@@ -10,4 +10,4 @@ set -euo pipefail
 ./build_openssh.sh
 
 # build pts
-./build_pts.sh
+./setup_pts.sh
