@@ -54,6 +54,9 @@ if [ -z "$RESULTS_BASE_DIR" ]; then
     RESULTS_BASE_DIR="$(cd "$CONFIG_DIR" && cd "$RESULTS_DIR_RELATIVE" && pwd)"
 fi
 
+# マシン名の取得（環境変数MACHINE_NAMEが指定されていない場合はhostnameを使用）
+MACHINE_NAME="${MACHINE_NAME:-$(hostname)}"
+echo "[INFO] Machine name: $MACHINE_NAME"
 echo "[INFO] Results directory: $RESULTS_BASE_DIR"
 
 # CPUコア数を検出
@@ -100,9 +103,9 @@ for threads in $(seq 1 $MAX_THREADS); do
     fi
 done
 
-# 結果をベンチマーク毎のフォルダに整理してエクスポート
+# 結果をベンチマーク毎のフォルダに整理してエクスポート（マシン名/ベンチマーク名の階層構造）
 echo ">>> Organizing and exporting results..."
-BENCHMARK_RESULTS_DIR="$RESULTS_BASE_DIR/$BENCHMARK_NAME"
+BENCHMARK_RESULTS_DIR="$RESULTS_BASE_DIR/$MACHINE_NAME/$BENCHMARK_NAME"
 mkdir -p "$BENCHMARK_RESULTS_DIR"
 
 # 各スレッド数の結果をエクスポート
