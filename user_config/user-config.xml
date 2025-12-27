@@ -14,6 +14,9 @@
       <DefaultDisplayMode>DEFAULT</DefaultDisplayMode>
       <PhoromaticServers></PhoromaticServers>
       <ColoredConsole>AUTO</ColoredConsole>
+      <ResultsViewer>
+        <ShowResultsAfterTest>FALSE</ShowResultsAfterTest>
+      </ResultsViewer>
     </General>
     <Modules>
       <AutoLoadModules>toggle_screensaver, perf_tips</AutoLoadModules>
