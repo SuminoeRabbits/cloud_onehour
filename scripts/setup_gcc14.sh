@@ -1,6 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
+# Setup passwordless sudo if not already configured
+# This is required for automated benchmark runs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/setup_passwordless_sudo.sh" ]; then
+    if ! sudo -n true 2>/dev/null; then
+        echo "=== Sudo requires password. Setting up passwordless sudo... ==="
+        echo "You will be asked for your password one last time."
+        bash "$SCRIPT_DIR/setup_passwordless_sudo.sh"
+    else
+        echo "[INFO] Passwordless sudo is already configured"
+    fi
+fi
+
 # Check and switch to GCC 14 if needed
 current_gcc_version=$(gcc -dumpversion 2>/dev/null | cut -d. -f1 || echo "0")
 if [[ -z "$current_gcc_version" ]] || [[ "$current_gcc_version" -lt 14 ]] 2>/dev/null; then
