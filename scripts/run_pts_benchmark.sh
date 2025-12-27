@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+# Load compiler environment settings
+SCRIPT_DIR_INIT="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR_INIT/setup_compiler_env.sh" ]; then
+    echo ">>> Loading compiler environment settings..."
+    source "$SCRIPT_DIR_INIT/setup_compiler_env.sh"
+else
+    echo "[WARN] Compiler environment file not found, using default settings"
+fi
+
 # 使用方法を表示
 usage() {
     echo "Usage: $0 <benchmark> [max_threads]"
@@ -174,6 +183,28 @@ fi
 
 # テストを強制的に再ビルド（現在の環境変数とコンパイラ設定を使用）
 echo ">>> Forcing rebuild with current compiler settings..."
+echo "[INFO] Using compiler: ${CC:-gcc} with CFLAGS: ${CFLAGS:-default}"
+echo "[INFO] Using CXXFLAGS: ${CXXFLAGS:-default}"
+
+# Coremarkなど一部のベンチマークは独自のMakefileでCFLAGSを上書きするため、
+# 複数の環境変数を設定して最適化フラグを確実に渡す
+# Note: Coremarkは内部で -O2 を指定するが、後に指定した最適化フラグが優先されるため、
+#       CFLAGSの最後に最適化フラグを追加する必要がある
+if [ -n "${CFLAGS:-}" ]; then
+    # 既存のCFLAGSに追加の変数として渡す
+    export XCFLAGS="${CFLAGS}"
+    export EXTRA_CFLAGS="${CFLAGS}"
+    export FLAGS="${CFLAGS}"
+
+    # Coremarkの場合、FLAGSFULLやCFLAGS_FULLも設定を試みる
+    export FLAGSFULL="${CFLAGS}"
+    export CFLAGS_FULL="${CFLAGS}"
+fi
+
+if [ -n "${CXXFLAGS:-}" ]; then
+    export EXTRA_CXXFLAGS="${CXXFLAGS}"
+fi
+
 PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite force-install "$BENCHMARK_FULL"
 
 # 失敗したテストを記録
