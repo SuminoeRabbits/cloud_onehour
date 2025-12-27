@@ -65,6 +65,44 @@ echo "[INFO] Results directory: $RESULTS_BASE_DIR"
 AVAILABLE_CORES=$(nproc)
 echo "[INFO] Detected $AVAILABLE_CORES CPU cores"
 
+# CPU scaling governorを保存して、performanceに設定
+echo ">>> Setting CPU scaling governor to performance..."
+ORIGINAL_GOVERNORS=()
+GOVERNOR_SET_SUCCESS=false
+
+# 各CPUのgovernorを保存
+for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    if [ -f "$cpu" ]; then
+        ORIGINAL_GOVERNORS+=("$(cat $cpu)")
+    fi
+done
+
+# performanceに設定を試みる
+if command -v cpupower >/dev/null 2>&1; then
+    # cpupowerコマンドが利用可能な場合
+    if sudo cpupower frequency-set -g performance >/dev/null 2>&1; then
+        echo "[OK] CPU governor set to performance using cpupower"
+        GOVERNOR_SET_SUCCESS=true
+    fi
+elif [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+    # 直接sysfsに書き込む方法
+    cpu_num=0
+    for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        if echo performance | sudo tee "$cpu" >/dev/null 2>&1; then
+            ((cpu_num++))
+        fi
+    done
+    if [ $cpu_num -gt 0 ]; then
+        echo "[OK] CPU governor set to performance for $cpu_num cores"
+        GOVERNOR_SET_SUCCESS=true
+    fi
+fi
+
+if [ "$GOVERNOR_SET_SUCCESS" = false ]; then
+    echo "[WARN] Could not set CPU governor to performance. Benchmarks may not reflect maximum performance."
+    echo "[WARN] Install 'cpupower' (linux-tools-common) or run with sudo for better performance."
+fi
+
 # スレッド数の指定（第2引数または最大コア数）
 MAX_THREADS=${2:-$AVAILABLE_CORES}
 
@@ -212,6 +250,23 @@ done
 # we use echo "y" to automatically confirm the removal prompt.
 echo ">>> Removing test installation..."
 echo "y" | PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite remove-installed-test "$BENCHMARK_FULL" > /dev/null
+
+# CPU governorを元に戻す
+if [ "$GOVERNOR_SET_SUCCESS" = true ] && [ ${#ORIGINAL_GOVERNORS[@]} -gt 0 ]; then
+    echo ">>> Restoring original CPU governor settings..."
+    cpu_idx=0
+    for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        if [ -f "$cpu" ] && [ $cpu_idx -lt ${#ORIGINAL_GOVERNORS[@]} ]; then
+            original_gov="${ORIGINAL_GOVERNORS[$cpu_idx]}"
+            if echo "$original_gov" | sudo tee "$cpu" >/dev/null 2>&1; then
+                ((cpu_idx++))
+            fi
+        fi
+    done
+    if [ $cpu_idx -gt 0 ]; then
+        echo "[OK] Restored CPU governor for $cpu_idx cores"
+    fi
+fi
 
 # 結果サマリー
 echo ""
