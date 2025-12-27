@@ -6,11 +6,7 @@ ARCHIVE="zlib-${VERSION}.tar.gz"
 DOWNLOAD_URL="https://www.zlib.net/${ARCHIVE}"
 INSTALL_PREFIX="/usr/local"
 
-# dependencies
-sudo apt-get update
-sudo apt-get install -y make cmake
-
-# Detect lib directory based on architecture
+# Detect lib directory based on architecture (早めに検出)
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64)
@@ -35,6 +31,23 @@ LIBDIR="${INSTALL_PREFIX}/${LIBSUBDIR}"
 
 echo "Building zlib ${VERSION} with current CFLAGS: ${CFLAGS:-none}"
 echo "Detected architecture: $ARCH -> Using library directory: $LIBSUBDIR"
+
+# Check if zlib is already installed with the correct version
+if [ -f "${LIBDIR}/libz.so" ]; then
+    INSTALLED_VERSION=$(strings "${LIBDIR}/libz.so" 2>/dev/null | grep -oP '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+    if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
+        echo "=== zlib ${VERSION} is already installed ==="
+        echo "Skipping installation. To reinstall, remove ${LIBDIR}/libz.so first."
+        exit 0
+    else
+        echo "Found existing zlib version: ${INSTALLED_VERSION:-unknown}"
+        echo "Will upgrade to version ${VERSION}"
+    fi
+fi
+
+# dependencies
+sudo apt-get update
+sudo apt-get install -y make cmake
 
 # Set LDFLAGS to ensure RPATH is embedded
 export LDFLAGS="-Wl,-rpath,${LIBDIR}"

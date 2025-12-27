@@ -8,6 +8,19 @@ INSTALL_PREFIX="/usr/local"
 
 echo "Building OpenSSL ${VERSION} with current CFLAGS: ${CFLAGS:-none}"
 
+# Check if OpenSSL is already installed with the correct version
+if [ -x "${INSTALL_PREFIX}/bin/openssl" ]; then
+    INSTALLED_VERSION=$("${INSTALL_PREFIX}/bin/openssl" version 2>/dev/null | awk '{print $2}')
+    if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
+        echo "=== OpenSSL ${VERSION} is already installed ==="
+        echo "Skipping installation. To reinstall, remove ${INSTALL_PREFIX}/bin/openssl first."
+        exit 0
+    else
+        echo "Found existing OpenSSL version: ${INSTALLED_VERSION:-unknown}"
+        echo "Will upgrade to version ${VERSION}"
+    fi
+fi
+
 # Download source
 wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
 

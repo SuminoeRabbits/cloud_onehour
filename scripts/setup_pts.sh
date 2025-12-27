@@ -1,10 +1,41 @@
 #!/bin/bash
 set -euo pipefail
 
-ARCHIVE="phoronix-test-suite-10.8.4.tar.gz"
+VERSION="10.8.4"
+ARCHIVE="phoronix-test-suite-${VERSION}.tar.gz"
 DOWNLOAD_URL="https://phoronix-test-suite.com/releases/${ARCHIVE}"
 INSTALL_DIR="/opt/phoronix-test-suite"
 LAUNCHER="/usr/local/bin/phoronix-test-suite"
+
+# Check if PTS is already installed with the correct version
+if [ -x "$LAUNCHER" ]; then
+    INSTALLED_VERSION=$("$LAUNCHER" version 2>/dev/null | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
+        echo "=== Phoronix Test Suite ${VERSION} is already installed ==="
+        echo "Skipping installation. To reinstall, remove ${INSTALL_DIR} first."
+
+        # Still setup user config directory even if PTS is already installed
+        PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+        USER_CONFIG_DIR="$PROJECT_ROOT/user_config"
+        USER_CONFIG_FILE="$USER_CONFIG_DIR/user-config.xml"
+        RESULTS_DIR="$PROJECT_ROOT/results"
+
+        mkdir -p "$USER_CONFIG_DIR"
+        mkdir -p "$RESULTS_DIR"
+
+        if [[ -f "$USER_CONFIG_FILE" ]] && [[ ! -w "$USER_CONFIG_FILE" ]]; then
+            echo "user-config.xml is already protected (read-only)"
+        elif [[ -f "$USER_CONFIG_FILE" ]]; then
+            chmod 444 "$USER_CONFIG_FILE"
+            echo "Set user-config.xml to read-only mode (444)"
+        fi
+
+        exit 0
+    else
+        echo "Found existing PTS version: ${INSTALLED_VERSION:-unknown}"
+        echo "Will upgrade to version ${VERSION}"
+    fi
+fi
 
 wget -O "$ARCHIVE" "$DOWNLOAD_URL"
 
