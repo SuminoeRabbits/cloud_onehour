@@ -11,3 +11,7 @@ set -euo pipefail
 
 # build pts
 ./setup_pts.sh
+
+# install cpupower
+sudo apt-get -y install linux-tools-common linux-tools-$(uname -r)
+
