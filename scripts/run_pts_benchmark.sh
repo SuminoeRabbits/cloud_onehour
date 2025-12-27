@@ -25,10 +25,16 @@ fi
 BENCHMARK="$1"
 BENCHMARK_FULL="pts/${BENCHMARK}"
 
-# プロジェクトルートディレクトリを取得
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# プロジェクトルートディレクトリを取得（BASH_SOURCEではなく$0を使用）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_DIR="$PROJECT_ROOT/user_config"
 CONFIG_FILE="$CONFIG_DIR/user-config.xml"
+
+# デバッグ用：パスを確認
+echo "[DEBUG] SCRIPT_DIR: $SCRIPT_DIR"
+echo "[DEBUG] PROJECT_ROOT: $PROJECT_ROOT"
+echo "[DEBUG] CONFIG_DIR: $CONFIG_DIR"
 BENCHMARK_NAME="${BENCHMARK%%-*}"  # ベンチマーク名を取得（例: coremark-1.0.1 -> coremark）
 
 # 設定ファイルの存在と内容を確認
@@ -76,6 +82,35 @@ fi
 echo "[INFO] Benchmark: $BENCHMARK_FULL"
 echo "[INFO] Will test from 1 to $MAX_THREADS threads"
 
+# Verify batch mode is configured
+echo ">>> Verifying batch mode configuration..."
+BATCH_CONFIGURED=$(grep -oP '<Configured>\K[^<]+' "$CONFIG_FILE")
+if [ "$BATCH_CONFIGURED" != "TRUE" ]; then
+    echo "[ERROR] Batch mode is not configured in user-config.xml"
+    echo "Please ensure <Configured>TRUE</Configured> is set in $CONFIG_FILE"
+    exit 1
+fi
+echo "[OK] Batch mode is configured in $CONFIG_FILE"
+
+# Also ensure the global config (~/.phoronix-test-suite/user-config.xml) has batch mode configured
+# This is a workaround for PTS sometimes checking global config even when PTS_USER_PATH_OVERRIDE is set
+GLOBAL_CONFIG="$HOME/.phoronix-test-suite/user-config.xml"
+if [ -f "$GLOBAL_CONFIG" ]; then
+    GLOBAL_BATCH_CONFIGURED=$(grep -oP '<Configured>\K[^<]+' "$GLOBAL_CONFIG" 2>/dev/null || echo "FALSE")
+    if [ "$GLOBAL_BATCH_CONFIGURED" != "TRUE" ]; then
+        echo "[WARN] Global config at $GLOBAL_CONFIG does not have batch mode configured"
+        echo "[INFO] Configuring batch mode in global config (non-interactive)..."
+
+        # Run batch-setup with default answers (all "n" for prompts, but will set Configured=TRUE)
+        # This is a workaround because PTS may check global config even when override is set
+        echo -e "Y\nN\nN\nN\nN\nN\nY" | phoronix-test-suite batch-setup >/dev/null 2>&1 || true
+
+        echo "[OK] Global batch mode configured"
+    fi
+else
+    echo "[INFO] No global config found at $GLOBAL_CONFIG (this is OK when using PTS_USER_PATH_OVERRIDE)"
+fi
+
 # テストを強制的に再ビルド（現在の環境変数とコンパイラ設定を使用）
 echo ">>> Forcing rebuild with current compiler settings..."
 PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite force-install "$BENCHMARK_FULL"
@@ -87,6 +122,7 @@ failed_tests=()
 for threads in $(seq 1 $MAX_THREADS); do
     echo ""
     echo ">>> Running with $threads threads (CPU cores 0-$(($threads-1)))"
+    echo "[DEBUG] PTS_USER_PATH_OVERRIDE will be set to: $CONFIG_DIR"
     # CPUアフィニティで物理的に制限
     cpu_list="0-$(($threads-1))"
     # 環境変数を先に設定してtasksetを実行
