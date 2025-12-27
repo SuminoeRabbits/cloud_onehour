@@ -3,10 +3,10 @@
 <PhoronixTestSuite>
   <Options>
     <OpenBenchmarking>
-      <AnonymousUsageReporting>TRUE</AnonymousUsageReporting>
+      <AnonymousUsageReporting>FALSE</AnonymousUsageReporting>
       <IndexCacheTTL>3</IndexCacheTTL>
       <AlwaysUploadSystemLogs>FALSE</AlwaysUploadSystemLogs>
-      <AllowResultUploadsToOpenBenchmarking>TRUE</AllowResultUploadsToOpenBenchmarking>
+      <AllowResultUploadsToOpenBenchmarking>FALSE</AllowResultUploadsToOpenBenchmarking>
     </OpenBenchmarking>
     <General>
       <DefaultBrowser></DefaultBrowser>
@@ -16,7 +16,7 @@
       <ColoredConsole>AUTO</ColoredConsole>
     </General>
     <Modules>
-      <AutoLoadModules>toggle_screensaver, update_checker, perf_tips, ob_auto_compare, load_dynamic_result_viewer</AutoLoadModules>
+      <AutoLoadModules>toggle_screensaver, perf_tips</AutoLoadModules>
     </Modules>
     <Installation>
       <RemoveDownloadFiles>FALSE</RemoveDownloadFiles>
@@ -31,7 +31,7 @@
       <SaveInstallationLogs>TRUE</SaveInstallationLogs>
       <SaveTestLogs>TRUE</SaveTestLogs>
       <RemoveTestInstallOnCompletion>FALSE</RemoveTestInstallOnCompletion>
-      <ResultsDirectory>~/.phoronix-test-suite/test-results/</ResultsDirectory>
+      <ResultsDirectory>/home/snakajim/work/cloud_onehour/results/</ResultsDirectory>
       <AlwaysUploadResultsToOpenBenchmarking>FALSE</AlwaysUploadResultsToOpenBenchmarking>
       <AutoSortRunQueue>TRUE</AutoSortRunQueue>
       <ShowPostRunStatistics>TRUE</ShowPostRunStatistics>

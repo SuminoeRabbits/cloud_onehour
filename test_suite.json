@@ -1,7 +1,7 @@
 {
     "_comment": "PTS benchmark test suite definitions",
     "test_category": {
-        "CPU int/fp": {
+        "CPU Int/FP": {
             "items": {
                 "pts/coremark-pro-1.2.0": {
                     "enabled": false,
@@ -21,7 +21,7 @@
             "items": {
                 "pts/coremark-1.0.1": {
                     "enabled": true,
-                    "vcpu_scaling": "auto",
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
                     "notes": ""
                 }
@@ -53,37 +53,123 @@
             "items": {
                 "pts/compress-7zip-1.11.0": {
                     "enabled": true,
-                    "vcpu_scaling": "none",
-                    "sve2_support": "unsupported",
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
                     "notes": ""
                 },
                 "pts/compress-zstd-1.6.0": {
                     "enabled": true,
-                    "vcpu_scaling": "none",
-                    "sve2_support": "unsupported",
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
                     "notes": ""
                 },
                 "pts/compress-xz-1.1.0": {
                     "enabled": true,
-                    "vcpu_scaling": "none",
-                    "sve2_support": "unsupported",
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
                     "notes": ""
                 }
             }
         },
-        "Cryptography & TLS": {
+        "Cryptography and TLS": {
             "items": {
                 "pts/openssl-3.6.0": {
                     "enabled": true,
-                    "vcpu_scaling": "auto",
-                    "sve2_support": "supported",
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
                     "notes": ""
                 },
                 "pts/nginx-3.3.0": {
                     "enabled": true,
-                    "vcpu_scaling": "auto",
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
                     "notes": "auto-vectorization assumed"
+                }
+            }
+        },
+        "Java Applications": {
+            "items": {
+                "pts/renaissance-1.4.0": {
+                    "enabled": true,
+                    "vcpu_scaling": false,
+                    "sve2_support": true,
+                    "notes": "SVE2 is supported after OpenJDK9."
+                },
+                "pts/java-jmh-1.0.1": {
+                    "enabled": true,
+                    "vcpu_scaling": false,
+                    "sve2_support": true,
+                    "notes": "SVE2 is supported after OpenJDK9."
+                }
+            }
+        },
+        "Network": {
+            "items": {
+                "pts/apache-3.0.0": {
+                    "enabled": true,
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
+                    "notes": "No need to support SIMD."
+                },
+                "pts/spark-1.0.0": {
+                    "enabled": true,
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
+                    "notes": "No need to support SIMD."
+                }
+            }
+        },
+        "Multimedia": {
+            "items": {
+                "pts/ffmpeg-7.0.1": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "run.sh must be updated to scale."
+                },
+                "pts/x265-1.5.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": ""
+                }
+            }
+        },
+        "Database": {
+            "items": {
+                "pts/pgbench-1.16.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "No need to support SIMD. Need to patch test profile."
+                },
+                "pts/redis-2.2.0": {
+                    "enabled": false,
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
+                    "notes": "Need to revisit."
+                }
+            }
+        },
+        "Memory Access": {
+            "items": {
+                "pts/stream-1.3.4": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:OMP_NUM_THREADS",
+                    "sve2_support": false,
+                    "notes": "Need to set -fopenmp at build, export OMP_NUM_THREADS=`nproc`"
+                },
+                "pts/tinymembench-1.0.2": {
+                    "enabled": false,
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
+                    "notes": "No need to support SIMD. Single thread only."
+                },
+                "pts/pmbench-1.0.2": {
+                    "enabled": false,
+                    "vcpu_scaling": false,
+                    "sve2_support": false,
+                    "notes": "Need to revisit."
                 }
             }
         }
