@@ -31,7 +31,7 @@
       <SaveInstallationLogs>TRUE</SaveInstallationLogs>
       <SaveTestLogs>TRUE</SaveTestLogs>
       <RemoveTestInstallOnCompletion>FALSE</RemoveTestInstallOnCompletion>
-      <ResultsDirectory>/home/snakajim/work/cloud_onehour/results/</ResultsDirectory>
+      <ResultsDirectory>../results/</ResultsDirectory>
       <AlwaysUploadResultsToOpenBenchmarking>FALSE</AlwaysUploadResultsToOpenBenchmarking>
       <AutoSortRunQueue>TRUE</AutoSortRunQueue>
       <ShowPostRunStatistics>TRUE</ShowPostRunStatistics>
@@ -62,7 +62,7 @@
       <Configured>TRUE</Configured>
     </BatchMode>
     <Networking>
-      <NoInternetCommunication>FALSE</NoInternetCommunication>
+      <NoInternetCommunication>TRUE</NoInternetCommunication>
       <NoNetworkCommunication>FALSE</NoNetworkCommunication>
       <Timeout>20</Timeout>
       <ProxyAddress></ProxyAddress>

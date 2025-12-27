@@ -28,12 +28,18 @@ sudo chmod +x "$LAUNCHER"
 rm -f "$ARCHIVE"
 
 # Setup user config directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-USER_CONFIG_DIR="$SCRIPT_DIR/../user_config"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+USER_CONFIG_DIR="$PROJECT_ROOT/user_config"
 USER_CONFIG_FILE="$USER_CONFIG_DIR/user-config.xml"
+RESULTS_DIR="$PROJECT_ROOT/results"
 
-# Ensure user_config directory exists
+# Ensure directories exist
 mkdir -p "$USER_CONFIG_DIR"
+mkdir -p "$RESULTS_DIR"
+
+echo "Project root: $PROJECT_ROOT"
+echo "Config directory: $USER_CONFIG_DIR"
+echo "Results directory: $RESULTS_DIR"
 
 # Verify installation
 echo "=== Verifying installation ==="
@@ -49,13 +55,13 @@ if [[ ! -x "$LAUNCHER" ]]; then
 fi
 
 # Verify version output using custom config directory
-if ! PTS_USER_PATH="$USER_CONFIG_DIR" "$LAUNCHER" version >/dev/null 2>&1; then
+if ! PTS_USER_PATH_OVERRIDE="$USER_CONFIG_DIR" "$LAUNCHER" version >/dev/null 2>&1; then
     echo "Error: Installation failed - phoronix-test-suite version command failed"
     exit 1
 fi
 
 echo "=== Installation successful ==="
-PTS_USER_PATH="$USER_CONFIG_DIR" "$LAUNCHER" version
+PTS_USER_PATH_OVERRIDE="$USER_CONFIG_DIR" "$LAUNCHER" version
 
 # Protect existing user-config.xml from being overwritten
 if [[ -f "$USER_CONFIG_FILE" ]]; then
