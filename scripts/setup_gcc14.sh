@@ -5,14 +5,99 @@ set -euo pipefail
 current_gcc_version=$(gcc -dumpversion 2>/dev/null | cut -d. -f1 || echo "0")
 if [[ -z "$current_gcc_version" ]] || [[ "$current_gcc_version" -lt 14 ]] 2>/dev/null; then
     echo "Current GCC version is ${current_gcc_version:-not installed}. Installing GCC 14..."
-    sudo apt-get update
-    sudo apt-get install -y gcc-14 g++-14
+    
+    # Detect Ubuntu version
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        UBUNTU_VERSION="${VERSION_ID}"
+        UBUNTU_CODENAME="${VERSION_CODENAME}"
+    else
+        echo "Error: Cannot detect Ubuntu version"
+        exit 1
+    fi
+    
+    echo "Detected Ubuntu ${UBUNTU_VERSION} (${UBUNTU_CODENAME})"
+    
+    # Check if GCC-14 is available in default repositories
+    if apt-cache search --names-only '^gcc-14$' | grep -q '^gcc-14'; then
+        # GCC-14 is available in default repositories (Ubuntu 24.04+)
+        echo "GCC-14 is available in default repositories"
+        sudo apt-get update
+        sudo apt-get install -y gcc-14 g++-14
+    else
+        # GCC-14 not in default repos, compile from source (Ubuntu 22.04)
+        echo "GCC-14 not in default repositories, compiling from source..."
+        echo "This will take 1-2 hours. Please be patient."
+        
+        GCC_VERSION="14.2.0"
+        INSTALL_PREFIX="/usr/local"
+        BUILD_DIR="/tmp/gcc-${GCC_VERSION}-build"
+        
+        # Install build dependencies
+        echo "Installing build dependencies..."
+        sudo apt-get update
+        sudo apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev \
+            flex bison texinfo libzstd-dev wget
+        
+        # Download GCC source
+        echo "Downloading GCC ${GCC_VERSION} source code..."
+        cd /tmp
+        if [[ ! -f "gcc-${GCC_VERSION}.tar.gz" ]]; then
+            wget https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz
+        fi
+        
+        # Extract source
+        echo "Extracting source code..."
+        rm -rf gcc-${GCC_VERSION}
+        tar -xzf gcc-${GCC_VERSION}.tar.gz
+        cd gcc-${GCC_VERSION}
+        
+        # Create build directory
+        echo "Configuring build..."
+        rm -rf "${BUILD_DIR}"
+        mkdir -p "${BUILD_DIR}"
+        cd "${BUILD_DIR}"
+        
+        # Configure
+        ../configure \
+            --prefix=${INSTALL_PREFIX} \
+            --enable-languages=c,c++ \
+            --disable-multilib \
+            --enable-threads=posix \
+            --enable-checking=release \
+            --program-suffix=-14 \
+            --with-system-zlib
+        
+        # Build (this takes 1-2 hours)
+        echo "Building GCC-14 (this will take 1-2 hours)..."
+        make -j$(nproc)
+        
+        # Install
+        echo "Installing GCC-14..."
+        sudo make install
+        
+        # Clean up
+        echo "Cleaning up build files..."
+        cd /tmp
+        rm -rf gcc-${GCC_VERSION} "${BUILD_DIR}"
+        
+        echo "GCC-14 compiled and installed to ${INSTALL_PREFIX}"
+    fi
     
     # Set alternatives
-    sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
-    sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
-    sudo update-alternatives --set gcc /usr/bin/gcc-14
-    sudo update-alternatives --set g++ /usr/bin/g++-14
+    if [[ -f /usr/bin/gcc-14 ]]; then
+        # Package installation
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+        sudo update-alternatives --set gcc /usr/bin/gcc-14
+        sudo update-alternatives --set g++ /usr/bin/g++-14
+    elif [[ -f /usr/local/bin/gcc-14 ]]; then
+        # Source installation
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/bin/gcc-14 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/bin/g++-14 100
+        sudo update-alternatives --set gcc /usr/local/bin/gcc-14
+        sudo update-alternatives --set g++ /usr/local/bin/g++-14
+    fi
     
     echo "Switched to GCC 14"
 else

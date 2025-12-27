@@ -1,0 +1,91 @@
+{
+    "_comment": "PTS benchmark test suite definitions",
+    "test_category": {
+        "CPU int/fp": {
+            "items": {
+                "pts/coremark-pro-1.2.0": {
+                    "enabled": false,
+                    "vcpu_scaling": "unknown",
+                    "sve2_support": "unknown",
+                    "notes": ""
+                },
+                "pts/speccpu2017": {
+                    "enabled": false,
+                    "vcpu_scaling": "unknown",
+                    "sve2_support": "unknown",
+                    "notes": ""
+                }
+            }
+        },
+        "Pipeline Efficiency": {
+            "items": {
+                "pts/coremark-1.0.1": {
+                    "enabled": true,
+                    "vcpu_scaling": "auto",
+                    "sve2_support": "unknown",
+                    "notes": ""
+                }
+            }
+        },
+        "Build Process": {
+            "items": {
+                "pts/build-linux-kernel-1.17.1": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": "unknown",
+                    "notes": ""
+                },
+                "pts/build-llvm-1.6.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": "unknown",
+                    "notes": ""
+                },
+                "pts/build-gcc-1.5.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": "unknown",
+                    "notes": ""
+                }
+            }
+        },
+        "Compression": {
+            "items": {
+                "pts/compress-7zip-1.11.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "none",
+                    "sve2_support": "unsupported",
+                    "notes": ""
+                },
+                "pts/compress-zstd-1.6.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "none",
+                    "sve2_support": "unsupported",
+                    "notes": ""
+                },
+                "pts/compress-xz-1.1.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "none",
+                    "sve2_support": "unsupported",
+                    "notes": ""
+                }
+            }
+        },
+        "Cryptography & TLS": {
+            "items": {
+                "pts/openssl-3.6.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "auto",
+                    "sve2_support": "supported",
+                    "notes": ""
+                },
+                "pts/nginx-3.3.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "auto",
+                    "sve2_support": "unknown",
+                    "notes": "auto-vectorization assumed"
+                }
+            }
+        }
+    }
+}
