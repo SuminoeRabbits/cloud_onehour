@@ -116,7 +116,22 @@ if [ -f "$GLOBAL_CONFIG" ]; then
         echo "[OK] Internet communication disabled in global config"
     fi
 else
-    echo "[INFO] No global config found at $GLOBAL_CONFIG (this is OK when using PTS_USER_PATH_OVERRIDE)"
+    echo "[INFO] No global config found at $GLOBAL_CONFIG - creating one now..."
+    echo "[INFO] Configuring batch mode in global config (non-interactive)..."
+
+    # Create global config with batch mode enabled and uploads disabled
+    echo -e "Y\nN\nN\nN\nN\nN\nY" | phoronix-test-suite batch-setup >/dev/null 2>&1 || true
+
+    # After creation, disable internet communication
+    if [ -f "$GLOBAL_CONFIG" ]; then
+        sed -i 's/<NoInternetCommunication>FALSE<\/NoInternetCommunication>/<NoInternetCommunication>TRUE<\/NoInternetCommunication>/g' "$GLOBAL_CONFIG"
+        sed -i 's/<AlwaysUploadResultsToOpenBenchmarking>TRUE<\/AlwaysUploadResultsToOpenBenchmarking>/<AlwaysUploadResultsToOpenBenchmarking>FALSE<\/AlwaysUploadResultsToOpenBenchmarking>/g' "$GLOBAL_CONFIG"
+        sed -i 's/<AllowResultUploadsToOpenBenchmarking>TRUE<\/AllowResultUploadsToOpenBenchmarking>/<AllowResultUploadsToOpenBenchmarking>FALSE<\/AllowResultUploadsToOpenBenchmarking>/g' "$GLOBAL_CONFIG"
+        echo "[OK] Global config created and configured"
+    else
+        echo "[ERROR] Failed to create global config"
+        exit 1
+    fi
 fi
 
 # テストを強制的に再ビルド（現在の環境変数とコンパイラ設定を使用）
@@ -133,10 +148,12 @@ for threads in $(seq 1 $MAX_THREADS); do
     # CPUアフィニティで物理的に制限
     cpu_list="0-$(($threads-1))"
     # 環境変数を先に設定してtasksetを実行
+    # SKIP_ALL_TEST_OPTION_CHECKS=1 を追加してバッチモードチェックをスキップ
     if TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" \
+       SKIP_ALL_TEST_OPTION_CHECKS=1 \
        taskset -c $cpu_list \
        phoronix-test-suite batch-benchmark "$BENCHMARK_FULL"; then
         echo "[OK] Test with $threads threads completed successfully"
