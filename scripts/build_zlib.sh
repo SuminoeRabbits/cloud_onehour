@@ -6,6 +6,10 @@ ARCHIVE="zlib-${VERSION}.tar.gz"
 DOWNLOAD_URL="https://www.zlib.net/${ARCHIVE}"
 INSTALL_PREFIX="/usr/local"
 
+# dependencies
+sudo apt-get update
+sudo apt-get install -y make cmake
+
 # Detect lib directory based on architecture
 ARCH=$(uname -m)
 case "$ARCH" in
