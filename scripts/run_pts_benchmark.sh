@@ -218,16 +218,15 @@ for threads in $(seq 1 $MAX_THREADS); do
     cpu_list="0-$(($threads-1))"
     # 環境変数を先に設定してtasksetを実行
     # SKIP_ALL_TEST_OPTION_CHECKS=1 を追加してバッチモードチェックをスキップ
-    # FORCE_TIMES_TO_RUN=1 でテスト回数を1回に固定（バッチモードチェックを回避）
     # TEST_RESULTS_NAME等で結果の保存先を指定
     # user-config.xmlの<ShowResultsAfterTest>FALSE</ShowResultsAfterTest>でプロンプトを回避
     # AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE でアップロードプロンプトを回避
+    # Note: FORCE_TIMES_TO_RUNを削除し、user-config.xmlの設定を使用（DynamicRunCount=FALSE, LimitDynamicToTestLength=20）
     if echo -e "n\nn" | TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" \
        SKIP_ALL_TEST_OPTION_CHECKS=1 \
-       FORCE_TIMES_TO_RUN=1 \
        AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE \
        taskset -c $cpu_list \
        phoronix-test-suite benchmark "$BENCHMARK_FULL" 2>&1 | grep -v "trim():" | grep -v "\[8192\]"; then

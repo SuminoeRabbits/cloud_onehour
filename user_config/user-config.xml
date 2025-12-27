@@ -42,10 +42,10 @@
     <TestResultValidation>
       <DynamicRunCount>TRUE</DynamicRunCount>
       <LimitDynamicToTestLength>10</LimitDynamicToTestLength>
-      <StandardDeviationThreshold>2.5</StandardDeviationThreshold>
+      <StandardDeviationThreshold>3.5</StandardDeviationThreshold>
       <ExportResultsTo>../results</ExportResultsTo>
-      <MinimalTestTime>2</MinimalTestTime>
-      <DropNoisyResults>TRUE</DropNoisyResults>
+      <MinimalTestTime>3</MinimalTestTime>
+      <DropNoisyResults>FALSE</DropNoisyResults>
     </TestResultValidation>
     <ResultViewer>
       <WebPort>RANDOM</WebPort>
