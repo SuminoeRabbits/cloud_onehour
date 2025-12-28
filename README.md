@@ -89,7 +89,6 @@ Firewall setting.
 ```
 # 自分のIPを取得
 MY_IP=$(curl -s https://checkip.amazonaws.com)
-
 # ファイアウォールルールを作成
 gcloud compute firewall-rules create allow-ssh-from-home \
     --direction=INGRESS \
@@ -99,7 +98,20 @@ gcloud compute firewall-rules create allow-ssh-from-home \
     --rules=tcp:22 \
     --source-ranges=$MY_IP/32
 ```
+
+Confirm your GCP is Ok.
+```
+gcloud config list
+```
 ### clean up
+
+```
+gcloud compute instances list
+gcloud compute instances list --format="table(name,zone,status,externalIp)"
+# 全てのインスタンスを強制的に削除する（確認ダイアログなし）
+gcloud compute instances delete $(gcloud compute instances list --format="value(name)") --quiet
+```
+
 
 ## version history
 
