@@ -1,0 +1,20 @@
+{
+  "common": {
+    "os_version": "25.04",
+    "ssh_user": "ubuntu",
+    "local_log_dir": "./bench_results",
+    "benchmark_command1": "sudo apt-get update && sudo apt-get install -y sysbench",
+    "benchmark_command2": "mkdir -p ~/reports",
+    "benchmark_command3": "sysbench cpu --cpu-max-prime=20000 --threads={vcpus} run > ~/reports/sysbench_cpu.log",
+    "reports_dir": "~/reports",
+    "security_group_name": "cloud-benchmarking-sg"
+  },
+  "aws": {
+    "enable": true,
+    "region": "ap-northeast-1",
+    "key_name": "AUTO_DETECT",
+    "instances": [
+      { "type": "t3.micro", "name": "aws-test-t3", "arch": "amd64", "vcpus": 2, "enable": true }
+    ]
+  }
+}
