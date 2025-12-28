@@ -37,8 +37,36 @@ else
     echo "[OK] Added error_reporting to $PHP_INI"
 fi
 
-# Verify the change
-NEW_SETTING=$(grep -E "^error_reporting\s*=" "$PHP_INI")
-echo "[INFO] New setting: $NEW_SETTING"
+# Also disable display_errors to prevent any error output to stdout/stderr
+# This is the most reliable way to suppress ALL error messages
+CURRENT_DISPLAY=$(grep -E "^display_errors\s*=" "$PHP_INI" || echo "")
 
-echo "[OK] PHP deprecation warnings suppressed"
+if [ -n "$CURRENT_DISPLAY" ]; then
+    echo "[INFO] Current display_errors: $CURRENT_DISPLAY"
+    sudo sed -i 's/^display_errors\s*=.*/display_errors = Off/' "$PHP_INI"
+    echo "[OK] Updated display_errors to Off"
+else
+    echo "display_errors = Off" | sudo tee -a "$PHP_INI" > /dev/null
+    echo "[OK] Added display_errors = Off"
+fi
+
+# Disable display_startup_errors as well
+CURRENT_STARTUP=$(grep -E "^display_startup_errors\s*=" "$PHP_INI" || echo "")
+
+if [ -n "$CURRENT_STARTUP" ]; then
+    sudo sed -i 's/^display_startup_errors\s*=.*/display_startup_errors = Off/' "$PHP_INI"
+    echo "[OK] Updated display_startup_errors to Off"
+else
+    echo "display_startup_errors = Off" | sudo tee -a "$PHP_INI" > /dev/null
+    echo "[OK] Added display_startup_errors = Off"
+fi
+
+# Verify the changes
+echo ""
+echo "=== Final PHP Configuration ==="
+grep -E "^error_reporting\s*=" "$PHP_INI"
+grep -E "^display_errors\s*=" "$PHP_INI"
+grep -E "^display_startup_errors\s*=" "$PHP_INI"
+
+echo ""
+echo "[OK] PHP deprecation warnings completely suppressed"
