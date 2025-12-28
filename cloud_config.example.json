@@ -1,0 +1,43 @@
+{
+  "common": {
+    "os_version": "22.04",
+    "ssh_user": "ubuntu",
+    "ssh_key_name": "cloud_onehour_project",
+    "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
+    "local_log_dir": "./bench_results",
+    "benchmark_command1": "sudo apt-get update && sudo apt-get install -y sysbench",
+    "benchmark_command2": "mkdir -p ~/reports",
+    "benchmark_command3": "sysbench cpu --cpu-max-prime=20000 --threads={vcpus} run > ~/reports/sysbench_cpu.log",
+    "reports_dir": "~/reports",
+    "security_group_name": "cloud-benchmarking-sg",
+    "ssh_timeout": 20,
+    "ssh_strict_host_key_checking": false
+  },
+  "aws": {
+    "enable": false,
+    "region": "ap-northeast-1",
+    "instances": [
+      {
+        "name": "aws-benchmark-instance",
+        "type": "t3.micro",
+        "arch": "amd64",
+        "vcpus": 2,
+        "enable": false
+      }
+    ]
+  },
+  "gcp": {
+    "enable": false,
+    "project_id": "AUTO_DETECT",
+    "zone": "asia-northeast1-a",
+    "instances": [
+      {
+        "name": "gcp-benchmark-instance",
+        "type": "e2-micro",
+        "arch": "amd64",
+        "vcpus": 2,
+        "enable": false
+      }
+    ]
+  }
+}
