@@ -108,3 +108,13 @@ fi
 
 echo ""
 echo "Phoronix Test Suite installed. Run: phoronix-test-suite version"
+
+# Suppress PHP deprecation warnings
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/suppress_php_warnings.sh" ]; then
+    echo ""
+    echo "=== Suppressing PHP deprecation warnings ==="
+    "$SCRIPT_DIR/suppress_php_warnings.sh"
+else
+    echo "[Warning] suppress_php_warnings.sh not found, skipping PHP warning suppression"
+fi

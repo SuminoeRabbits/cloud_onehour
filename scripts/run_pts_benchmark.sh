@@ -289,6 +289,9 @@ for threads in $(seq 1 $MAX_THREADS); do
     (yes "" > "$input_fifo") &
     yes_pid=$!
 
+    # Run benchmark with clean output
+    # - Remove ANSI/ESC sequences for cleaner logs
+    # - PHP deprecation warnings are suppressed at system level (via suppress_php_warnings.sh)
     if TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
@@ -296,8 +299,11 @@ for threads in $(seq 1 $MAX_THREADS); do
        SKIP_ALL_TEST_OPTION_CHECKS=1 \
        SKIP_TEST_OPTION_HANDLING=1 \
        AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE \
+       NO_COLOR=1 \
+       FORCE_TIMES_TO_RUN=1 \
        taskset -c $cpu_list \
-       phoronix-test-suite benchmark "$BENCHMARK_FULL" < "$input_fifo" 2>&1 | grep -v "trim():" | grep -v "\[8192\]"; then
+       phoronix-test-suite benchmark "$BENCHMARK_FULL" < "$input_fifo" 2>&1 | \
+       sed -r 's/\x1B\[[0-9;]*[mK]//g'; then
         benchmark_result=0
     else
         benchmark_result=1
