@@ -63,27 +63,34 @@ if [[ -z "$current_gcc_version" ]] || [[ "$current_gcc_version" -lt 14 ]] 2>/dev
         echo "Extracting source code..."
         rm -rf gcc-${GCC_VERSION}
         tar -xzf gcc-${GCC_VERSION}.tar.gz
-        cd gcc-${GCC_VERSION}
+        cd gcc-${GCC_VERSION} || {
+            echo "Error: Failed to enter source directory gcc-${GCC_VERSION}"
+            exit 1
+        }
         
         # Create build directory
         echo "Configuring build..."
         rm -rf "${BUILD_DIR}"
         mkdir -p "${BUILD_DIR}"
-        cd "${BUILD_DIR}"
-        
+        cd "${BUILD_DIR}" || {
+            echo "Error: Failed to enter build directory ${BUILD_DIR}"
+            exit 1
+        }
+
         # Configure
-        ../configure \
-            --prefix=${INSTALL_PREFIX} \
+        /tmp/gcc-${GCC_VERSION}/configure \
+            --prefix="${INSTALL_PREFIX}" \
             --enable-languages=c,c++ \
             --disable-multilib \
             --enable-threads=posix \
             --enable-checking=release \
             --program-suffix=-14 \
             --with-system-zlib
-        
+
         # Build (this takes 1-2 hours)
         echo "Building GCC-14 (this will take 1-2 hours)..."
-        make -j$(nproc)
+        NCPUS=$(nproc 2>/dev/null || echo 1)
+        make -j"${NCPUS}"
         
         # Install
         echo "Installing GCC-14..."

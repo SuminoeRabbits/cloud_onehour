@@ -26,7 +26,10 @@ wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
 
 # Extract
 tar -xf "$ARCHIVE"
-cd "openssl-${VERSION}"
+cd "openssl-${VERSION}" || {
+    echo "Error: Failed to enter directory openssl-${VERSION}"
+    exit 1
+}
 
 # Detect lib directory based on architecture
 ARCH=$(uname -m)
@@ -65,7 +68,8 @@ export LDFLAGS="-Wl,-rpath,${LIBDIR}"
          zlib
 
 # Build
-make -j$(nproc)
+NCPUS=$(nproc 2>/dev/null || echo 1)
+make -j"${NCPUS}"
 
 # Skip tests (optional - QUIC tests may fail in some environments)
 # make test
@@ -87,11 +91,22 @@ echo "=== OpenSSL Version ==="
 "${INSTALL_PREFIX}/bin/openssl" version -a
 
 # Cleanup
-cd ..
+cd .. || {
+    echo "Warning: Failed to return to parent directory"
+}
 rm -rf "openssl-${VERSION}" "$ARCHIVE"
 
 echo ""
 echo "OpenSSL ${VERSION} installed to ${INSTALL_PREFIX}"
 echo "To use it, ensure ${INSTALL_PREFIX}/bin is in your PATH"
-echo "export PATH=${INSTALL_PREFIX}/bin:\$PATH" >> ~/.bashrc
-echo "export LD_LIBRARY_PATH=${INSTALL_PREFIX}/lib:\$LD_LIBRARY_PATH" >> ~/.bashrc
+
+# Add to bashrc only if not already present
+if ! grep -q "export PATH=${INSTALL_PREFIX}/bin:" ~/.bashrc 2>/dev/null; then
+    echo "export PATH=${INSTALL_PREFIX}/bin:\$PATH" >> ~/.bashrc
+    echo "Added PATH to ~/.bashrc"
+fi
+
+if ! grep -q "export LD_LIBRARY_PATH=${LIBDIR}:" ~/.bashrc 2>/dev/null; then
+    echo "export LD_LIBRARY_PATH=${LIBDIR}:\$LD_LIBRARY_PATH" >> ~/.bashrc
+    echo "Added LD_LIBRARY_PATH to ~/.bashrc"
+fi

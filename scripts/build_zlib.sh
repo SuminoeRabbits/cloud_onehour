@@ -57,13 +57,17 @@ wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
 
 # Extract
 tar -xf "$ARCHIVE"
-cd "zlib-${VERSION}"
+cd "zlib-${VERSION}" || {
+    echo "Error: Failed to enter directory zlib-${VERSION}"
+    exit 1
+}
 
 # Configure with lib directory
 ./configure --prefix="${INSTALL_PREFIX}" --libdir="${LIBDIR}"
 
 # Build
-make -j$(nproc)
+NCPUS=$(nproc 2>/dev/null || echo 1)
+make -j"${NCPUS}"
 
 # Test
 make test
@@ -85,7 +89,9 @@ echo "=== Zlib installed ==="
 ls -l "${LIBDIR}/libz.so"*
 
 # Cleanup
-cd ..
+cd .. || {
+    echo "Warning: Failed to return to parent directory"
+}
 rm -rf "zlib-${VERSION}" "$ARCHIVE"
 
 echo ""

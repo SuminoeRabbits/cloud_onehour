@@ -71,7 +71,7 @@ echo "[INFO] Machine name: $MACHINE_NAME"
 echo "[INFO] Results directory: $RESULTS_BASE_DIR"
 
 # CPUコア数を検出
-AVAILABLE_CORES=$(nproc)
+AVAILABLE_CORES=$(nproc 2>/dev/null || echo 1)
 echo "[INFO] Detected $AVAILABLE_CORES CPU cores"
 
 # CPU scaling governorを保存して、performanceに設定
@@ -82,7 +82,7 @@ GOVERNOR_SET_SUCCESS=false
 # 各CPUのgovernorを保存
 for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     if [ -f "$cpu" ]; then
-        ORIGINAL_GOVERNORS+=("$(cat $cpu)")
+        ORIGINAL_GOVERNORS+=("$(cat "$cpu")")
     fi
 done
 
@@ -235,7 +235,7 @@ for threads in $(seq 1 $MAX_THREADS); do
         grep -H "cpu MHz" /proc/cpuinfo 2>/dev/null || true
         for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
             if [ -f "$f" ]; then
-                cpu_idx=$(basename $(dirname "$f") | sed 's/cpu//')
+                cpu_idx=$(basename "$(dirname "$f")" | sed 's/cpu//')
                 val=$(cat "$f" 2>/dev/null || echo)
                 echo "cpu${cpu_idx}: ${val} kHz"
             fi
@@ -265,7 +265,7 @@ for threads in $(seq 1 $MAX_THREADS); do
         grep -H "cpu MHz" /proc/cpuinfo 2>/dev/null || true
         for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
             if [ -f "$f" ]; then
-                cpu_idx=$(basename $(dirname "$f") | sed 's/cpu//')
+                cpu_idx=$(basename "$(dirname "$f")" | sed 's/cpu//')
                 val=$(cat "$f" 2>/dev/null || echo)
                 echo "cpu${cpu_idx}: ${val} kHz"
             fi
