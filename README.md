@@ -85,6 +85,7 @@ gcloud config set project [あなたのプロジェクトID]
 ```
 
 Firewall setting.
+
 ```
 # 自分のIPを取得
 MY_IP=$(curl -s https://checkip.amazonaws.com)
