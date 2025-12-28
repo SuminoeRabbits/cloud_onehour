@@ -55,7 +55,8 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
     version_to_codename = {
         '20.04': 'focal',
         '22.04': 'jammy',
-        '24.04': 'noble'
+        '24.04': 'noble',
+        '25.04': 'plucky'
     }
     codename = version_to_codename.get(os_version, 'jammy')
 
@@ -84,11 +85,23 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
 def launch_gcp_instance(inst, config, project, zone):
     """Launch GCP instance and return (instance_id, ip)."""
     name = inst['name']
+    os_version = config['common']['os_version']
     img_arch = "arm64" if inst['arch'] == "arm64" else "amd64"
+
+    # Convert os_version to GCP image family format
+    version_number = os_version.replace('.', '')
+
+    # Determine if LTS or not (LTS versions: 20.04, 22.04, 24.04, etc.)
+    # LTS versions end in .04 and are even-numbered years
+    is_lts = os_version.endswith('.04') and int(os_version.split('.')[0]) % 2 == 0
+    lts_suffix = "-lts" if is_lts else ""
+
+    image_family = f"ubuntu-{version_number}{lts_suffix}-{img_arch}"
+
     ip = run_cmd(
         f"gcloud compute instances create {name} --project={project} "
         f"--zone={zone} --machine-type={inst['type']} "
-        f"--image-family=ubuntu-2404-lts-{img_arch} --image-project=ubuntu-os-cloud "
+        f"--image-family={image_family} --image-project=ubuntu-os-cloud "
         f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'"
     )
     return name if ip else None, ip

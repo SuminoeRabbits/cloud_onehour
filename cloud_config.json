@@ -1,6 +1,6 @@
 {
   "common": {
-    "os_version": "22.04",
+    "os_version": "25.04",
     "ssh_user": "ubuntu",
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
