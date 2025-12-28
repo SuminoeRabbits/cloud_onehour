@@ -222,6 +222,25 @@ for threads in $(seq 1 $MAX_THREADS); do
     # user-config.xmlの<ShowResultsAfterTest>FALSE</ShowResultsAfterTest>でプロンプトを回避
     # AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE でアップロードプロンプトを回避
     # Note: FORCE_TIMES_TO_RUNを削除し、user-config.xmlの設定を使用（DynamicRunCount=FALSE, LimitDynamicToTestLength=20）
+    # Prepare per-run results directory (ensure exists so we can save pre/post samples)
+    BENCHMARK_RESULTS_DIR="$RESULTS_BASE_DIR/$MACHINE_NAME/$BENCHMARK_NAME"
+    mkdir -p "$BENCHMARK_RESULTS_DIR"
+
+    # Capture pre-run CPU frequency snapshot (no polling during run)
+    PRE_FREQ_FILE="$BENCHMARK_RESULTS_DIR/${BENCHMARK}-${threads}threads-cpufreq-pre.txt"
+    {
+        echo "timestamp: $(date --iso-8601=seconds)"
+        lscpu 2>/dev/null || true
+        grep -H "cpu MHz" /proc/cpuinfo 2>/dev/null || true
+        for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
+            if [ -f "$f" ]; then
+                cpu_idx=$(basename $(dirname "$f") | sed 's/cpu//')
+                val=$(cat "$f" 2>/dev/null || echo)
+                echo "cpu${cpu_idx}: ${val} kHz"
+            fi
+        done
+    } > "$PRE_FREQ_FILE" 2>/dev/null || true
+
     if echo -e "n\nn" | TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
@@ -235,6 +254,21 @@ for threads in $(seq 1 $MAX_THREADS); do
         echo "[ERROR] Test with $threads threads failed"
         failed_tests+=("$threads")
     fi
+
+    # Capture post-run CPU frequency snapshot
+    POST_FREQ_FILE="$BENCHMARK_RESULTS_DIR/${BENCHMARK}-${threads}threads-cpufreq-post.txt"
+    {
+        echo "timestamp: $(date --iso-8601=seconds)"
+        lscpu 2>/dev/null || true
+        grep -H "cpu MHz" /proc/cpuinfo 2>/dev/null || true
+        for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
+            if [ -f "$f" ]; then
+                cpu_idx=$(basename $(dirname "$f") | sed 's/cpu//')
+                val=$(cat "$f" 2>/dev/null || echo)
+                echo "cpu${cpu_idx}: ${val} kHz"
+            fi
+        done
+    } > "$POST_FREQ_FILE" 2>/dev/null || true
 done
 
 # 結果をベンチマーク毎のフォルダに整理してエクスポート（マシン名/ベンチマーク名の階層構造）
