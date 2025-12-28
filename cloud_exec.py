@@ -123,7 +123,8 @@ def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking):
     """Execute setup commands via SSH with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o ConnectTimeout={ssh_connect_timeout}"
+    # Add UserKnownHostsFile=/dev/null to avoid known_hosts conflicts when IPs are reused
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout}"
     ssh_user = config['common']['ssh_user']
 
     # Get setup command timeout (default 2 hours for compilation tasks)
@@ -153,7 +154,7 @@ def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking)
     """Execute benchmark commands via SSH in background (no output to host)."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_timeout = config['common'].get('ssh_timeout', 20)
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o ConnectTimeout={ssh_timeout}"
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_timeout}"
     ssh_user = config['common']['ssh_user']
 
     print("  [Benchmark Phase] Starting background jobs...")
@@ -181,7 +182,7 @@ def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking)
 def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_checking):
     """Collect benchmark results from remote instance."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk}"
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null"
     ssh_user = config['common']['ssh_user']
     cloud_rep_dir = config['common']['cloud_reports_dir']
 
