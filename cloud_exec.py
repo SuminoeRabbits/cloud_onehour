@@ -5,15 +5,27 @@ import time
 import sys
 from pathlib import Path
 
-def run_cmd(cmd, capture=True, ignore=False, verbose=False):
-    """Execute shell command and return output or status."""
+def run_cmd(cmd, capture=True, ignore=False, verbose=False, timeout=None):
+    """Execute shell command and return output or status.
+
+    Args:
+        cmd: Command to execute
+        capture: Whether to capture output
+        ignore: Whether to ignore errors
+        verbose: Whether to print command before execution
+        timeout: Timeout in seconds (None = no timeout)
+    """
     try:
         if verbose:
             print(f"[CMD] {cmd}")
         res = subprocess.run(
-            cmd, shell=True, capture_output=capture, text=True, check=not ignore
+            cmd, shell=True, capture_output=capture, text=True, check=not ignore, timeout=timeout
         )
         return res.stdout.strip() if capture else True
+    except subprocess.TimeoutExpired:
+        if not ignore:
+            print(f"[Error] Command timed out after {timeout} seconds")
+        return None
     except subprocess.CalledProcessError as e:
         if not ignore:
             print(f"[Error] {e.stderr}")
@@ -110,9 +122,12 @@ def launch_gcp_instance(inst, config, project, zone):
 def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking):
     """Execute setup commands via SSH with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
-    ssh_timeout = config['common'].get('ssh_timeout', 20)
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o ConnectTimeout={ssh_timeout}"
+    ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o ConnectTimeout={ssh_connect_timeout}"
     ssh_user = config['common']['ssh_user']
+
+    # Get setup command timeout (default 2 hours for compilation tasks)
+    setup_timeout = config['common'].get('setup_command_timeout', 7200)
 
     print("  [Setup Phase] Starting...")
     for i in range(1, 4):
@@ -124,7 +139,8 @@ def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking):
             continue
 
         print(f"  [Setup {i}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False)
+        print(f"  [Setup {i}] Timeout: {setup_timeout}s ({setup_timeout//60} minutes)")
+        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=setup_timeout)
         if result is None:
             print(f"  [Warning] Setup {i} failed or timed out")
             return False
