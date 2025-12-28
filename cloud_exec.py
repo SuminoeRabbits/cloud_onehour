@@ -1,114 +1,107 @@
-import json
-import subprocess
-import os
-import time
-import sys
+import json, subprocess, os, time, sys
 
-def run_command(cmd, capture=True, ignore_error=False):
+def run_cmd(cmd, capture=True, ignore=False):
     """コマンド実行の共通ラッパー"""
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=capture, text=True, check=not ignore_error)
-        return result.stdout.strip() if capture else True
+        res = subprocess.run(cmd, shell=True, capture_output=capture, text=True, check=not ignore)
+        return res.stdout.strip() if capture else True
     except subprocess.CalledProcessError as e:
-        if not ignore_error:
-            print(f"\n[Error] Command failed: {cmd}\n{e.stderr}")
+        if not ignore: print(f"\n[Error] {e.stderr}")
         return None
 
-def get_my_ip():
-    """現在のパブリックIPを取得"""
-    return run_command("curl -s https://checkip.amazonaws.com")
+def get_gcp_project():
+    """gcloudの現在の設定からプロジェクトIDを取得"""
+    project = run_cmd("gcloud config get-value project")
+    if not project or "(unset)" in project or project == "":
+        print("[Error] GCP Project ID is not set in gcloud config.")
+        print("Please run: gcloud config set project [YOUR_PROJECT_ID]")
+        return None
+    return project
 
-def setup_aws_security_group(region, sg_name):
-    """SSH(22番)を許可するセキュリティグループを自動作成/取得"""
-    # 既存SGの確認
-    sg_id = run_command(f"aws ec2 describe-security-groups --region {region} --group-names {sg_name} --query 'SecurityGroups[0].GroupId' --output text", ignore_error=True)
-    
+def setup_aws_sg(region, sg_name):
+    """AWS セキュリティグループの自動設定"""
+    sg_id = run_cmd(f"aws ec2 describe-security-groups --region {region} --group-names {sg_name} --query 'SecurityGroups[0].GroupId' --output text", ignore=True)
     if not sg_id or sg_id == "None":
-        print(f"Creating new security group: {sg_name}")
-        vpc_id = run_command(f"aws ec2 describe-vpcs --region {region} --query 'Vpcs[0].VpcId' --output text")
-        sg_id = run_command(f"aws ec2 create-security-group --group-name {sg_name} --description 'SG for benchmarking' --vpc-id {vpc_id} --region {region} --query 'GroupId' --output text")
-    
-    # 自分のIPからのSSHを許可（ルールが既にあればエラーになるので無視）
-    my_ip = get_my_ip()
-    print(f"Authorizing SSH access from your IP: {my_ip}")
-    run_command(f"aws ec2 authorize-security-group-ingress --group-id {sg_id} --protocol tcp --port 22 --cidr {my_ip}/32 --region {region}", ignore_error=True)
-    
+        vpc_id = run_cmd(f"aws ec2 describe-vpcs --region {region} --query 'Vpcs[0].VpcId' --output text")
+        sg_id = run_cmd(f"aws ec2 create-security-group --group-name {sg_name} --description 'SG for benchmarking' --vpc-id {vpc_id} --region {region} --query 'GroupId' --output text")
+    my_ip = run_cmd("curl -s https://checkip.amazonaws.com")
+    run_cmd(f"aws ec2 authorize-security-group-ingress --group-id {sg_id} --protocol tcp --port 22 --cidr {my_ip}/32 --region {region}", ignore=True)
     return sg_id
 
-def get_aws_ami(region, arch, os_ver):
-    pattern = f"ubuntu/images/hvm-ssd-gp3/ubuntu-*-{os_ver}-{arch}-server-*"
-    cmd = (f"aws ec2 describe-images --region {region} --owners 099720109477 "
-           f"--filters 'Name=name,Values={pattern}' "
-           f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text")
-    return run_command(cmd)
+def process_instance(cloud, inst, config, key_path, region_info):
+    """インスタンスの起動からログ回収、削除までのメインループ"""
+    name, itype = inst['name'], inst['type']
+    print(f"\n>>> Starting {cloud.upper()}: {name} ({itype})")
+    instance_id = None
+    ip = None
+    
+    try:
+        if cloud == 'aws':
+            ami = run_cmd(f"aws ec2 describe-images --region {region_info['region']} --owners 099720109477 --filters 'Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-*-{config['common']['os_version']}-{inst['arch']}-server-*' --query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text")
+            launch_cmd = f"aws ec2 run-instances --region {region_info['region']} --image-id {ami} --instance-type {itype} --key-name {region_info['key_name']} --security-group-ids {region_info['sg_id']} --query 'Instances[0].InstanceId' --output text"
+            instance_id = run_cmd(launch_cmd)
+            run_cmd(f"aws ec2 wait instance-running --region {region_info['region']} --instance-ids {instance_id}")
+            ip = run_cmd(f"aws ec2 describe-instances --region {region_info['region']} --instance-ids {instance_id} --query 'Reservations[0].Instances[0].PublicIpAddress' --output text")
+        
+        elif cloud == 'gcp':
+            # GCP起動ロジック
+            img_arch = "arm64" if inst['arch'] == "arm64" else "x86-64"
+            launch_cmd = (f"gcloud compute instances create {name} --project={region_info['project']} "
+                          f"--zone={region_info['zone']} --machine-type={itype} "
+                          f"--image-family=ubuntu-2404-lts-{img_arch} --image-project=ubuntu-os-cloud "
+                          f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'")
+            ip = run_cmd(launch_cmd)
+            instance_id = name 
 
-def get_aws_key_info(region):
-    cmd = f"aws ec2 describe-key-pairs --region {region} --query 'KeyPairs[*].KeyName' --output json"
-    out = run_command(cmd); keys = json.loads(out) if out else []
-    if not keys: return None, None
-    key_name = keys[0]
-    key_path = os.path.expanduser(f"~/.ssh/{key_name}.pem")
-    return key_name, key_path
+        print(f"IP: {ip}. Waiting 60s for SSH...")
+        time.sleep(60)
+
+        # 共通処理: SSHでベンチマーク実行
+        ssh_opt = "-o StrictHostKeyChecking=no -o ConnectTimeout=20"
+        for i in range(1, 4):
+            cmd = config['common'][f"benchmark_command{i}"].format(vcpus=inst['vcpus'])
+            print(f"  [Step {i}] Executing..."); run_cmd(f"ssh -i {key_path} {ssh_opt} {config['common']['ssh_user']}@{ip} '{cmd}'", capture=False)
+
+        # 共通処理: ログの回収 (tar.gz)
+        rep_dir = config['common']['reports_dir']
+        run_cmd(f"ssh -i {key_path} {ssh_opt} {config['common']['ssh_user']}@{ip} 'tar -czf /tmp/reports.tar.gz -C $(dirname {rep_dir}) $(basename {rep_dir})'", capture=False)
+        local_f = f"{config['common']['local_log_dir']}/{cloud}_{name}.tar.gz"
+        run_cmd(f"scp -i {key_path} {ssh_opt} {config['common']['ssh_user']}@{ip}:/tmp/reports.tar.gz {local_f}")
+        print(f"Collected: {local_f}")
+
+    except Exception as e: print(f"Error in {name}: {e}")
+    finally:
+        if instance_id:
+            print(f"Terminating {name}...")
+            if cloud == 'aws': run_cmd(f"aws ec2 terminate-instances --region {region_info['region']} --instance-ids {instance_id}")
+            if cloud == 'gcp': run_cmd(f"gcloud compute instances delete {name} --project={region_info['project']} --zone={region_info['zone']} --quiet")
 
 def main():
-    with open('cloud_config.json', 'r') as f:
-        config = json.load(f)
+    if not os.path.exists('cloud_config.json'):
+        print("Error: cloud_config.json not found."); return
 
+    with open('cloud_config.json', 'r') as f: config = json.load(f)
     os.makedirs(config['common']['local_log_dir'], exist_ok=True)
-    ssh_opt = "-o StrictHostKeyChecking=no -o ConnectTimeout=20"
+    key_path = os.path.expanduser("~/.ssh/bench-key-2025.pem")
 
+    # AWS処理
     if config['aws']['enable']:
-        region = config['aws']['region']
-        key_name, key_path = get_aws_key_info(region)
-        if not key_name or not os.path.exists(key_path):
-            print(f"Key error: {key_path} not found"); sys.exit(1)
-
-        # セキュリティグループの準備
-        sg_id = setup_aws_security_group(region, config['common']['security_group_name'])
-
+        key_name = run_cmd("aws ec2 describe-key-pairs --query 'KeyPairs[0].KeyName' --output text")
+        sg_id = setup_aws_sg(config['aws']['region'], config['common']['security_group_name'])
         for inst in config['aws']['instances']:
-            if not inst.get('enable'): continue
-            instance_id = None
-            try:
-                print(f"\n>>> AWS Launching: {inst['name']} ({inst['type']})")
-                ami_id = get_aws_ami(region, inst['arch'], config['common']['os_version'])
-                
-                # インスタンス起動（SGを指定）
-                launch_cmd = (f"aws ec2 run-instances --region {region} --image-id {ami_id} "
-                              f"--instance-type {inst['type']} --key-name {key_name} "
-                              f"--security-group-ids {sg_id} "
-                              f"--tag-specifications 'ResourceType=instance,Tags=[{{Key=Name,Value={inst['name']}}}]' "
-                              f"--query 'Instances[0].InstanceId' --output text")
-                instance_id = run_command(launch_cmd)
-                
-                print("Waiting for instance to be 'running'...")
-                run_command(f"aws ec2 wait instance-running --region {region} --instance-ids {instance_id}")
-                ip = run_command(f"aws ec2 describe-instances --region {region} --instance-ids {instance_id} --query 'Reservations[0].Instances[0].PublicIpAddress' --output text")
-                
-                print(f"IP: {ip}. Waiting 60s for SSH daemon...")
-                time.sleep(60) # SSH起動待ち時間を延長
+            if inst.get('enable'): process_instance('aws', inst, config, key_path, {'region': config['aws']['region'], 'key_name': key_name, 'sg_id': sg_id})
 
-                # Steps 1-3
-                for i in range(1, 4):
-                    cmd = config['common'][f"benchmark_command{i}"].format(vcpus=inst['vcpus'])
-                    print(f"[Step {i}] Executing..."); run_command(f"ssh -i {key_path} {ssh_opt} ubuntu@{ip} '{cmd}'", capture=False)
+    # GCP処理
+    if config['gcp']['enable']:
+        # プロジェクトIDの自動取得
+        p_id = config['gcp']['project_id']
+        if p_id == "AUTO_DETECT":
+            p_id = get_gcp_project()
+            if not p_id: return # 取得失敗時は終了
+        print(f"Auto-detected GCP Project: {p_id}")
 
-                # Directory check and Archive
-                rep_dir = config['common']['reports_dir']
-                check_cmd = f"ssh -i {key_path} {ssh_opt} ubuntu@{ip} 'test -d {rep_dir}'"
-                if subprocess.run(check_cmd, shell=True).returncode == 0:
-                    print(f"Archiving {rep_dir}...")
-                    run_command(f"ssh -i {key_path} {ssh_opt} ubuntu@{ip} 'tar -czf /tmp/reports.tar.gz -C $(dirname {rep_dir}) $(basename {rep_dir})'", capture=False)
-                    local_f = f"{config['common']['local_log_dir']}/{inst['name']}_reports.tar.gz"
-                    run_command(f"scp -i {key_path} {ssh_opt} ubuntu@{ip}:/tmp/reports.tar.gz {local_f}")
-                    print(f"Downloaded: {local_f}")
-                else:
-                    print(f"[Warning] {rep_dir} not found.")
-
-            except Exception as e: print(f"Error: {e}")
-            finally:
-                if instance_id:
-                    print(f"Terminating {instance_id}..."); run_command(f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}")
+        for inst in config['gcp']['instances']:
+            if inst.get('enable'): process_instance('gcp', inst, config, key_path, {'project': p_id, 'zone': config['gcp']['zone']})
 
 if __name__ == "__main__":
     main()

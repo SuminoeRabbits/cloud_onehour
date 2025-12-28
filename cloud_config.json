@@ -17,4 +17,13 @@
       { "type": "t3.micro", "name": "aws-test-t3", "arch": "amd64", "vcpus": 2, "enable": true }
     ]
   }
+"gcp": {
+    "enable": true,
+    "project_id": "AUTO_DETECT",
+    "region": "asia-northeast1",
+    "zone": "asia-northeast1-a",
+    "instances": [
+      { "type": "e2-micro", "name": "gcp-test-e2", "arch": "amd64", "vcpus": 2, "enable": true }
+    ]
+  }
 }
