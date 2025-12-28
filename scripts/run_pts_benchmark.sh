@@ -243,7 +243,13 @@ for threads in $(seq 1 $MAX_THREADS); do
         echo
     } > "$FREQ_FILE" 2>/dev/null || true
 
-    if echo -e "n\nn" | TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
+    # Run batch-setup once to configure test options non-interactively
+    if [ ! -f ~/.phoronix-test-suite/batch-mode-configured ]; then
+        echo "y" | phoronix-test-suite batch-setup > /dev/null 2>&1 || true
+        touch ~/.phoronix-test-suite/batch-mode-configured
+    fi
+
+    if yes "" | TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" \
