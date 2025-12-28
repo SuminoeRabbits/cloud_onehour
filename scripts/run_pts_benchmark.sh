@@ -243,20 +243,71 @@ for threads in $(seq 1 $MAX_THREADS); do
         echo
     } > "$FREQ_FILE" 2>/dev/null || true
 
-    # Run batch-setup once to configure test options non-interactively
-    if [ ! -f ~/.phoronix-test-suite/batch-mode-configured ]; then
+    # Configure PTS user-config.xml for non-interactive batch mode
+    PTS_CONFIG_DIR=~/.phoronix-test-suite
+    PTS_USER_CONFIG="$PTS_CONFIG_DIR/user-config.xml"
+
+    # Get the directory where this script is located
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+    TEMPLATE_CONFIG="$REPO_ROOT/user_config/user-config.xml"
+
+    # Use pre-configured user-config.xml if available
+    if [ -f "$TEMPLATE_CONFIG" ]; then
+        mkdir -p "$PTS_CONFIG_DIR"
+        cp "$TEMPLATE_CONFIG" "$PTS_USER_CONFIG"
+        echo "[INFO] Using pre-configured PTS user-config.xml from $TEMPLATE_CONFIG"
+    elif [ ! -f "$PTS_USER_CONFIG" ]; then
+        # Fallback: run batch-setup to create initial config
         echo "y" | phoronix-test-suite batch-setup > /dev/null 2>&1 || true
-        touch ~/.phoronix-test-suite/batch-mode-configured
+
+        # Apply critical settings via sed
+        if [ -f "$PTS_USER_CONFIG" ]; then
+            sed -i 's|<BatchMode>.*</BatchMode>|<BatchMode>TRUE</BatchMode>|' "$PTS_USER_CONFIG" 2>/dev/null || true
+            sed -i 's|<AlwaysUploadResultsToOpenBenchmarking>.*</AlwaysUploadResultsToOpenBenchmarking>|<AlwaysUploadResultsToOpenBenchmarking>FALSE</AlwaysUploadResultsToOpenBenchmarking>|' "$PTS_USER_CONFIG" 2>/dev/null || true
+            sed -i 's|<PromptForTestDescription>.*</PromptForTestDescription>|<PromptForTestDescription>FALSE</PromptForTestDescription>|' "$PTS_USER_CONFIG" 2>/dev/null || true
+            sed -i 's|<PromptForTestIdentifier>.*</PromptForTestIdentifier>|<PromptForTestIdentifier>FALSE</PromptForTestIdentifier>|' "$PTS_USER_CONFIG" 2>/dev/null || true
+            sed -i 's|<RunAllTestOptions>.*</RunAllTestOptions>|<RunAllTestOptions>FALSE</RunAllTestOptions>|' "$PTS_USER_CONFIG" 2>/dev/null || true
+        fi
     fi
 
-    if yes "" | TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
+    # Pre-configure test options for OpenSSL to avoid interactive prompts
+    # This creates a saved test configuration that PTS will use automatically
+    TEST_OPTION_DIR=~/.phoronix-test-suite/test-options
+    mkdir -p "$TEST_OPTION_DIR"
+
+    # For OpenSSL tests, create a default option file selecting "Test All Options"
+    if [[ "$BENCHMARK_FULL" == *"openssl"* ]]; then
+        echo "3" > "$TEST_OPTION_DIR/${BENCHMARK_FULL}.config" 2>/dev/null || true
+    fi
+
+    # Create a named pipe for unlimited input
+    input_fifo=$(mktemp -u)
+    mkfifo "$input_fifo"
+
+    # Feed unlimited newlines to the pipe in background
+    (yes "" > "$input_fifo") &
+    yes_pid=$!
+
+    if TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" \
        SKIP_ALL_TEST_OPTION_CHECKS=1 \
+       SKIP_TEST_OPTION_HANDLING=1 \
        AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE \
        taskset -c $cpu_list \
-       phoronix-test-suite benchmark "$BENCHMARK_FULL" 2>&1 | grep -v "trim():" | grep -v "\[8192\]"; then
+       phoronix-test-suite benchmark "$BENCHMARK_FULL" < "$input_fifo" 2>&1 | grep -v "trim():" | grep -v "\[8192\]"; then
+        benchmark_result=0
+    else
+        benchmark_result=1
+    fi
+
+    # Clean up
+    kill $yes_pid 2>/dev/null || true
+    rm -f "$input_fifo"
+
+    if [ $benchmark_result -eq 0 ]; then
         echo "[OK] Test with $threads threads completed successfully"
     else
         echo "[ERROR] Test with $threads threads failed"
