@@ -97,6 +97,13 @@ gcloud compute firewall-rules create allow-ssh-from-home \
     --action=ALLOW \
     --rules=tcp:22 \
     --source-ranges=$MY_IP/32
+# 公開鍵を確実に生成（上書き）
+ssh-keygen -y -f ~/.ssh/<your project key>.pem > ~/.ssh/<your project key>.pub
+# メタデータへの登録（"ubuntu:" という接頭辞が重要です）
+gcloud compute project-info add-metadata \
+    --metadata ssh-keys="ubuntu:$(cat ~/.ssh/<your project key>.pub)"
+#「OS Login」機能の無効化確認
+gcloud compute project-info add-metadata --metadata enable-oslogin=FALSE
 ```
 
 Confirm your GCP is Ok.

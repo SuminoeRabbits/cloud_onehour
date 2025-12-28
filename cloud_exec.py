@@ -50,11 +50,24 @@ def setup_aws_sg(region, sg_name):
 
 def launch_aws_instance(inst, config, region, key_name, sg_id):
     """Launch AWS instance and return (instance_id, ip)."""
+    os_version = config['common']['os_version']
+    # Map Ubuntu version to codename
+    version_to_codename = {
+        '20.04': 'focal',
+        '22.04': 'jammy',
+        '24.04': 'noble'
+    }
+    codename = version_to_codename.get(os_version, 'jammy')
+
     ami = run_cmd(
         f"aws ec2 describe-images --region {region} --owners 099720109477 "
-        f"--filters 'Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-*-{config['common']['os_version']}-{inst['arch']}-server-*' "
+        f"--filters 'Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-{codename}-{os_version}-{inst['arch']}-server-*' "
         f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text"
     )
+    if not ami or ami == "None":
+        print(f"[Error] No AMI found for Ubuntu {os_version} ({codename}) {inst['arch']} in {region}")
+        return None, None
+
     instance_id = run_cmd(
         f"aws ec2 run-instances --region {region} --image-id {ami} "
         f"--instance-type {inst['type']} --key-name {key_name} "
@@ -81,17 +94,59 @@ def launch_gcp_instance(inst, config, project, zone):
     return name if ip else None, ip
 
 
-def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking):
-    """Execute benchmark commands via SSH."""
+def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking):
+    """Execute setup commands via SSH with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_timeout = config['common'].get('ssh_timeout', 20)
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o ConnectTimeout={ssh_timeout}"
     ssh_user = config['common']['ssh_user']
 
+    print("  [Setup Phase] Starting...")
     for i in range(1, 4):
-        cmd = config['common'][f"benchmark_command{i}"].format(vcpus=inst['vcpus'])
-        print(f"  [Step {i}] Executing...")
-        run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False)
+        cmd_key = f"setup_command{i}"
+        if cmd_key not in config['common']:
+            continue
+        cmd = config['common'][cmd_key].format(vcpus=inst['vcpus'])
+        if not cmd or cmd.strip() == "":
+            continue
+
+        print(f"  [Setup {i}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False)
+        if result is None:
+            print(f"  [Warning] Setup {i} failed or timed out")
+            return False
+        else:
+            print(f"  [Setup {i}] Completed")
+    return True
+
+
+def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking):
+    """Execute benchmark commands via SSH in background (no output to host)."""
+    strict_hk = "yes" if ssh_strict_host_key_checking else "no"
+    ssh_timeout = config['common'].get('ssh_timeout', 20)
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o ConnectTimeout={ssh_timeout}"
+    ssh_user = config['common']['ssh_user']
+
+    print("  [Benchmark Phase] Starting background jobs...")
+    for i in range(1, 3):
+        cmd_key = f"benchmark_command{i}"
+        if cmd_key not in config['common']:
+            continue
+        cmd = config['common'][cmd_key].format(vcpus=inst['vcpus'])
+        if not cmd or cmd.strip() == "":
+            continue
+
+        print(f"  [Benchmark {i}] Launching: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=True)
+        if result is None:
+            print(f"  [Warning] Benchmark {i} failed to launch")
+        else:
+            print(f"  [Benchmark {i}] Launched in background")
+
+    # Wait for benchmarks to complete
+    wait_time = config['common'].get('benchmark_wait_time', 300)
+    print(f"  [Benchmark Phase] Waiting {wait_time}s for completion...")
+    time.sleep(wait_time)
 
 
 def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_checking):
@@ -99,14 +154,15 @@ def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_check
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk}"
     ssh_user = config['common']['ssh_user']
-    rep_dir = config['common']['reports_dir']
+    cloud_rep_dir = config['common']['cloud_reports_dir']
 
     run_cmd(
         f"ssh {ssh_opt} {ssh_user}@{ip} "
-        f"'tar -czf /tmp/reports.tar.gz -C $(dirname {rep_dir}) $(basename {rep_dir})'",
+        f"'tar -czf /tmp/reports.tar.gz -C $(dirname {cloud_rep_dir}) $(basename {cloud_rep_dir})'",
         capture=False,
     )
-    local_f = f"{config['common']['local_log_dir']}/{cloud}_{name}.tar.gz"
+    host_rep_dir = config['common']['host_reports_dir']
+    local_f = f"{host_rep_dir}/{cloud}_{name}.tar.gz"
     run_cmd(f"scp {ssh_opt} {ssh_user}@{ip}:/tmp/reports.tar.gz {local_f}")
     print(f"Collected: {local_f}")
 
@@ -145,7 +201,17 @@ def process_instance(cloud, inst, config, key_path):
         time.sleep(60)
 
         ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
+
+        # Run setup commands with output
+        setup_success = run_ssh_setup(ip, config, inst, key_path, ssh_strict)
+        if not setup_success:
+            print(f"[Error] Setup failed for {name}. Skipping benchmarks.")
+            return
+
+        # Run benchmark commands in background
         run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict)
+
+        # Collect results
         collect_results(ip, config, cloud, name, key_path, ssh_strict)
 
     except Exception as e:
@@ -185,7 +251,7 @@ def main():
     if not config:
         return
 
-    os.makedirs(config['common']['local_log_dir'], exist_ok=True)
+    os.makedirs(config['common']['host_reports_dir'], exist_ok=True)
 
     # Validate SSH key
     key_path_template = config['common'].get(
@@ -197,15 +263,27 @@ def main():
 
     # Process AWS instances
     if config['aws']['enable']:
+        enabled_count = 0
         for inst in config['aws']['instances']:
             if inst.get('enable'):
                 process_instance('aws', inst, config, key_path)
+                enabled_count += 1
+        if enabled_count == 0:
+            print("[Info] AWS is enabled but no instances are enabled in the configuration.")
+    else:
+        print("[Info] AWS is disabled in the configuration (aws.enable = false).")
 
     # Process GCP instances
     if config['gcp']['enable']:
+        enabled_count = 0
         for inst in config['gcp']['instances']:
             if inst.get('enable'):
                 process_instance('gcp', inst, config, key_path)
+                enabled_count += 1
+        if enabled_count == 0:
+            print("[Info] GCP is enabled but no instances are enabled in the configuration.")
+    else:
+        print("[Info] GCP is disabled in the configuration (gcp.enable = false).")
 
 
 if __name__ == "__main__":

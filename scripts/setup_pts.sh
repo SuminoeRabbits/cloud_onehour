@@ -37,7 +37,7 @@ if [ -x "$LAUNCHER" ]; then
     fi
 fi
 
-wget -O "$ARCHIVE" "$DOWNLOAD_URL"
+wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
 
 sudo apt-get update
 sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip

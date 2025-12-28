@@ -1,29 +1,46 @@
 {
   "common": {
-    "os_version": "25.04",
+    "os_version": "22.04",
     "ssh_user": "ubuntu",
-    "local_log_dir": "./bench_results",
-    "benchmark_command1": "sudo apt-get update && sudo apt-get install -y sysbench",
-    "benchmark_command2": "mkdir -p ~/reports",
-    "benchmark_command3": "sysbench cpu --cpu-max-prime=20000 --threads={vcpus} run > ~/reports/sysbench_cpu.log",
-    "reports_dir": "~/reports",
-    "security_group_name": "cloud-benchmarking-sg"
+    "ssh_key_name": "cloud_onehour_project",
+    "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
+    "setup_command1": "sudo apt-get update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
+    "setup_command2": "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
+    "setup_command3": "",
+    "benchmark_command1": "cd ~/cloud_onehour && nohup bash -c 'sysbench cpu --cpu-max-prime=20000 --threads={vcpus} run > ~/cloud_onehour/reports/sysbench_cpu.log 2>&1' > /dev/null 2>&1 &",
+    "benchmark_command2": "",
+    "cloud_reports_dir": "~/cloud_onehour/reports",
+    "host_reports_dir": "bench_results",
+    "security_group_name": "cloud-benchmarking-sg",
+    "ssh_timeout": 20,
+    "ssh_strict_host_key_checking": false,
+    "benchmark_wait_time": 300
   },
   "aws": {
     "enable": true,
     "region": "ap-northeast-1",
-    "key_name": "AUTO_DETECT",
     "instances": [
-      { "type": "t3.micro", "name": "aws-test-t3", "arch": "amd64", "vcpus": 2, "enable": true }
+      {
+        "name": "aws-benchmark-instance",
+        "type": "t3.micro",
+        "arch": "amd64",
+        "vcpus": 2,
+        "enable": true
+      }
     ]
   },
   "gcp": {
     "enable": true,
     "project_id": "AUTO_DETECT",
-    "region": "asia-northeast1",
     "zone": "asia-northeast1-a",
     "instances": [
-    { "type": "e2-micro", "name": "gcp-test-e2", "arch": "amd64", "vcpus": 2, "enable": true }
+      {
+        "name": "gcp-benchmark-instance",
+        "type": "e2-medium",
+        "arch": "amd64",
+        "vcpus": 2,
+        "enable": true
+      }
     ]
   }
 }
