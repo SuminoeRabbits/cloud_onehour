@@ -36,6 +36,7 @@ cd cloud_onehour/scripts
 Use and test_suite.json to run multiple tests at once in batch mode.
 
 ```
+python3.10 cloud_exec.py 2>&1 | tee -a stdout.log
 ```
 
 ### Tune your test_suite.json

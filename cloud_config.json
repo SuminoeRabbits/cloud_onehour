@@ -22,7 +22,7 @@
     "instances": [
       {
         "name": "aws-benchmark-instance",
-        "type": "t3.micro",
+        "type": "t3.small",
         "arch": "amd64",
         "vcpus": 2,
         "enable": true
