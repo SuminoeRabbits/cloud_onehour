@@ -227,8 +227,9 @@ for threads in $(seq 1 $MAX_THREADS); do
     mkdir -p "$BENCHMARK_RESULTS_DIR"
 
     # Capture pre-run CPU frequency snapshot (no polling during run)
-    PRE_FREQ_FILE="$BENCHMARK_RESULTS_DIR/${BENCHMARK}-${threads}threads-cpufreq-pre.txt"
+    FREQ_FILE="$BENCHMARK_RESULTS_DIR/${BENCHMARK}-${threads}threads-cpufreq.txt"
     {
+        echo "=== PRE-RUN SNAPSHOT ==="
         echo "timestamp: $(date --iso-8601=seconds)"
         lscpu 2>/dev/null || true
         grep -H "cpu MHz" /proc/cpuinfo 2>/dev/null || true
@@ -239,7 +240,8 @@ for threads in $(seq 1 $MAX_THREADS); do
                 echo "cpu${cpu_idx}: ${val} kHz"
             fi
         done
-    } > "$PRE_FREQ_FILE" 2>/dev/null || true
+        echo
+    } > "$FREQ_FILE" 2>/dev/null || true
 
     if echo -e "n\nn" | TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
@@ -255,9 +257,9 @@ for threads in $(seq 1 $MAX_THREADS); do
         failed_tests+=("$threads")
     fi
 
-    # Capture post-run CPU frequency snapshot
-    POST_FREQ_FILE="$BENCHMARK_RESULTS_DIR/${BENCHMARK}-${threads}threads-cpufreq-post.txt"
+    # Capture post-run CPU frequency snapshot (append to same file)
     {
+        echo "=== POST-RUN SNAPSHOT ==="
         echo "timestamp: $(date --iso-8601=seconds)"
         lscpu 2>/dev/null || true
         grep -H "cpu MHz" /proc/cpuinfo 2>/dev/null || true
@@ -268,7 +270,8 @@ for threads in $(seq 1 $MAX_THREADS); do
                 echo "cpu${cpu_idx}: ${val} kHz"
             fi
         done
-    } > "$POST_FREQ_FILE" 2>/dev/null || true
+        echo
+    } >> "$FREQ_FILE" 2>/dev/null || true
 done
 
 # 結果をベンチマーク毎のフォルダに整理してエクスポート（マシン名/ベンチマーク名の階層構造）
