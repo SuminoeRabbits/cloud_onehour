@@ -437,35 +437,27 @@ echo ">>> Organizing and exporting results..."
 BENCHMARK_RESULTS_DIR="$RESULTS_BASE_DIR/$MACHINE_NAME/$BENCHMARK_NAME"
 mkdir -p "$BENCHMARK_RESULTS_DIR"
 
-# 各スレッド数の結果をエクスポート
-# PTSに保存されている結果を検索してエクスポート（ANSIカラーコードを除去）
-PTS_SAVED_RESULTS=$(PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite list-saved-results 2>/dev/null | sed 's/\x1B\[[0-9;]*[a-zA-Z]//g' | grep -E "^[a-z]" | awk '{print $1}')
+# 各スレッド数の結果をエクスポート（CSVのみ）
+# PTSはベンチマーク実行時に~/にCSVファイルを直接生成する
+# これらのファイルを適切な場所に移動する
 
+echo ">>> Organizing CSV results..."
 for threads in $(seq 1 $MAX_THREADS); do
     RESULT_IDENTIFIER="${BENCHMARK}-${threads}threads"
 
-    # PTSに保存されている結果名を探す（PTSは名前を短縮することがある）
-    SAVED_RESULT_NAME=$(echo "$PTS_SAVED_RESULTS" | grep -i "${threads}threads" | head -1)
+    # PTSが生成するCSVファイル名のパターン
+    # 例: coremark-101-1threads-16.csv (最後の数字は実行回数)
+    CSV_PATTERN="${BENCHMARK_NAME}-*-${threads}threads*.csv"
 
-    if [ -n "$SAVED_RESULT_NAME" ]; then
-        echo "  Exporting results for $threads thread(s) (saved as: $SAVED_RESULT_NAME)..."
+    # ホームディレクトリでCSVファイルを検索
+    CSV_FILES=$(ls -t $HOME/${CSV_PATTERN} 2>/dev/null | head -1)
 
-        # 結果をエクスポート
-        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite result-file-to-csv "$SAVED_RESULT_NAME" > /dev/null 2>&1
-        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite result-file-to-text "$SAVED_RESULT_NAME" > "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.txt" 2>&1
-        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite result-file-to-json "$SAVED_RESULT_NAME" > /dev/null 2>&1
-
-        # CSVとJSONファイルを移動（PTSはホームディレクトリまたはカレントディレクトリに保存する）
-        if [ -f "${SAVED_RESULT_NAME}.csv" ]; then
-            mv "${SAVED_RESULT_NAME}.csv" "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.csv"
-        fi
-        if [ -f "$HOME/${SAVED_RESULT_NAME}.json" ]; then
-            mv "$HOME/${SAVED_RESULT_NAME}.json" "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.json"
-        elif [ -f "${SAVED_RESULT_NAME}.json" ]; then
-            mv "${SAVED_RESULT_NAME}.json" "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.json"
-        fi
+    if [ -n "$CSV_FILES" ]; then
+        CSV_FILE="$CSV_FILES"
+        echo "  Moving CSV for $threads thread(s): $(basename $CSV_FILE)"
+        mv "$CSV_FILE" "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.csv"
     else
-        echo "  [WARN] Results for $threads thread(s) not found in PTS database"
+        echo "  [WARN] CSV file not found for $threads thread(s) (pattern: ${CSV_PATTERN})"
     fi
 done
 
