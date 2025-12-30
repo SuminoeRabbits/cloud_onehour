@@ -27,6 +27,9 @@ if [[ "${1:-}" == "--fix-permissions" ]]; then
     echo "[OK] Permissions fixed successfully"
     echo "Current ownership:"
     ls -ld "$INSTALL_DIR"
+    echo ""
+    echo "Current PHP version: $(php --version | head -1)"
+    echo "Note: PTS requires PHP 8.1. If version differs, run ./scripts/setup_pts.sh to reinstall with correct PHP."
     exit 0
 fi
 
@@ -87,10 +90,44 @@ install_pts() {
     echo "Downloading PTS ${VERSION}..."
     wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
 
-    # Install dependencies
+    # Install dependencies with specific PHP version
     echo "Installing dependencies..."
-    sudo apt-get update
-    sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+
+    # Ensure PHP 8.1 is used for consistency across Ubuntu 22.04 and 25.10
+    REQUIRED_PHP_VERSION="8.1"
+    CURRENT_PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "none")
+
+    echo "Current PHP version: $CURRENT_PHP_VERSION"
+    echo "Required PHP version: $REQUIRED_PHP_VERSION"
+
+    if [[ "$CURRENT_PHP_VERSION" != "$REQUIRED_PHP_VERSION" ]]; then
+        echo "Installing PHP $REQUIRED_PHP_VERSION for PTS compatibility..."
+
+        # Add ondrej/php repository if needed (for Ubuntu 25.10)
+        if ! dpkg -l | grep -q "php${REQUIRED_PHP_VERSION}-cli"; then
+            echo "Adding PHP repository..."
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:ondrej/php
+            sudo apt-get update
+        fi
+
+        # Install PHP 8.1 packages
+        sudo apt-get install -y \
+            php${REQUIRED_PHP_VERSION}-cli \
+            php${REQUIRED_PHP_VERSION}-xml \
+            php${REQUIRED_PHP_VERSION}-json \
+            php${REQUIRED_PHP_VERSION}-gd \
+            php${REQUIRED_PHP_VERSION}-curl \
+            unzip
+
+        # Set PHP 8.1 as the default CLI version
+        sudo update-alternatives --set php /usr/bin/php${REQUIRED_PHP_VERSION}
+
+        echo "PHP $REQUIRED_PHP_VERSION installed and set as default"
+    else
+        echo "PHP $REQUIRED_PHP_VERSION is already installed"
+        sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+    fi
 
     # Extract and install
     echo "Extracting archive..."
@@ -176,6 +213,7 @@ fi
 
 echo ""
 echo "=== Installation successful ==="
+echo "PHP version: $(php --version | head -1)"
 PTS_USER_PATH_OVERRIDE="$USER_CONFIG_DIR" "$LAUNCHER" version
 
 # Suppress PHP deprecation warnings
