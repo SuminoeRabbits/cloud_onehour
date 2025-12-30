@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+# Ensure /usr/local/bin is in PATH (for source-compiled GCC)
+if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+    export PATH="/usr/local/bin:$PATH"
+fi
+
 # Setup passwordless sudo if not already configured
 # This is required for automated benchmark runs
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,9 +19,16 @@ if [ -f "$SCRIPT_DIR/setup_passwordless_sudo.sh" ]; then
     fi
 fi
 
+# Check if GCC-14 is already installed
+gcc14_installed=false
+if [[ -f /usr/bin/gcc-14 ]] || [[ -f /usr/local/bin/gcc-14 ]]; then
+    gcc14_installed=true
+    echo "GCC-14 is already installed"
+fi
+
 # Check and switch to GCC 14 if needed
 current_gcc_version=$(gcc -dumpversion 2>/dev/null | cut -d. -f1 || echo "0")
-if [[ -z "$current_gcc_version" ]] || [[ "$current_gcc_version" -lt 14 ]] 2>/dev/null; then
+if [[ "$gcc14_installed" = false ]]; then
     echo "Current GCC version is ${current_gcc_version:-not installed}. Installing GCC 14..."
     
     # Detect Ubuntu version
@@ -96,33 +108,81 @@ if [[ -z "$current_gcc_version" ]] || [[ "$current_gcc_version" -lt 14 ]] 2>/dev
         # Install
         echo "Installing GCC-14..."
         sudo make install
-        
+
+        # Verify installation
+        if [[ -f "${INSTALL_PREFIX}/bin/gcc-14" ]]; then
+            echo "[OK] GCC-14 installed to ${INSTALL_PREFIX}/bin/gcc-14"
+
+            # Ensure /usr/local/bin is in PATH
+            if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+                echo "Adding /usr/local/bin to PATH..."
+                export PATH="/usr/local/bin:$PATH"
+
+                # Add to .bashrc if not already there
+                if ! grep -q 'export PATH="/usr/local/bin:$PATH"' ~/.bashrc; then
+                    echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.bashrc
+                fi
+            fi
+        else
+            echo "[ERROR] GCC-14 installation failed - binary not found at ${INSTALL_PREFIX}/bin/gcc-14"
+            exit 1
+        fi
+
         # Clean up
         echo "Cleaning up build files..."
         cd /tmp
         rm -rf gcc-${GCC_VERSION} "${BUILD_DIR}"
-        
+
         echo "GCC-14 compiled and installed to ${INSTALL_PREFIX}"
     fi
-    
-    # Set alternatives
-    if [[ -f /usr/bin/gcc-14 ]]; then
-        # Package installation
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
-        sudo update-alternatives --set gcc /usr/bin/gcc-14
-        sudo update-alternatives --set g++ /usr/bin/g++-14
-    elif [[ -f /usr/local/bin/gcc-14 ]]; then
-        # Source installation
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/bin/gcc-14 100
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/bin/g++-14 100
-        sudo update-alternatives --set gcc /usr/local/bin/gcc-14
-        sudo update-alternatives --set g++ /usr/local/bin/g++-14
-    fi
-    
-    echo "Switched to GCC 14"
+fi
+
+# Always set/verify alternatives (even if GCC-14 was already installed)
+echo ">>> Configuring GCC-14 as default compiler..."
+
+# Ensure /usr/local/bin is in PATH before checking
+if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+    export PATH="/usr/local/bin:$PATH"
+fi
+
+if [[ -f /usr/bin/gcc-14 ]]; then
+    # Package installation
+    sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 || true
+    sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100 || true
+    sudo update-alternatives --set gcc /usr/bin/gcc-14
+    sudo update-alternatives --set g++ /usr/bin/g++-14
+    echo "[OK] Set GCC-14 from /usr/bin/gcc-14 as default"
+elif [[ -f /usr/local/bin/gcc-14 ]]; then
+    # Source installation
+    sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/bin/gcc-14 100 || true
+    sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/bin/g++-14 100 || true
+    sudo update-alternatives --set gcc /usr/local/bin/gcc-14
+    sudo update-alternatives --set g++ /usr/local/bin/g++-14
+    echo "[OK] Set GCC-14 from /usr/local/bin/gcc-14 as default"
 else
-    echo "GCC $current_gcc_version is already >= 14"
+    echo "[ERROR] GCC-14 binary not found in /usr/bin or /usr/local/bin"
+    exit 1
+fi
+
+# Verify GCC version after setting alternatives
+echo ">>> Verifying GCC installation..."
+echo "[DEBUG] PATH: $PATH"
+echo "[DEBUG] which gcc: $(which gcc 2>/dev/null || echo 'not found')"
+echo "[DEBUG] which gcc-14: $(which gcc-14 2>/dev/null || echo 'not found')"
+
+new_gcc_version=$(gcc -dumpversion 2>/dev/null | cut -d. -f1 || echo "0")
+if [[ "$new_gcc_version" -ge 14 ]]; then
+    echo "[OK] GCC $new_gcc_version is now active"
+    gcc --version | head -1
+else
+    echo "[WARN] GCC version is still $new_gcc_version (expected >= 14)"
+    echo "[WARN] Current gcc location: $(which gcc 2>/dev/null || echo 'not found')"
+    echo "[WARN] You may need to restart your shell or run: hash -r"
+    echo ""
+    echo "Diagnostic information:"
+    echo "  - /usr/bin/gcc-14 exists: $(test -f /usr/bin/gcc-14 && echo 'yes' || echo 'no')"
+    echo "  - /usr/local/bin/gcc-14 exists: $(test -f /usr/local/bin/gcc-14 && echo 'yes' || echo 'no')"
+    echo "  - update-alternatives gcc: $(update-alternatives --query gcc 2>/dev/null | grep 'Value:' || echo 'not set')"
 fi
 
 # Set compiler variables
