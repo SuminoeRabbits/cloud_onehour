@@ -12,16 +12,18 @@ fi
 
 # 使用方法を表示
 usage() {
-    echo "Usage: $0 <benchmark> [max_threads]"
+    echo "Usage: $0 <benchmark> [threads]"
     echo ""
     echo "Arguments:"
     echo "  benchmark    PTS benchmark name (e.g., coremark-1.0.1, openssl-3.0.1)"
-    echo "  max_threads  Maximum number of threads to test (default: all cores)"
+    echo "  threads      Number of threads to use (optional):"
+    echo "               - If omitted: Test all thread counts from 1 to vCPU max (default)"
+    echo "               - If N > 0:   Test only with N threads (capped at vCPU max)"
     echo ""
     echo "Examples:"
-    echo "  $0 coremark-1.0.1"
-    echo "  $0 coremark-1.0.1 4"
-    echo "  $0 openssl-3.0.1 8"
+    echo "  $0 coremark-1.0.1           # Test with 1, 2, 3, ... up to max vCPUs"
+    echo "  $0 coremark-1.0.1 4         # Test only with 4 threads"
+    echo "  $0 openssl-3.0.1 8          # Test only with 8 threads (capped at vCPU max)"
     exit 1
 }
 
@@ -93,11 +95,23 @@ if [ -z "$RESULTS_DIR_RELATIVE" ]; then
 fi
 
 # 相対パスを絶対パスに変換（CONFIG_DIRを基準とする）
-RESULTS_BASE_DIR="$(cd "$CONFIG_DIR" && cd "$RESULTS_DIR_RELATIVE" && pwd 2>/dev/null)"
+# まず、ディレクトリが存在するか確認し、なければ作成
+RESULTS_DIR_PATH="$CONFIG_DIR/$RESULTS_DIR_RELATIVE"
+if [ ! -d "$RESULTS_DIR_PATH" ]; then
+    echo "[INFO] Results directory does not exist, creating: $RESULTS_DIR_PATH"
+    mkdir -p "$RESULTS_DIR_PATH"
+    if [ $? -ne 0 ]; then
+        echo "[ERROR] Failed to create results directory: $RESULTS_DIR_PATH"
+        exit 1
+    fi
+    echo "[OK] Results directory created"
+fi
+
+# 絶対パスに変換
+RESULTS_BASE_DIR="$(cd "$RESULTS_DIR_PATH" && pwd)"
 if [ -z "$RESULTS_BASE_DIR" ]; then
-    # ディレクトリが存在しない場合は作成
-    mkdir -p "$CONFIG_DIR/$RESULTS_DIR_RELATIVE"
-    RESULTS_BASE_DIR="$(cd "$CONFIG_DIR" && cd "$RESULTS_DIR_RELATIVE" && pwd)"
+    echo "[ERROR] Failed to resolve results directory path: $RESULTS_DIR_PATH"
+    exit 1
 fi
 
 # マシン名の取得（環境変数MACHINE_NAMEが指定されていない場合はhostnameを使用）
@@ -147,18 +161,40 @@ if [ "$GOVERNOR_SET_SUCCESS" = false ]; then
     echo "[WARN] Install 'cpupower' (linux-tools-common) or run with sudo for better performance."
 fi
 
-# スレッド数の指定（第2引数または最大コア数）
-MAX_THREADS=${2:-$AVAILABLE_CORES}
+# スレッド数の処理
+# - 引数なし（Null）: 1からAVAILABLE_CORESまで全てテスト
+# - 引数あり（N > 0）: Nのみテスト（上限はAVAILABLE_CORES）
+if [[ $# -ge 2 ]]; then
+    # 第2引数が指定されている場合
+    FIXED_THREADS="$2"
 
-# 指定されたスレッド数が利用可能なコア数を超えていないか確認
-if [[ $MAX_THREADS -gt $AVAILABLE_CORES ]]; then
-    echo "[WARN] Requested $MAX_THREADS threads exceeds available $AVAILABLE_CORES cores"
-    echo "[WARN] Limiting to $AVAILABLE_CORES threads"
-    MAX_THREADS=$AVAILABLE_CORES
+    # 数値チェック
+    if ! [[ "$FIXED_THREADS" =~ ^[0-9]+$ ]] || [[ "$FIXED_THREADS" -le 0 ]]; then
+        echo "[ERROR] Thread count must be a positive integer (got: $FIXED_THREADS)"
+        usage
+    fi
+
+    # vCPU数を上限とする
+    if [[ $FIXED_THREADS -gt $AVAILABLE_CORES ]]; then
+        echo "[WARN] Requested $FIXED_THREADS threads exceeds available $AVAILABLE_CORES cores"
+        echo "[WARN] Limiting to $AVAILABLE_CORES threads"
+        FIXED_THREADS=$AVAILABLE_CORES
+    fi
+
+    echo "[INFO] Benchmark: $BENCHMARK_FULL"
+    echo "[INFO] Will test with FIXED thread count: $FIXED_THREADS"
+
+    # For loop compatibility: set range to single value
+    THREAD_START=$FIXED_THREADS
+    THREAD_END=$FIXED_THREADS
+else
+    # 引数なし: 1からAVAILABLE_CORESまで全てテスト
+    echo "[INFO] Benchmark: $BENCHMARK_FULL"
+    echo "[INFO] Will test from 1 to $AVAILABLE_CORES threads"
+
+    THREAD_START=1
+    THREAD_END=$AVAILABLE_CORES
 fi
-
-echo "[INFO] Benchmark: $BENCHMARK_FULL"
-echo "[INFO] Will test from 1 to $MAX_THREADS threads"
 
 # Verify batch mode is configured
 echo ">>> Verifying batch mode configuration..."
@@ -250,8 +286,8 @@ PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" phoronix-test-suite force-install "$BENCHMA
 # 失敗したテストを記録
 failed_tests=()
 
-# テスト実行（1コアから最大スレッド数まで1刻み）
-for threads in $(seq 1 $MAX_THREADS); do
+# テスト実行（THREAD_STARTからTHREAD_ENDまで）
+for threads in $(seq $THREAD_START $THREAD_END); do
     echo ""
     echo ">>> Running with $threads threads"
 
@@ -463,7 +499,7 @@ mkdir -p "$BENCHMARK_RESULTS_DIR"
 # これらのファイルを適切な場所に移動する
 
 echo ">>> Exporting and organizing results..."
-for threads in $(seq 1 $MAX_THREADS); do
+for threads in $(seq $THREAD_START $THREAD_END); do
     RESULT_IDENTIFIER="${BENCHMARK}-${threads}threads"
 
     # PTSが生成するtest-resultsディレクトリから結果を取得
@@ -635,7 +671,11 @@ fi
 echo ""
 echo "=== Benchmark Summary ==="
 echo "Benchmark: $BENCHMARK_FULL"
-echo "Threads tested: 1 to $MAX_THREADS"
+if [[ $THREAD_START -eq $THREAD_END ]]; then
+    echo "Threads tested: $THREAD_START (fixed)"
+else
+    echo "Threads tested: $THREAD_START to $THREAD_END"
+fi
 if [[ ${#failed_tests[@]} -eq 0 ]]; then
     echo "[OK] All tests completed successfully"
 else
