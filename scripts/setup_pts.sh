@@ -90,43 +90,75 @@ install_pts() {
     echo "Downloading PTS ${VERSION}..."
     wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
 
-    # Install dependencies with specific PHP version
+    # Install dependencies with PHP version management
     echo "Installing dependencies..."
 
-    # Ensure PHP 8.1 is used for consistency across Ubuntu 22.04 and 25.10
-    REQUIRED_PHP_VERSION="8.1"
+    # Detect Ubuntu version
+    UBUNTU_VERSION=$(lsb_release -rs 2>/dev/null || echo "unknown")
+    UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || echo "unknown")
     CURRENT_PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "none")
 
+    echo "Ubuntu version: $UBUNTU_VERSION ($UBUNTU_CODENAME)"
     echo "Current PHP version: $CURRENT_PHP_VERSION"
-    echo "Required PHP version: $REQUIRED_PHP_VERSION"
 
-    if [[ "$CURRENT_PHP_VERSION" != "$REQUIRED_PHP_VERSION" ]]; then
-        echo "Installing PHP $REQUIRED_PHP_VERSION for PTS compatibility..."
-
-        # Add ondrej/php repository if needed (for Ubuntu 25.10)
-        if ! dpkg -l | grep -q "php${REQUIRED_PHP_VERSION}-cli"; then
-            echo "Adding PHP repository..."
-            sudo apt-get install -y software-properties-common
-            sudo add-apt-repository -y ppa:ondrej/php
-            sudo apt-get update
+    # Clean up broken ondrej/php PPA if exists (for Ubuntu 25.x)
+    if [[ "$UBUNTU_VERSION" =~ ^25\. ]] || [[ "$UBUNTU_CODENAME" == "questing" ]]; then
+        if [ -f "/etc/apt/sources.list.d/ondrej-ubuntu-php-${UBUNTU_CODENAME}.sources" ]; then
+            echo "Removing unsupported ondrej/php PPA for Ubuntu 25.x..."
+            sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources
+            sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.list
         fi
+    fi
 
-        # Install PHP 8.1 packages
-        sudo apt-get install -y \
-            php${REQUIRED_PHP_VERSION}-cli \
-            php${REQUIRED_PHP_VERSION}-xml \
-            php${REQUIRED_PHP_VERSION}-json \
-            php${REQUIRED_PHP_VERSION}-gd \
-            php${REQUIRED_PHP_VERSION}-curl \
-            unzip
-
-        # Set PHP 8.1 as the default CLI version
-        sudo update-alternatives --set php /usr/bin/php${REQUIRED_PHP_VERSION}
-
-        echo "PHP $REQUIRED_PHP_VERSION installed and set as default"
-    else
-        echo "PHP $REQUIRED_PHP_VERSION is already installed"
+    # Strategy based on Ubuntu version
+    if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
+        # Ubuntu 22.04 LTS: Use default PHP 8.1
+        echo "Ubuntu 22.04 LTS detected: Using default PHP 8.1"
+        sudo apt-get update
         sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+
+    elif [[ "$UBUNTU_VERSION" == "24.04" ]]; then
+        # Ubuntu 24.04 LTS: Use default PHP 8.3
+        echo "Ubuntu 24.04 LTS detected: Using default PHP 8.3"
+        echo "Note: PHP 8.3 will be used with compatibility measures"
+        sudo apt-get update
+        sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+
+    elif [[ "$UBUNTU_VERSION" =~ ^25\. ]] || [[ "$UBUNTU_CODENAME" == "questing" ]]; then
+        # Ubuntu 25.x: Use system default PHP (8.4) - ondrej PPA doesn't support non-LTS yet
+        echo "Ubuntu 25.x detected: Using system default PHP 8.4"
+        echo "Note: PHP 8.4 will be used with compatibility measures (ondrej/php PPA not available for non-LTS)"
+        sudo apt-get update
+        sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+
+    else
+        # Other Ubuntu versions: Try to install PHP 8.1 from ondrej PPA
+        echo "Ubuntu $UBUNTU_VERSION detected: Attempting to install PHP 8.1 from ondrej/php PPA"
+        REQUIRED_PHP_VERSION="8.1"
+
+        if ! dpkg -l | grep -q "php${REQUIRED_PHP_VERSION}-cli"; then
+            echo "Adding ondrej/php repository..."
+            sudo apt-get install -y software-properties-common
+            if sudo add-apt-repository -y ppa:ondrej/php; then
+                sudo apt-get update
+                # Install PHP 8.1 packages
+                sudo apt-get install -y \
+                    php${REQUIRED_PHP_VERSION}-cli \
+                    php${REQUIRED_PHP_VERSION}-xml \
+                    php${REQUIRED_PHP_VERSION}-json \
+                    php${REQUIRED_PHP_VERSION}-gd \
+                    php${REQUIRED_PHP_VERSION}-curl \
+                    unzip
+                # Set PHP 8.1 as default
+                sudo update-alternatives --set php /usr/bin/php${REQUIRED_PHP_VERSION}
+                echo "PHP $REQUIRED_PHP_VERSION installed and set as default"
+            else
+                echo "[WARN] Failed to add ondrej/php PPA, using system default PHP"
+                sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+            fi
+        else
+            sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+        fi
     fi
 
     # Extract and install
