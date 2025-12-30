@@ -4,11 +4,11 @@
     "ssh_user": "ubuntu",
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
-    "setup_command1": "sudo apt-get update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
-    "setup_command2": "cd ~/cloud_onehour/scripts && ./setup_gcc14.sh && ./build_zlib.sh && ./build_openssh.sh",
-    "setup_command3": "cd ~/cloud_onehour/scripts && ./setup_pts.sh && sudo apt-get -y install linux-tools-common linux-tools-$(uname -r)",
-    "benchmark_command1": "mkdir -p ~/cloud_onehour/reports && cd ~/cloud_onehour && nohup sysbench cpu --cpu-max-prime=20000 --threads={vcpus} run > ~/cloud_onehour/reports/sysbench_cpu.log 2>&1 &",
-    "benchmark_command2": "",
+    "setup_command1": "sudo apt-get -y update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
+    "setup_command2": "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
+    "setup_command3": "",
+    "benchmark_command1": "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh coremark-1.0.1 ",
+    "benchmark_command2": "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh openssl-3.6.0 ",
     "cloud_reports_dir": "~/cloud_onehour/reports",
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
@@ -32,7 +32,7 @@
     ]
   },
   "gcp": {
-    "enable": true,
+    "enable": false,
     "project_id": "AUTO_DETECT",
     "zone": "asia-northeast1-a",
     "instances": [
