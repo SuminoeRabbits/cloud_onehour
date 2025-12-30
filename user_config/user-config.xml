@@ -19,7 +19,8 @@
       </ResultsViewer>
     </General>
     <Modules>
-      <AutoLoadModules>toggle_screensaver</AutoLoadModules>
+      <AutoLoadModules></AutoLoadModules>
+      <LoadModules></LoadModules>
     </Modules>
     <Installation>
       <RemoveDownloadFiles>FALSE</RemoveDownloadFiles>
