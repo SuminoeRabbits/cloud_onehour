@@ -37,6 +37,8 @@ if [ -f "${INSTALL_PREFIX}/include/zlib.h" ]; then
     INSTALLED_VERSION=$(grep '#define ZLIB_VERSION' "${INSTALL_PREFIX}/include/zlib.h" 2>/dev/null | awk '{print $3}' | tr -d '"')
     if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
         echo "=== zlib ${VERSION} is already installed ==="
+        echo "Ensuring ldconfig cache is up to date..."
+        sudo ldconfig
         echo "Skipping installation. To reinstall, remove ${LIBDIR}/libz.so first."
         exit 0
     else

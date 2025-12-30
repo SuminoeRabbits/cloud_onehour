@@ -9,7 +9,7 @@ INSTALL_PREFIX="/usr/local"
 echo "Building OpenSSL ${VERSION} with current CFLAGS: ${CFLAGS:-none}"
 
 # Check zlib dependency
-if ! ldconfig -p | grep -q libz.so; then
+if ! ldconfig -p | grep -qE 'libz\.so\.1[[:space:]]'; then
     echo "Error: zlib not found. Please run build_zlib.sh first."
     echo "OpenSSL requires zlib for compression support."
     exit 1
@@ -20,6 +20,8 @@ if [ -x "${INSTALL_PREFIX}/bin/openssl" ]; then
     INSTALLED_VERSION=$("${INSTALL_PREFIX}/bin/openssl" version 2>/dev/null | awk '{print $2}' | cut -d'-' -f1)
     if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
         echo "=== OpenSSL ${VERSION} is already installed ==="
+        echo "Ensuring ldconfig cache is up to date..."
+        sudo ldconfig
         echo "Skipping installation. To reinstall, remove ${INSTALL_PREFIX}/bin/openssl first."
         exit 0
     else
