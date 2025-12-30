@@ -22,14 +22,74 @@ cd cloud_onehour/scripts
 
 **Note**: You will be asked for your sudo password once during setup. After that, sudo commands will run without password prompts.
 
+### Test options configuration (required)
+
+All benchmarks MUST have test-specific XML configuration files in `user_config/test-options/`. These files contain test-specific PTS settings that override the base configuration in `user_config/user-config.xml`.
+
+**Configuration Architecture:**
+- `user_config/user-config.xml` - Base PTS configuration (common settings for all tests)
+- `user_config/test-options/pts_<benchmark-name>.config` - Test-specific overrides (XML format)
+
+**How it works:**
+1. The benchmark script loads `user_config/user-config.xml` as the base configuration
+2. Test-specific settings from `user_config/test-options/pts_<benchmark-name>.config` are merged into the base config
+3. The merged configuration is written to `~/.phoronix-test-suite/user-config.xml`
+4. PTS uses the merged configuration for the test run
+
+**XML Config File Format:**
+
+Config file: `user_config/test-options/pts_coremark-1.0.1.config`
+```xml
+<?xml version="1.0"?>
+<PhoronixTestSuite>
+  <Options>
+    <TestResultValidation>
+      <DynamicRunCount>FALSE</DynamicRunCount>
+      <LimitDynamicToTestLength>20</LimitDynamicToTestLength>
+    </TestResultValidation>
+  </Options>
+  <TestOptions>
+    <Test>
+      <Identifier>pts/coremark-1.0.1</Identifier>
+      <Option>1</Option>
+    </Test>
+  </TestOptions>
+</PhoronixTestSuite>
+```
+
+Config file: `user_config/test-options/pts_openssl-3.6.0.config`
+```xml
+<?xml version="1.0"?>
+<PhoronixTestSuite>
+  <Options>
+    <TestResultValidation>
+      <DynamicRunCount>FALSE</DynamicRunCount>
+      <LimitDynamicToTestLength>20</LimitDynamicToTestLength>
+    </TestResultValidation>
+  </Options>
+  <TestOptions>
+    <Test>
+      <Identifier>pts/openssl-3.6.0</Identifier>
+      <Option>3</Option>
+    </Test>
+  </TestOptions>
+</PhoronixTestSuite>
+```
+
+**Key Elements:**
+- `<Options>` - Overrides base PTS settings (e.g., DynamicRunCount, LimitDynamicToTestLength)
+- `<TestOptions><Test><Option>` - Specifies which test option to select (e.g., "1", "3")
+
+**Note**: All tests in `test_suite.json` already have pre-configured XML files. Modify these to customize test behavior per benchmark. The script is completely generic - all test-specific settings are in the XML config files.
+
 ## Run benchmark
 
 ### Simple run
 
 ```bash
 # Compiler environment is automatically loaded by run_pts_benchmark.sh
-./scripts/run_pts_benchmark.sh coremark-1.0.1
-./scripts/run_pts_benchmark.sh openssl-3.0.1
+./scripts/run_pts_benchmark.sh coremark-1.0.1 2>&1 | tee -a stdout.log
+./scripts/run_pts_benchmark.sh openssl-3.0.1 2>&1 | tee -a stdout.log
 ```
 
 ### Total run
@@ -113,11 +173,18 @@ gcloud config list
 ```
 ### clean up
 
-```
+```bash
+# インスタンス一覧を表示
 gcloud compute instances list
 gcloud compute instances list --format="table(name,zone,status,externalIp)"
-# 全てのインスタンスを強制的に削除する（確認ダイアログなし）
-gcloud compute instances delete $(gcloud compute instances list --format="value(name)") --quiet
+
+# 全てのインスタンスを強制的に削除する（全ゾーン対応、確認ダイアログなし）
+gcloud compute instances list --format="value(name,zone)" | while read name zone; do
+  [ -n "$name" ] && gcloud compute instances delete "$name" --zone="$zone" --quiet
+done
+
+# または1行で（xargs使用）
+gcloud compute instances list --format="value(name,zone)" | awk '{if($1!="") print $1, "--zone=" $2}' | xargs -r gcloud compute instances delete --quiet
 ```
 
 

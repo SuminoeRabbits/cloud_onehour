@@ -248,9 +248,45 @@ failed_tests=()
 # テスト実行（1コアから最大スレッド数まで1刻み）
 for threads in $(seq 1 $MAX_THREADS); do
     echo ""
-    echo ">>> Running with $threads threads (CPU cores 0-$(($threads-1)))"
+    echo ">>> Running with $threads threads"
+
     # CPUアフィニティで物理的に制限
-    cpu_list="0-$(($threads-1))"
+    # x86ハイパーバイザー環境では偶数IDが物理コア、奇数IDが論理コア（HT）となることが多い
+    # 線形に性能向上させるため、nproc/2までは偶数IDを優先し、その後奇数IDを追加
+    # 例: threads=1 -> 0
+    #     threads=2 -> 0,2
+    #     threads=3 -> 0,2,4
+    #     threads=4 -> 0,2,4,1  (nproc/2を超えたら奇数IDを追加開始)
+    #     threads=5 -> 0,2,4,1,3
+    cpu_list=""
+    nproc_total=$(nproc)
+    half_cores=$((nproc_total / 2))
+
+    if [ $threads -le $half_cores ]; then
+        # 物理コアのみ使用（偶数ID）: 0,2,4,...
+        for ((i=0; i<threads; i++)); do
+            if [ $i -gt 0 ]; then
+                cpu_list="${cpu_list},"
+            fi
+            cpu_list="${cpu_list}$((i * 2))"
+        done
+    else
+        # 物理コア全て + 論理コア（奇数ID）
+        # まず偶数IDを全て追加
+        for ((i=0; i<half_cores; i++)); do
+            if [ $i -gt 0 ]; then
+                cpu_list="${cpu_list},"
+            fi
+            cpu_list="${cpu_list}$((i * 2))"
+        done
+        # 次に奇数IDを必要数追加
+        logical_cores=$((threads - half_cores))
+        for ((i=0; i<logical_cores; i++)); do
+            cpu_list="${cpu_list},$((i * 2 + 1))"
+        done
+    fi
+
+    echo ">>> CPU affinity: $cpu_list"
     # 環境変数を先に設定してtasksetを実行
     # SKIP_ALL_TEST_OPTION_CHECKS=1 を追加してバッチモードチェックをスキップ
     # TEST_RESULTS_NAME等で結果の保存先を指定
@@ -327,18 +363,25 @@ PYTHON_EOF
     echo "[INFO] Test option: $TEST_OPTION"
 
     # Pre-configure test options to avoid interactive prompts
-    # Use BENCHMARK_CONFIG_NAME (pts_coremark-1.0.1) instead of BENCHMARK_FULL (pts/coremark-1.0.1)
+    # Strategy: Instead of using test-options file, feed responses directly via FIFO
+    # This handles both single and multiple selection tests reliably
     TEST_OPTION_DIR=~/.phoronix-test-suite/test-options
     mkdir -p "$TEST_OPTION_DIR"
-    echo "$TEST_OPTION" > "$TEST_OPTION_DIR/${BENCHMARK_CONFIG_NAME}.config"
+
+    # Remove any existing test-options file to prevent conflicts
+    rm -f "$TEST_OPTION_DIR/${BENCHMARK_CONFIG_NAME}.config"
+
     echo "[INFO] Using test option '$TEST_OPTION' for $BENCHMARK_FULL"
 
-    # Create a named pipe for unlimited input to handle any unexpected remaining prompts
+    # Create a named pipe for providing responses
     input_fifo=$(mktemp -u)
     mkfifo "$input_fifo"
 
-    # Feed empty responses to handle any unexpected prompts beyond the configured options
-    yes "" > "$input_fifo" &
+    # Feed test option followed by empty lines to handle prompts
+    # First line: test option (e.g., "3")
+    # Second line: empty (confirms selection for multiple-choice tests)
+    # Remaining lines: empty (handles any additional prompts)
+    (echo "$TEST_OPTION"; yes "") > "$input_fifo" &
     yes_pid=$!
 
     # Run benchmark with clean output
