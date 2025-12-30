@@ -67,9 +67,11 @@ cd "zlib-${VERSION}" || {
 
 # Build
 NCPUS=$(nproc 2>/dev/null || echo 1)
+echo "Building with ${NCPUS} parallel jobs..."
 make -j"${NCPUS}"
 
 # Test
+echo "Running tests..."
 make test
 
 # Install

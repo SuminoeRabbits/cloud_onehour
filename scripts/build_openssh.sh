@@ -69,6 +69,7 @@ export LDFLAGS="-Wl,-rpath,${LIBDIR}"
 
 # Build
 NCPUS=$(nproc 2>/dev/null || echo 1)
+echo "Building with ${NCPUS} parallel jobs..."
 make -j"${NCPUS}"
 
 # Skip tests (optional - QUIC tests may fail in some environments)

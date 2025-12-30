@@ -90,6 +90,7 @@ if [[ -z "$current_gcc_version" ]] || [[ "$current_gcc_version" -lt 14 ]] 2>/dev
         # Build (this takes 1-2 hours)
         echo "Building GCC-14 (this will take 1-2 hours)..."
         NCPUS=$(nproc 2>/dev/null || echo 1)
+        echo "Building with ${NCPUS} parallel jobs..."
         make -j"${NCPUS}"
         
         # Install
