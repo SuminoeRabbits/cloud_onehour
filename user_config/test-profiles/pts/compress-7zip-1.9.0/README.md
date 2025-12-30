@@ -11,11 +11,12 @@ This custom test profile overrides the default PTS compress-7zip-1.9.0 test prof
 ### Change 1: Fix GCC 14 compilation error
 
 ```diff
-- make -j $NUM_CPU_CORES -f makefile.gcc
-+ CFLAGS="$CFLAGS -Wno-error=dangling-pointer" CXXFLAGS="$CXXFLAGS -Wno-error=dangling-pointer" make -j $NUM_CPU_CORES -f makefile.gcc
++ # Patch makefile to remove -Werror
++ sed -i 's/-Werror/-Wno-error=dangling-pointer/g' ../../7zip_gcc.mak
+  make -j $NUM_CPU_CORES -f makefile.gcc
 ```
 
-**Reason:** 7-Zip 22.00 has compilation errors with GCC 14 due to stricter dangling pointer checks in `LzmaEnc.c`. Adding `-Wno-error=dangling-pointer` downgrades this error to a warning.
+**Reason:** 7-Zip 22.00 has compilation errors with GCC 14 due to stricter dangling pointer checks in `LzmaEnc.c`. The makefile hardcodes `-Werror` which turns all warnings into errors. We patch the makefile to replace `-Werror` with `-Wno-error=dangling-pointer`, allowing the build to succeed.
 
 ### Change 2: Add `-mmt=$NUM_CPU_CORES` to benchmark command
 
