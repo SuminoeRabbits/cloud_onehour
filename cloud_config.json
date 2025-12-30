@@ -4,18 +4,18 @@
     "ssh_user": "ubuntu",
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
-    "setup_command1": "sudo apt-get -y update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
-    "setup_command2": "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
-    "setup_command3": "",
-    "benchmark_command1": "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh coremark-1.0.1 ",
-    "benchmark_command2": "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh openssl-3.6.0 ",
+    "commands": [
+      "sudo apt-get -y update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
+      "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
+      "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh coremark-1.0.1",
+      "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh openssl-3.6.0"
+    ],
     "cloud_reports_dir": "~/cloud_onehour/reports",
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "setup_command_timeout": 10800,
+    "command_timeout": 10800,
     "ssh_strict_host_key_checking": false,
-    "benchmark_wait_time": 300,
     "debug_stdout": true
   },
   "aws": {
