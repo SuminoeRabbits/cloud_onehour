@@ -216,6 +216,11 @@ else
     fi
 fi
 
+# Disable perf_tips module to prevent interactive prompts during SSH execution
+echo ">>> Disabling perf_tips module to ensure non-interactive execution..."
+phoronix-test-suite unload-module perf_tips >/dev/null 2>&1 || true
+echo "[OK] perf_tips module disabled"
+
 # テストを強制的に再ビルド（現在の環境変数とコンパイラ設定を使用）
 echo ">>> Forcing rebuild with current compiler settings..."
 echo "[INFO] Using compiler: ${CC:-gcc} with CFLAGS: ${CFLAGS:-default}"
