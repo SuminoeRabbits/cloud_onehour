@@ -161,11 +161,15 @@ if [ "$GOVERNOR_SET_SUCCESS" = false ]; then
     echo "[WARN] Install 'cpupower' (linux-tools-common) or run with sudo for better performance."
 fi
 
-# スレッド数の処理
-# - 引数なし（Null）: 1からAVAILABLE_CORESまで全てテスト
-# - 引数あり（N > 0）: Nのみテスト（上限はAVAILABLE_CORES）
+# Determine execution mode based on thread argument value ONLY (no test name hardcoding)
+# Mode 1: Null argument -> Runtime thread control, test from 1 to vCPU
+# Mode 2: threads >= vCPU -> Compile-time mode, run once with all vCPUs
+# Mode 3: 1 <= threads < vCPU -> Runtime thread control, run with N threads on N CPUs
+echo ">>> Determining execution mode based on thread argument..."
+echo "[INFO] Benchmark: $BENCHMARK_FULL"
+
 if [[ $# -ge 2 ]]; then
-    # 第2引数が指定されている場合
+    # Thread argument provided
     FIXED_THREADS="$2"
 
     # 数値チェック
@@ -174,24 +178,23 @@ if [[ $# -ge 2 ]]; then
         usage
     fi
 
-    # vCPU数を上限とする
-    if [[ $FIXED_THREADS -gt $AVAILABLE_CORES ]]; then
-        echo "[WARN] Requested $FIXED_THREADS threads exceeds available $AVAILABLE_CORES cores"
-        echo "[WARN] Limiting to $AVAILABLE_CORES threads"
-        FIXED_THREADS=$AVAILABLE_CORES
+    if [[ $FIXED_THREADS -ge $AVAILABLE_CORES ]]; then
+        # Mode 2: Compile-time mode (threads >= vCPU)
+        echo "[INFO] Mode: COMPILE-TIME (threads=$FIXED_THREADS >= vCPU=$AVAILABLE_CORES)"
+        echo "[INFO] Will run once with all $AVAILABLE_CORES CPUs"
+        THREAD_START=$AVAILABLE_CORES
+        THREAD_END=$AVAILABLE_CORES
+    else
+        # Mode 3: Runtime mode with fixed thread count (1 <= threads < vCPU)
+        echo "[INFO] Mode: RUNTIME FIXED (threads=$FIXED_THREADS < vCPU=$AVAILABLE_CORES)"
+        echo "[INFO] Will test with $FIXED_THREADS thread(s) on $FIXED_THREADS CPU(s)"
+        THREAD_START=$FIXED_THREADS
+        THREAD_END=$FIXED_THREADS
     fi
-
-    echo "[INFO] Benchmark: $BENCHMARK_FULL"
-    echo "[INFO] Will test with FIXED thread count: $FIXED_THREADS"
-
-    # For loop compatibility: set range to single value
-    THREAD_START=$FIXED_THREADS
-    THREAD_END=$FIXED_THREADS
 else
-    # 引数なし: 1からAVAILABLE_CORESまで全てテスト
-    echo "[INFO] Benchmark: $BENCHMARK_FULL"
+    # Mode 1: No argument -> Runtime mode, test all thread counts
+    echo "[INFO] Mode: RUNTIME SCALING (no thread argument)"
     echo "[INFO] Will test from 1 to $AVAILABLE_CORES threads"
-
     THREAD_START=1
     THREAD_END=$AVAILABLE_CORES
 fi
@@ -438,10 +441,12 @@ PYTHON_EOF
     # - DISPLAY_COMPACT_RESULTS=1 prevents "Do you want to view results" prompt
     # - SKIP_TEST_RESULT_PARSE=1 prevents result parsing prompts
     # - PHP_ERROR_REPORTING forces PHP to ignore deprecation warnings (critical for Ubuntu 25/PHP 8.3+)
+    # - NUM_CPU_CORES: Override for runtime thread control (ignored by compile-time tests)
     if TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
        PTS_USER_PATH_OVERRIDE="$CONFIG_DIR" \
+       NUM_CPU_CORES="$threads" \
        SKIP_ALL_TEST_OPTION_CHECKS=1 \
        SKIP_TEST_OPTION_HANDLING=1 \
        AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE \

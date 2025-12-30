@@ -337,115 +337,83 @@ def launch_oci_instance(inst, config, compartment_id, region):
     return None, None
 
 
-def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
-    """Execute setup commands via SSH with output displayed."""
+def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
+    """Execute all commands via SSH sequentially with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
     ssh_user = config['common']['ssh_user']
-    setup_timeout = config['common'].get('setup_command_timeout', 7200)
+    command_timeout = config['common'].get('command_timeout', 10800)
 
-    progress(instance_name, "Setup phase started")
+    # Support both old format (setup_command1, etc.) and new format (commands array)
+    commands = []
+    if 'commands' in config['common']:
+        # New format: array of commands
+        commands = config['common']['commands']
+    else:
+        # Old format: fallback for backward compatibility
+        for i in range(1, 10):  # Support up to 9 setup commands
+            cmd_key = f"setup_command{i}"
+            if cmd_key in config['common']:
+                cmd = config['common'][cmd_key]
+                if cmd and cmd.strip():
+                    commands.append(cmd)
+        for i in range(1, 10):  # Support up to 9 benchmark commands
+            cmd_key = f"benchmark_command{i}"
+            if cmd_key in config['common']:
+                cmd = config['common'][cmd_key]
+                if cmd and cmd.strip():
+                    commands.append(cmd)
+
+    if not commands:
+        if DEBUG_MODE == True:
+            log("No commands to execute", "WARNING")
+        return False
+
+    total_commands = len(commands)
+    progress(instance_name, f"Command execution started ({total_commands} commands)")
 
     if DEBUG_MODE == True:
-        log(f"Starting setup phase for {ip}")
+        log(f"Starting command execution for {ip} ({total_commands} commands)")
     elif DEBUG_MODE == False:
-        print("  [Setup Phase] Starting...")
+        print(f"  [Commands] Starting execution of {total_commands} commands...")
 
-    for i in range(1, 4):
-        cmd_key = f"setup_command{i}"
-        if cmd_key not in config['common']:
-            continue
-        cmd = config['common'][cmd_key].format(vcpus=inst['vcpus'])
+    for i, cmd in enumerate(commands, start=1):
+        # Format command with vcpu substitution
+        cmd = cmd.format(vcpus=inst['vcpus'])
+
         if not cmd or cmd.strip() == "":
             continue
 
-        progress(instance_name, f"Setup command {i}/{3}")
+        progress(instance_name, f"Command {i}/{total_commands}")
 
         if DEBUG_MODE == True:
-            log(f"Setup command {i}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-            log(f"Timeout: {setup_timeout}s ({setup_timeout//60} minutes)")
+            log(f"Command {i}/{total_commands}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            log(f"Timeout: {command_timeout}s ({command_timeout//60} minutes)")
         elif DEBUG_MODE == False:
-            print(f"  [Setup {i}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-            print(f"  [Setup {i}] Timeout: {setup_timeout}s ({setup_timeout//60} minutes)")
+            print(f"  [Command {i}/{total_commands}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            print(f"  [Command {i}/{total_commands}] Timeout: {command_timeout}s ({command_timeout//60} minutes)")
 
-        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=setup_timeout)
+        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=command_timeout)
 
         if result is None:
             if DEBUG_MODE == True:
-                log(f"Setup command {i} failed or timed out", "ERROR")
+                log(f"Command {i}/{total_commands} failed or timed out", "ERROR")
             elif DEBUG_MODE == False:
-                print(f"  [Warning] Setup {i} failed or timed out")
+                print(f"  [Warning] Command {i}/{total_commands} failed or timed out")
             return False
 
         if DEBUG_MODE == True:
-            log(f"Setup command {i} completed")
+            log(f"Command {i}/{total_commands} completed")
         elif DEBUG_MODE == False:
-            print(f"  [Setup {i}] Completed")
+            print(f"  [Command {i}/{total_commands}] Completed")
 
-    progress(instance_name, "Setup phase completed")
+    progress(instance_name, "All commands completed")
 
     if DEBUG_MODE == True:
-        log("Setup phase completed successfully")
+        log("All commands completed successfully")
 
     return True
-
-
-def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
-    """Execute benchmark commands via SSH in background."""
-    strict_hk = "yes" if ssh_strict_host_key_checking else "no"
-    ssh_timeout = config['common'].get('ssh_timeout', 20)
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_timeout} -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
-    ssh_user = config['common']['ssh_user']
-
-    progress(instance_name, "Benchmark phase started")
-
-    if DEBUG_MODE == True:
-        log(f"Starting benchmark phase for {ip}")
-    elif DEBUG_MODE == False:
-        print("  [Benchmark Phase] Starting background jobs...")
-
-    for i in range(1, 3):
-        cmd_key = f"benchmark_command{i}"
-        if cmd_key not in config['common']:
-            continue
-        cmd = config['common'][cmd_key].format(vcpus=inst['vcpus'])
-        if not cmd or cmd.strip() == "":
-            continue
-
-        if DEBUG_MODE == True:
-            log(f"Benchmark command {i}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-        elif DEBUG_MODE == False:
-            print(f"  [Benchmark {i}] Launching: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-
-        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=True)
-
-        if result is None:
-            if DEBUG_MODE == True:
-                log(f"Benchmark command {i} failed to launch", "WARN")
-            elif DEBUG_MODE == False:
-                print(f"  [Warning] Benchmark {i} failed to launch")
-        else:
-            if DEBUG_MODE == True:
-                log(f"Benchmark command {i} launched in background")
-            elif DEBUG_MODE == False:
-                print(f"  [Benchmark {i}] Launched in background")
-
-    wait_time = config['common'].get('benchmark_wait_time', 300)
-
-    progress(instance_name, f"Waiting {wait_time}s for benchmarks")
-
-    if DEBUG_MODE == True:
-        log(f"Waiting {wait_time}s for benchmarks to complete...")
-    elif DEBUG_MODE == False:
-        print(f"  [Benchmark Phase] Waiting {wait_time}s for completion...")
-
-    time.sleep(wait_time)
-
-    progress(instance_name, "Benchmark phase completed")
-
-    if DEBUG_MODE == True:
-        log("Benchmark wait completed")
 
 
 def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_checking, instance_name):
@@ -567,18 +535,15 @@ def process_instance(cloud, inst, config, key_path):
 
         ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
 
-        # Run setup commands with output
-        setup_success = run_ssh_setup(ip, config, inst, key_path, ssh_strict, instance_name)
-        if not setup_success:
-            msg = f"Setup failed for {name}"
+        # Run all commands sequentially
+        commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name)
+        if not commands_success:
+            msg = f"Command execution failed for {name}"
             if DEBUG_MODE == True:
                 log(msg, "ERROR")
             else:
-                print(f"[Error] {msg}. Skipping benchmarks.")
+                print(f"[Error] {msg}. Skipping result collection.")
             return
-
-        # Run benchmark commands in background
-        run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict, instance_name)
 
         # Collect results
         collect_results(ip, config, cloud, name, key_path, ssh_strict, instance_name)

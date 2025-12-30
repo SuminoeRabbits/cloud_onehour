@@ -2,28 +2,22 @@
     "_comment": "PTS benchmark test suite definitions",
     "test_category": {
         "CPU Int/FP": {
-            "enabled": false,
+            "enabled": true,
             "items": {
-                "pts/coremark-pro-1.2.0": {
-                    "enabled": false,
-                    "vcpu_scaling": "unknown",
-                    "sve2_support": "unknown",
-                    "notes": ""
-                },
-                "pts/speccpu2017": {
-                    "enabled": false,
-                    "vcpu_scaling": "unknown",
-                    "sve2_support": "unknown",
+                "pts/sysbench-1.1.0": {
+                    "enabled": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
                     "notes": ""
                 }
             }
         },
         "Pipeline Efficiency": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/coremark-1.0.1": {
                     "enabled": true,
-                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "vcpu_scaling": "fixed:vCPUs",
                     "sve2_support": "unknown",
                     "notes": ""
                 }
@@ -76,7 +70,7 @@
             }
         },
         "Cryptography and TLS": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/openssl-3.0.1" :{
                     "enabled": true,
