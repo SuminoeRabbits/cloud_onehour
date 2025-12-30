@@ -102,13 +102,69 @@ aws configure list
 ```
 
 ### Total run
-Use and test_suite.json to run multiple tests at once in batch mode.
 
-```
+Automatically launch cloud instances, run benchmarks, collect results, and terminate instances.
+
+**Usage**:
+```bash
 python3.10 cloud_exec.py 2>&1 | tee -a stdout.log
 ```
 
-### Tune your test_suite.json
+**Output Control** - Set `debug_stdout` in `cloud_config.json`:
+
+```json
+{
+  "common": {
+    "debug_stdout": false    // or true, or "progress"
+  }
+}
+```
+
+**Output modes**:
+- `false` (default): Minimal output
+- `true`: Full debug logs with timestamps
+- `"progress"` or any other string: Progress-only (shows step for each instance)
+
+**Examples**:
+
+*Mode: `false` (minimal)*
+```
+>>> Starting AWS: aws-benchmark-instance (t3.medium)
+  [Setup 1] Executing: sudo apt-get update...
+  [Setup 1] Completed
+```
+
+*Mode: `true` (full debug)*
+```
+[18:15:32] [INFO] Starting AWS instance: aws-benchmark-instance
+[18:15:33] [CMD] Executing: aws ec2 describe-key-pairs...
+[18:15:34] [INFO] Key pair: cloud_onehour_project
+```
+
+*Mode: `"progress"` (progress-only)*
+```
+[18:15:32] [AWS:aws-benchmark-instance] Starting
+[18:15:45] [AWS:aws-benchmark-instance] Instance launched (IP: 54.123.45.67)
+[18:16:45] [AWS:aws-benchmark-instance] Setup phase started
+[18:17:00] [AWS:aws-benchmark-instance] Setup command 1/3
+[19:50:00] [AWS:aws-benchmark-instance] Setup phase completed
+[19:50:05] [AWS:aws-benchmark-instance] Benchmark phase started
+[19:55:10] [AWS:aws-benchmark-instance] Results collected
+[19:55:15] [AWS:aws-benchmark-instance] Completed successfully
+```
+
+**What happens during execution**:
+1. Launch cloud instance(s) (AWS/GCP based on cloud_config.json)
+2. Wait 60s for SSH to become available
+3. Run setup commands (git clone, build GCC/zlib/OpenSSL, setup PTS) - ~1-2 hours
+4. Run benchmark commands in background
+5. Wait for completion (default: 5 minutes)
+6. Collect results to `bench_results/<cloud>_<instance-name>.tar.gz`
+7. Terminate instance(s)
+
+**Expected runtime**: 1.5-2.5 hours per instance (mostly compilation time)
+
+### Configure cloud_config.json
 
 ## Analyze results
 

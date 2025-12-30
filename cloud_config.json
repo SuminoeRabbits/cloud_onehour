@@ -1,6 +1,6 @@
 {
   "common": {
-    "os_version": "24.04",
+    "os_version": "25.04",
     "ssh_user": "ubuntu",
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
@@ -15,7 +15,8 @@
     "ssh_timeout": 20,
     "setup_command_timeout": 10800,
     "ssh_strict_host_key_checking": false,
-    "benchmark_wait_time": 300
+    "benchmark_wait_time": 300,
+    "debug_stdout": true
   },
   "aws": {
     "enable": true,
@@ -41,6 +42,20 @@
         "arch": "amd64",
         "vcpus": 2,
         "enable": true
+      }
+    ]
+  },
+  "oci": {
+    "enable": false,
+    "compartment_id": "ocid1.compartment.oc1...",
+    "region": "ap-tokyo-1",
+    "instances": [
+      {
+        "name": "oci-benchmark-instance",
+        "type": "VM.Standard.E4.Flex",
+        "arch": "amd64",
+        "vcpus": 2,
+        "enable": false
       }
     ]
   }

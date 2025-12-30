@@ -3,67 +3,210 @@ import subprocess
 import os
 import time
 import sys
+import signal
+import threading
 from pathlib import Path
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def run_cmd(cmd, capture=True, ignore=False, verbose=False, timeout=None):
-    """Execute shell command and return output or status.
+# Global debug mode - set by load_config
+DEBUG_MODE = False  # false, true, or other (progress-only)
 
-    Args:
-        cmd: Command to execute
-        capture: Whether to capture output
-        ignore: Whether to ignore errors
-        verbose: Whether to print command before execution
-        timeout: Timeout in seconds (None = no timeout)
-    """
+# Global tracking of active instances for cleanup on signal
+active_instances_lock = threading.Lock()
+active_instances = []  # List of dicts: {'cloud': 'aws'/'gcp', 'instance_id': str, 'name': str, 'region': str, 'project': str, 'zone': str}
+
+def cleanup_active_instances(signum=None, frame=None):
+    """Terminate all active instances on signal or exception."""
+    with active_instances_lock:
+        if not active_instances:
+            return
+
+        if signum:
+            signal_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+            print(f"\n[Signal] Received {signal_name}. Cleaning up active instances...", flush=True)
+        else:
+            print(f"\n[Cleanup] Terminating active instances...", flush=True)
+
+        for inst_info in active_instances:
+            try:
+                cloud = inst_info['cloud']
+                instance_id = inst_info['instance_id']
+                name = inst_info['name']
+
+                print(f"[Cleanup] Terminating {cloud}:{name} ({instance_id})...", flush=True)
+
+                if cloud == 'aws':
+                    region = inst_info.get('region')
+                    subprocess.run(
+                        f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}",
+                        shell=True, capture_output=True, timeout=30
+                    )
+                elif cloud == 'gcp':
+                    project = inst_info.get('project')
+                    zone = inst_info.get('zone')
+                    subprocess.run(
+                        f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet",
+                        shell=True, capture_output=True, timeout=30
+                    )
+                elif cloud == 'oci':
+                    # TODO: Implement OCI instance termination
+                    # subprocess.run(
+                    #     f"oci compute instance terminate --instance-id {instance_id} --force",
+                    #     shell=True, capture_output=True, timeout=30
+                    # )
+                    print(f"[Cleanup] OCI termination not yet implemented for {name}", flush=True)
+
+                print(f"[Cleanup] {cloud}:{name} terminated", flush=True)
+            except Exception as e:
+                print(f"[Cleanup] Failed to terminate {inst_info.get('name', 'unknown')}: {e}", flush=True)
+
+        active_instances.clear()
+
+    if signum:
+        print(f"[Signal] Cleanup complete. Exiting.", flush=True)
+        sys.exit(1)
+
+def register_instance(cloud, instance_id, name, region=None, project=None, zone=None, compartment_id=None):
+    """Register an instance as active for cleanup tracking."""
+    with active_instances_lock:
+        active_instances.append({
+            'cloud': cloud,
+            'instance_id': instance_id,
+            'name': name,
+            'region': region,
+            'project': project,
+            'zone': zone,
+            'compartment_id': compartment_id
+        })
+        if DEBUG_MODE == True:
+            log(f"Registered instance for cleanup: {cloud}:{name} ({instance_id})")
+
+def unregister_instance(instance_id):
+    """Remove an instance from active tracking."""
+    with active_instances_lock:
+        active_instances[:] = [inst for inst in active_instances if inst['instance_id'] != instance_id]
+        if DEBUG_MODE == True:
+            log(f"Unregistered instance: {instance_id}")
+
+def log(msg, level="INFO"):
+    """Print timestamped log message if debug mode is enabled."""
+    if DEBUG_MODE == True:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [{level}] {msg}", flush=True)
+    elif DEBUG_MODE not in [False, True]:
+        # Progress-only mode - don't print this, handle separately
+        pass
+
+def progress(instance_name, step):
+    """Print progress indicator for progress-only mode."""
+    if DEBUG_MODE not in [False, True]:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [{instance_name}] {step}", flush=True)
+    elif DEBUG_MODE == True:
+        log(f"{instance_name}: {step}", "PROGRESS")
+
+def run_cmd(cmd, capture=True, ignore=False, timeout=None):
+    """Execute shell command and return output or status."""
     try:
-        if verbose:
-            print(f"[CMD] {cmd}")
+        if DEBUG_MODE == True:
+            log(f"Executing: {cmd[:100]}{'...' if len(cmd) > 100 else ''}", "CMD")
+
+        start_time = time.time()
         res = subprocess.run(
             cmd, shell=True, capture_output=capture, text=True, check=not ignore, timeout=timeout
         )
+        elapsed = time.time() - start_time
+
+        if DEBUG_MODE == True:
+            log(f"Command completed in {elapsed:.2f}s", "CMD")
+
         return res.stdout.strip() if capture else True
     except subprocess.TimeoutExpired:
-        if not ignore:
+        if DEBUG_MODE == True:
+            log(f"Command timed out after {timeout} seconds", "ERROR")
+        elif DEBUG_MODE == False:
             print(f"[Error] Command timed out after {timeout} seconds")
+        if not ignore:
+            raise
         return None
     except subprocess.CalledProcessError as e:
+        if DEBUG_MODE == True:
+            log(f"Command failed: {e.stderr if e.stderr else 'No error message'}", "ERROR")
+        elif DEBUG_MODE == False:
+            print(f"[Error] {e.stderr if e.stderr else 'Command failed'}")
         if not ignore:
-            print(f"[Error] {e.stderr}")
+            raise
         return None
 
 def get_gcp_project():
     """Detect GCP project ID from gcloud config."""
+    if DEBUG_MODE == True:
+        log("Detecting GCP project ID...")
     project = run_cmd("gcloud config get-value project")
-    return project if project and "(unset)" not in project else None
+    if project and "(unset)" not in project:
+        if DEBUG_MODE == True:
+            log(f"GCP project: {project}")
+        return project
+    if DEBUG_MODE == True:
+        log("GCP project not configured", "WARN")
+    return None
 
 def setup_aws_sg(region, sg_name):
     """Create/retrieve AWS security group and authorize SSH access from current IP."""
+    if DEBUG_MODE == True:
+        log(f"Setting up AWS security group: {sg_name} in {region}")
+        log("Checking for existing security group...")
+
     sg_id = run_cmd(
         f"aws ec2 describe-security-groups --region {region} --group-names {sg_name} "
         f"--query 'SecurityGroups[0].GroupId' --output text",
         ignore=True,
     )
+
     if not sg_id or sg_id == "None":
+        if DEBUG_MODE == True:
+            log("Security group not found, creating new one...")
         vpc_id = run_cmd(
             f"aws ec2 describe-vpcs --region {region} --query 'Vpcs[0].VpcId' --output text"
         )
+        if DEBUG_MODE == True:
+            log(f"Using VPC: {vpc_id}")
+
         sg_id = run_cmd(
             f"aws ec2 create-security-group --group-name {sg_name} "
             f"--description 'SG for benchmarking' --vpc-id {vpc_id} --region {region} "
             f"--query 'GroupId' --output text"
         )
+        if DEBUG_MODE == True:
+            log(f"Created security group: {sg_id}")
+    else:
+        if DEBUG_MODE == True:
+            log(f"Using existing security group: {sg_id}")
+
+    if DEBUG_MODE == True:
+        log("Getting current public IP...")
     my_ip = run_cmd("curl -s https://checkip.amazonaws.com")
+    if DEBUG_MODE == True:
+        log(f"Current IP: {my_ip}")
+        log(f"Authorizing SSH access from {my_ip}/32...")
+
     run_cmd(
         f"aws ec2 authorize-security-group-ingress --group-id {sg_id} "
         f"--protocol tcp --port 22 --cidr {my_ip}/32 --region {region}",
         ignore=True,
     )
+    if DEBUG_MODE == True:
+        log("Security group configured")
+
     return sg_id
 
 def launch_aws_instance(inst, config, region, key_name, sg_id):
     """Launch AWS instance and return (instance_id, ip)."""
+    if DEBUG_MODE == True:
+        log(f"Launching AWS instance: {inst['name']} ({inst['type']})")
+
     os_version = config['common']['os_version']
-    # Map Ubuntu version to codename
     version_to_codename = {
         '20.04': 'focal',
         '22.04': 'jammy',
@@ -72,43 +215,87 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
     }
     codename = version_to_codename.get(os_version, 'jammy')
 
-    ami = run_cmd(
-        f"aws ec2 describe-images --region {region} --owners 099720109477 "
-        f"--filters 'Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-{codename}-{os_version}-{inst['arch']}-server-*' "
-        f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text"
-    )
+    if DEBUG_MODE == True:
+        log(f"Finding AMI for Ubuntu {os_version} ({codename}) {inst['arch']}...")
+
+    # Try multiple AMI patterns (gp3, gp2, standard ssd) to find the latest image
+    # Pattern priority: hvm-ssd-gp3 (newest), hvm-ssd (older)
+    ami_patterns = [
+        f"ubuntu/images/hvm-ssd-gp3/ubuntu-{codename}-{os_version}-{inst['arch']}-server-*",
+        f"ubuntu/images/hvm-ssd/ubuntu-{codename}-{os_version}-{inst['arch']}-server-*",
+        f"ubuntu/images/*ubuntu-{codename}-{os_version}-{inst['arch']}-server-*"
+    ]
+
+    ami = None
+    for pattern in ami_patterns:
+        if DEBUG_MODE == True:
+            log(f"Trying AMI pattern: {pattern}")
+
+        ami = run_cmd(
+            f"aws ec2 describe-images --region {region} --owners 099720109477 "
+            f"--filters 'Name=name,Values={pattern}' "
+            f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text"
+        )
+
+        if ami and ami != "None" and ami.strip():
+            if DEBUG_MODE == True:
+                log(f"Found AMI with pattern '{pattern}': {ami}")
+            break
+
+
     if not ami or ami == "None":
-        print(f"[Error] No AMI found for Ubuntu {os_version} ({codename}) {inst['arch']} in {region}")
+        msg = f"No AMI found for Ubuntu {os_version} ({codename}) {inst['arch']} in {region}"
+        if DEBUG_MODE == True:
+            log(msg, "ERROR")
+        else:
+            print(f"[Error] {msg}")
         return None, None
+
+    if DEBUG_MODE == True:
+        log(f"Using AMI: {ami}")
+        log("Starting instance...")
 
     instance_id = run_cmd(
         f"aws ec2 run-instances --region {region} --image-id {ami} "
         f"--instance-type {inst['type']} --key-name {key_name} "
         f"--security-group-ids {sg_id} --query 'Instances[0].InstanceId' --output text"
     )
+
+    if DEBUG_MODE == True:
+        log(f"Instance ID: {instance_id}")
+        log("Waiting for instance to be running...")
+
     run_cmd(f"aws ec2 wait instance-running --region {region} --instance-ids {instance_id}")
+
     ip = run_cmd(
         f"aws ec2 describe-instances --region {region} --instance-ids {instance_id} "
         f"--query 'Reservations[0].Instances[0].PublicIpAddress' --output text"
     )
+
+    if DEBUG_MODE == True:
+        log(f"Instance running with IP: {ip}")
+
     return instance_id, ip
 
 
 def launch_gcp_instance(inst, config, project, zone):
     """Launch GCP instance and return (instance_id, ip)."""
     name = inst['name']
+
+    if DEBUG_MODE == True:
+        log(f"Launching GCP instance: {name} ({inst['type']})")
+
     os_version = config['common']['os_version']
     img_arch = "arm64" if inst['arch'] == "arm64" else "amd64"
 
-    # Convert os_version to GCP image family format
     version_number = os_version.replace('.', '')
-
-    # Determine if LTS or not (LTS versions: 20.04, 22.04, 24.04, etc.)
-    # LTS versions end in .04 and are even-numbered years
     is_lts = os_version.endswith('.04') and int(os_version.split('.')[0]) % 2 == 0
     lts_suffix = "-lts" if is_lts else ""
-
     image_family = f"ubuntu-{version_number}{lts_suffix}-{img_arch}"
+
+    if DEBUG_MODE == True:
+        log(f"Using image family: {image_family}")
+        log("Creating instance...")
 
     ip = run_cmd(
         f"gcloud compute instances create {name} --project={project} "
@@ -116,21 +303,55 @@ def launch_gcp_instance(inst, config, project, zone):
         f"--image-family={image_family} --image-project=ubuntu-os-cloud "
         f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'"
     )
+
+    if ip:
+        if DEBUG_MODE == True:
+            log(f"Instance created with IP: {ip}")
+    else:
+        if DEBUG_MODE == True:
+            log("Failed to create instance", "ERROR")
+        else:
+            print("[Error] Failed to create GCP instance")
+
     return name if ip else None, ip
 
 
-def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking):
+def launch_oci_instance(inst, config, compartment_id, region):
+    """Launch OCI instance and return (instance_id, ip).
+
+    TODO: Implement OCI instance launch using OCI CLI
+    Reference: oci compute instance launch --compartment-id <id> --shape <type> ...
+    """
+    name = inst['name']
+
+    if DEBUG_MODE == True:
+        log(f"Launching OCI instance: {name} ({inst['type']})")
+        log("OCI launch not yet implemented", "WARN")
+    else:
+        print(f"[Warning] OCI instance launch not yet implemented for {name}")
+
+    # TODO: Implement OCI instance creation logic
+    # instance_id = run_cmd(f"oci compute instance launch ...")
+    # ip = run_cmd(f"oci compute instance get --instance-id {instance_id} ...")
+
+    return None, None
+
+
+def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
     """Execute setup commands via SSH with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
-    # Add UserKnownHostsFile=/dev/null to avoid known_hosts conflicts when IPs are reused
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout}"
     ssh_user = config['common']['ssh_user']
-
-    # Get setup command timeout (default 2 hours for compilation tasks)
     setup_timeout = config['common'].get('setup_command_timeout', 7200)
 
-    print("  [Setup Phase] Starting...")
+    progress(instance_name, "Setup phase started")
+
+    if DEBUG_MODE == True:
+        log(f"Starting setup phase for {ip}")
+    elif DEBUG_MODE == False:
+        print("  [Setup Phase] Starting...")
+
     for i in range(1, 4):
         cmd_key = f"setup_command{i}"
         if cmd_key not in config['common']:
@@ -139,25 +360,51 @@ def run_ssh_setup(ip, config, inst, key_path, ssh_strict_host_key_checking):
         if not cmd or cmd.strip() == "":
             continue
 
-        print(f"  [Setup {i}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-        print(f"  [Setup {i}] Timeout: {setup_timeout}s ({setup_timeout//60} minutes)")
+        progress(instance_name, f"Setup command {i}/{3}")
+
+        if DEBUG_MODE == True:
+            log(f"Setup command {i}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            log(f"Timeout: {setup_timeout}s ({setup_timeout//60} minutes)")
+        elif DEBUG_MODE == False:
+            print(f"  [Setup {i}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            print(f"  [Setup {i}] Timeout: {setup_timeout}s ({setup_timeout//60} minutes)")
+
         result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=setup_timeout)
+
         if result is None:
-            print(f"  [Warning] Setup {i} failed or timed out")
+            if DEBUG_MODE == True:
+                log(f"Setup command {i} failed or timed out", "ERROR")
+            elif DEBUG_MODE == False:
+                print(f"  [Warning] Setup {i} failed or timed out")
             return False
-        else:
+
+        if DEBUG_MODE == True:
+            log(f"Setup command {i} completed")
+        elif DEBUG_MODE == False:
             print(f"  [Setup {i}] Completed")
+
+    progress(instance_name, "Setup phase completed")
+
+    if DEBUG_MODE == True:
+        log("Setup phase completed successfully")
+
     return True
 
 
-def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking):
-    """Execute benchmark commands via SSH in background (no output to host)."""
+def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
+    """Execute benchmark commands via SSH in background."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_timeout = config['common'].get('ssh_timeout', 20)
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_timeout}"
     ssh_user = config['common']['ssh_user']
 
-    print("  [Benchmark Phase] Starting background jobs...")
+    progress(instance_name, "Benchmark phase started")
+
+    if DEBUG_MODE == True:
+        log(f"Starting benchmark phase for {ip}")
+    elif DEBUG_MODE == False:
+        print("  [Benchmark Phase] Starting background jobs...")
+
     for i in range(1, 3):
         cmd_key = f"benchmark_command{i}"
         if cmd_key not in config['common']:
@@ -166,51 +413,110 @@ def run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict_host_key_checking)
         if not cmd or cmd.strip() == "":
             continue
 
-        print(f"  [Benchmark {i}] Launching: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=True)
-        if result is None:
-            print(f"  [Warning] Benchmark {i} failed to launch")
-        else:
-            print(f"  [Benchmark {i}] Launched in background")
+        if DEBUG_MODE == True:
+            log(f"Benchmark command {i}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+        elif DEBUG_MODE == False:
+            print(f"  [Benchmark {i}] Launching: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
 
-    # Wait for benchmarks to complete
+        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=True)
+
+        if result is None:
+            if DEBUG_MODE == True:
+                log(f"Benchmark command {i} failed to launch", "WARN")
+            elif DEBUG_MODE == False:
+                print(f"  [Warning] Benchmark {i} failed to launch")
+        else:
+            if DEBUG_MODE == True:
+                log(f"Benchmark command {i} launched in background")
+            elif DEBUG_MODE == False:
+                print(f"  [Benchmark {i}] Launched in background")
+
     wait_time = config['common'].get('benchmark_wait_time', 300)
-    print(f"  [Benchmark Phase] Waiting {wait_time}s for completion...")
+
+    progress(instance_name, f"Waiting {wait_time}s for benchmarks")
+
+    if DEBUG_MODE == True:
+        log(f"Waiting {wait_time}s for benchmarks to complete...")
+    elif DEBUG_MODE == False:
+        print(f"  [Benchmark Phase] Waiting {wait_time}s for completion...")
+
     time.sleep(wait_time)
 
+    progress(instance_name, "Benchmark phase completed")
 
-def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_checking):
+    if DEBUG_MODE == True:
+        log("Benchmark wait completed")
+
+
+def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_checking, instance_name):
     """Collect benchmark results from remote instance."""
+    progress(instance_name, "Collecting results")
+
+    if DEBUG_MODE == True:
+        log(f"Collecting results from {ip}")
+
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null"
     ssh_user = config['common']['ssh_user']
     cloud_rep_dir = config['common']['cloud_reports_dir']
+
+    if DEBUG_MODE == True:
+        log("Creating tarball on remote instance...")
 
     run_cmd(
         f"ssh {ssh_opt} {ssh_user}@{ip} "
         f"'tar -czf /tmp/reports.tar.gz -C $(dirname {cloud_rep_dir}) $(basename {cloud_rep_dir})'",
         capture=False,
     )
+
     host_rep_dir = config['common']['host_reports_dir']
     local_f = f"{host_rep_dir}/{cloud}_{name}.tar.gz"
+
+    if DEBUG_MODE == True:
+        log(f"Downloading to {local_f}...")
+
     run_cmd(f"scp {ssh_opt} {ssh_user}@{ip}:/tmp/reports.tar.gz {local_f}")
-    print(f"Collected: {local_f}")
+
+    progress(instance_name, "Results collected")
+
+    if DEBUG_MODE == True:
+        log(f"Results collected: {local_f}")
+    else:
+        print(f"Collected: {local_f}")
 
 
 def process_instance(cloud, inst, config, key_path):
     """Process a single cloud instance: launch, benchmark, collect, terminate."""
     name = inst['name']
-    print(f"\n>>> Starting {cloud.upper()}: {name} ({inst['type']})")
+    instance_name = f"{cloud.upper()}:{name}"
+
+    progress(instance_name, "Starting")
+
+    if DEBUG_MODE == True:
+        log(f"Starting {cloud.upper()} instance: {name} ({inst['type']})", "INFO")
+    else:
+        print(f"\n>>> Starting {cloud.upper()}: {name} ({inst['type']})")
+
     instance_id = None
     ip = None
     region = None
     project = None
     zone = None
+    compartment_id = None
 
     try:
         if cloud == 'aws':
             region = config['aws']['region']
+
+            if DEBUG_MODE == True:
+                log(f"AWS Region: {region}")
+                log("Getting AWS key pair name...")
+
             key_name = run_cmd("aws ec2 describe-key-pairs --query 'KeyPairs[0].KeyName' --output text")
+
+            if DEBUG_MODE == True:
+                log(f"Key pair: {key_name}")
+
             sg_id = setup_aws_sg(region, config['common']['security_group_name'])
             instance_id, ip = launch_aws_instance(inst, config, region, key_name, sg_id)
         elif cloud == 'gcp':
@@ -218,41 +524,125 @@ def process_instance(cloud, inst, config, key_path):
             if project == "AUTO_DETECT":
                 project = get_gcp_project()
             zone = config['gcp']['zone']
+
+            if DEBUG_MODE == True:
+                log(f"GCP Project: {project}, Zone: {zone}")
+
             instance_id, ip = launch_gcp_instance(inst, config, project, zone)
+        elif cloud == 'oci':
+            compartment_id = config['oci']['compartment_id']
+            region = config['oci']['region']
+
+            if DEBUG_MODE == True:
+                log(f"OCI Compartment: {compartment_id}, Region: {region}")
+
+            instance_id, ip = launch_oci_instance(inst, config, compartment_id, region)
         else:
-            print(f"[Error] Unknown cloud provider: {cloud}")
+            msg = f"Unknown cloud provider: {cloud}"
+            if DEBUG_MODE == True:
+                log(msg, "ERROR")
+            else:
+                print(f"[Error] {msg}")
             return
 
         if not ip or ip == "None":
-            print(f"[Error] Failed to get IP for {name}. Skipping benchmark.")
+            msg = f"Failed to get IP for {name}"
+            if DEBUG_MODE == True:
+                log(msg, "ERROR")
+            else:
+                print(f"[Error] {msg}. Skipping benchmark.")
             return
 
-        print(f"IP: {ip}. Waiting 60s for SSH...")
+        # Register instance for cleanup on signal/exception
+        register_instance(cloud, instance_id, name, region=region, project=project, zone=zone, compartment_id=compartment_id)
+
+        progress(instance_name, f"Instance launched (IP: {ip})")
+
+        if DEBUG_MODE == True:
+            log(f"Waiting 60s for SSH to become available...")
+        elif DEBUG_MODE == False:
+            print(f"IP: {ip}. Waiting 60s for SSH...")
+
         time.sleep(60)
 
         ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
 
         # Run setup commands with output
-        setup_success = run_ssh_setup(ip, config, inst, key_path, ssh_strict)
+        setup_success = run_ssh_setup(ip, config, inst, key_path, ssh_strict, instance_name)
         if not setup_success:
-            print(f"[Error] Setup failed for {name}. Skipping benchmarks.")
+            msg = f"Setup failed for {name}"
+            if DEBUG_MODE == True:
+                log(msg, "ERROR")
+            else:
+                print(f"[Error] {msg}. Skipping benchmarks.")
             return
 
         # Run benchmark commands in background
-        run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict)
+        run_ssh_benchmarks(ip, config, inst, key_path, ssh_strict, instance_name)
 
         # Collect results
-        collect_results(ip, config, cloud, name, key_path, ssh_strict)
+        collect_results(ip, config, cloud, name, key_path, ssh_strict, instance_name)
+
+        progress(instance_name, "Completed successfully")
+
+        if DEBUG_MODE == True:
+            log(f"Instance {name} completed successfully", "SUCCESS")
 
     except Exception as e:
-        print(f"[Error] {cloud} instance {name}: {e}")
+        msg = f"{cloud} instance {name}: {e}"
+        if DEBUG_MODE == True:
+            log(msg, "ERROR")
+            import traceback
+            traceback.print_exc()
+        else:
+            print(f"[Error] {msg}")
     finally:
         if instance_id:
-            print(f"Terminating {name}...")
+            # Unregister from active instances tracking
+            unregister_instance(instance_id)
+
+            progress(instance_name, "Terminating")
+
+            if DEBUG_MODE == True:
+                log(f"Terminating instance {name}...")
+            elif DEBUG_MODE == False:
+                print(f"Terminating {name}...")
+
             if cloud == 'aws' and region:
                 run_cmd(f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}")
             elif cloud == 'gcp' and project and zone:
                 run_cmd(f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet")
+            elif cloud == 'oci' and compartment_id:
+                # TODO: Implement OCI instance termination
+                if DEBUG_MODE == True:
+                    log("OCI instance termination not yet implemented", "WARN")
+                else:
+                    print(f"[Warning] OCI instance termination not yet implemented for {name}")
+                # run_cmd(f"oci compute instance terminate --instance-id {instance_id} --force")
+
+            if DEBUG_MODE == True:
+                log(f"Instance {name} terminated")
+
+def process_csp_instances(cloud, instances, config, key_path):
+    """Process all instances for a single CSP sequentially."""
+    csp_name = cloud.upper()
+    if DEBUG_MODE == True:
+        log(f"{csp_name} instances enabled")
+
+    enabled_count = 0
+    for inst in instances:
+        if inst.get('enable'):
+            process_instance(cloud, inst, config, key_path)
+            enabled_count += 1
+
+    if enabled_count == 0:
+        msg = f"{csp_name} enabled but no instances are enabled"
+        if DEBUG_MODE == True:
+            log(msg, "WARN")
+        else:
+            print(f"[Info] {msg} in the configuration.")
+
+    return enabled_count
 
 def load_config(config_path='cloud_config.json'):
     """Load benchmark configuration from JSON file."""
@@ -260,8 +650,18 @@ def load_config(config_path='cloud_config.json'):
         print(f"[Error] Configuration file not found: {config_path}")
         print(f"[Info] Copy cloud_config.example.json to {config_path} and update settings.")
         return None
+
     with open(config_path, 'r') as f:
-        return json.load(f)
+        config = json.load(f)
+
+    # Set global debug mode
+    global DEBUG_MODE
+    DEBUG_MODE = config['common'].get('debug_stdout', False)
+
+    if DEBUG_MODE == True:
+        log("Configuration loaded successfully")
+
+    return config
 
 
 def validate_key_path(key_path_template):
@@ -269,51 +669,148 @@ def validate_key_path(key_path_template):
     key_path = os.path.expanduser(
         key_path_template.replace('${HOME}', os.environ.get('HOME', '~'))
     )
+
+    if DEBUG_MODE == True:
+        log(f"Validating SSH key: {key_path}")
+
     if not os.path.exists(key_path):
-        print(f"[Error] SSH key not found: {key_path}")
+        msg = f"SSH key not found: {key_path}"
+        if DEBUG_MODE == True:
+            log(msg, "ERROR")
+        else:
+            print(f"[Error] {msg}")
         return None
+
+    if DEBUG_MODE == True:
+        log("SSH key validated")
+
     return key_path
 
 
 def main():
     """Main entry point for cloud benchmarking executor."""
-    config = load_config()
-    if not config:
-        return
+    # Register signal handlers for cleanup
+    signal.signal(signal.SIGINT, cleanup_active_instances)   # Ctrl+C
+    signal.signal(signal.SIGTERM, cleanup_active_instances)  # kill command
 
-    os.makedirs(config['common']['host_reports_dir'], exist_ok=True)
+    try:
+        if DEBUG_MODE == True:
+            log("=" * 60)
+            log("CLOUD BENCHMARKING EXECUTOR")
+            log("=" * 60)
 
-    # Validate SSH key
-    key_path_template = config['common'].get(
-        'ssh_key_path', '${HOME}/.ssh/cloud_onehour_project.pem'
-    )
-    key_path = validate_key_path(key_path_template)
-    if not key_path:
-        return
+        config = load_config()
+        if not config:
+            return
 
-    # Process AWS instances
-    if config['aws']['enable']:
-        enabled_count = 0
-        for inst in config['aws']['instances']:
-            if inst.get('enable'):
-                process_instance('aws', inst, config, key_path)
-                enabled_count += 1
-        if enabled_count == 0:
-            print("[Info] AWS is enabled but no instances are enabled in the configuration.")
-    else:
-        print("[Info] AWS is disabled in the configuration (aws.enable = false).")
+        # Create results directory
+        host_rep_dir = config['common']['host_reports_dir']
+        os.makedirs(host_rep_dir, exist_ok=True)
 
-    # Process GCP instances
-    if config['gcp']['enable']:
-        enabled_count = 0
-        for inst in config['gcp']['instances']:
-            if inst.get('enable'):
-                process_instance('gcp', inst, config, key_path)
-                enabled_count += 1
-        if enabled_count == 0:
-            print("[Info] GCP is enabled but no instances are enabled in the configuration.")
-    else:
-        print("[Info] GCP is disabled in the configuration (gcp.enable = false).")
+        if DEBUG_MODE == True:
+            log(f"Results directory: {host_rep_dir}")
+
+        # Validate SSH key
+        key_path_template = config['common'].get(
+            'ssh_key_path', '${HOME}/.ssh/cloud_onehour_project.pem'
+        )
+        key_path = validate_key_path(key_path_template)
+        if not key_path:
+            return
+
+        # Prepare CSP tasks for parallel execution
+        csp_tasks = []
+
+        if config['aws']['enable']:
+            if config['aws']['instances']:
+                csp_tasks.append(('aws', config['aws']['instances']))
+            else:
+                msg = "AWS is enabled but has no instances configured"
+                if DEBUG_MODE == True:
+                    log(msg, "WARN")
+                else:
+                    print(f"[Info] {msg}")
+        else:
+            msg = "AWS is disabled"
+            if DEBUG_MODE == True:
+                log(msg, "INFO")
+            else:
+                print(f"[Info] {msg} in the configuration (aws.enable = false).")
+
+        if config['gcp']['enable']:
+            if config['gcp']['instances']:
+                csp_tasks.append(('gcp', config['gcp']['instances']))
+            else:
+                msg = "GCP is enabled but has no instances configured"
+                if DEBUG_MODE == True:
+                    log(msg, "WARN")
+                else:
+                    print(f"[Info] {msg}")
+        else:
+            msg = "GCP is disabled"
+            if DEBUG_MODE == True:
+                log(msg, "INFO")
+            else:
+                print(f"[Info] {msg} in the configuration (gcp.enable = false).")
+
+        if config.get('oci', {}).get('enable'):
+            if config['oci']['instances']:
+                csp_tasks.append(('oci', config['oci']['instances']))
+            else:
+                msg = "OCI is enabled but has no instances configured"
+                if DEBUG_MODE == True:
+                    log(msg, "WARN")
+                else:
+                    print(f"[Info] {msg}")
+        else:
+            msg = "OCI is disabled"
+            if DEBUG_MODE == True:
+                log(msg, "INFO")
+            else:
+                print(f"[Info] {msg} in the configuration (oci.enable = false).")
+
+        # Execute CSPs in parallel (max 3 workers: AWS, GCP, and OCI)
+        if csp_tasks:
+            if DEBUG_MODE == True:
+                log(f"Starting parallel execution of {len(csp_tasks)} CSP(s)")
+
+            with ThreadPoolExecutor(max_workers=min(3, len(csp_tasks))) as executor:
+                # Submit all CSP tasks
+                future_to_csp = {
+                    executor.submit(process_csp_instances, cloud, instances, config, key_path): cloud
+                    for cloud, instances in csp_tasks
+                }
+
+                # Wait for all to complete
+                for future in as_completed(future_to_csp):
+                    cloud = future_to_csp[future]
+                    try:
+                        result = future.result()
+                        if DEBUG_MODE == True:
+                            log(f"{cloud.upper()} completed with {result} instance(s) processed")
+                    except Exception as exc:
+                        msg = f"{cloud.upper()} generated an exception: {exc}"
+                        if DEBUG_MODE == True:
+                            log(msg, "ERROR")
+                        else:
+                            print(f"[Error] {msg}")
+
+        if DEBUG_MODE == True:
+            log("=" * 60)
+            log("ALL INSTANCES COMPLETED")
+            log("=" * 60)
+
+    except Exception as e:
+        msg = f"Fatal error in main: {e}"
+        if DEBUG_MODE == True:
+            log(msg, "ERROR")
+            import traceback
+            traceback.print_exc()
+        else:
+            print(f"[Error] {msg}")
+        # Cleanup any active instances before exiting
+        cleanup_active_instances()
+        raise
 
 
 if __name__ == "__main__":
