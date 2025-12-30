@@ -6,11 +6,11 @@
             "items": {
                 "pts/sysbench-1.1.0": {
                     "enabled": true,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": ""
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument"
                 }
             }
         },
@@ -19,11 +19,11 @@
             "items": {
                 "pts/coremark-1.0.1": {
                     "enabled": true,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": "fixed:vCPUs",
+                    "THFix_in_compile": true,
+                    "THChange_at_runtime": false,
+                    "vcpu_scaling": "N/A",
                     "sve2_support": "unknown",
-                    "notes": "# of thread is decided by compile."
+                    "notes": "Thread count fixed at compile via -DMULTITHREAD=$NUM_CPU_CORES. # of thread is decided by compile."
                 }
             }
         },
@@ -32,27 +32,27 @@
             "items": {
                 "pts/build-linux-kernel-1.17.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
-                    "notes": ""
+                    "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation"
                 },
                 "pts/build-llvm-1.6.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
-                    "notes": ""
+                    "notes": "Uses cmake --build . -- -j $NUM_CPU_CORES"
                 },
                 "pts/build-gcc-1.5.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
-                    "notes": ""
+                    "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation"
                 }
             }
         },
@@ -61,56 +61,48 @@
             "items": {
                 "pts/compress-7zip-1.11.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "vcpu_scaling": "auto-detect",
                     "sve2_support": false,
-                    "notes": ""
+                    "notes": "7zip auto-detects CPU count; supports -mmt[N] but PTS doesn't use it"
                 },
                 "pts/compress-zstd-1.6.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": ""
+                    "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument"
                 },
                 "pts/compress-xz-1.1.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": ""
+                    "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument"
                 }
             }
         },
         "Cryptography and TLS": {
             "enabled": true,
             "items": {
-                "pts/openssl-3.0.1": {
-                    "enabled": true,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": "env:NUM_CPU_CORES",
-                    "sve2_support": true,
-                    "notes": ""
-                },
                 "pts/openssl-3.6.0": {
                     "enabled": true,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
-                    "notes": ""
+                    "notes": "Uses -multi $NUM_CPU_CORES runtime CLI argument"
                 },
-                "pts/nginx-3.3.0": {
+                "pts/nginx-3.0.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
-                    "sve2_support": "unknown",
-                    "notes": "auto-vectorization assumed"
+                    "sve2_support": false,
+                    "notes": "wrk uses -t $NUM_CPU_CORES for client threads. nginx worker_processes is commented out in install.sh and should be enabled with 'worker_processes auto;' for server-side scaling"
                 }
             }
         },
@@ -119,19 +111,19 @@
             "items": {
                 "pts/renaissance-1.4.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "jvm-internal",
                     "sve2_support": true,
-                    "notes": "SVE2 is supported after OpenJDK9."
+                    "notes": "JVM manages threading internally; different workloads have different parallelism. SVE2 is supported after OpenJDK9."
                 },
                 "pts/java-jmh-1.0.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "jmh:-t max",
                     "sve2_support": true,
-                    "notes": "SVE2 is supported after OpenJDK9."
+                    "notes": "JMH uses -t max to utilize all available threads. SVE2 is supported after OpenJDK9."
                 }
             }
         },
@@ -140,19 +132,19 @@
             "items": {
                 "pts/apache-3.0.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "vcpu_scaling": "single-threaded",
                     "sve2_support": false,
-                    "notes": "No need to support SIMD."
+                    "notes": "Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test. No need to support SIMD."
                 },
-                "pts/spark-1.0.0": {
+                "pts/spark-1.0.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
-                    "sve2_support": false,
-                    "notes": "No need to support SIMD."
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "spark-internal (auto-detect, configurable via spark-defaults.conf)",
+                    "sve2_support": true,
+                    "notes": "Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)"
                 }
             }
         },
@@ -161,40 +153,40 @@
             "items": {
                 "pts/ffmpeg-7.0.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
-                    "notes": "run.sh must be updated to scale."
+                    "notes": "Uses -threads $NUM_CPU_CORES runtime option for video encoding. run.sh must be updated to scale."
                 },
                 "pts/x265-1.5.0": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": "env:NUM_CPU_CORES",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "vcpu_scaling": "auto-detect",
                     "sve2_support": true,
-                    "notes": ""
+                    "notes": "x265 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them"
                 }
             }
         },
         "Database": {
             "enabled": false,
             "items": {
-                "pts/pgbench-1.16.0": {
+                "pts/pgbench-1.11.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "No need to support SIMD. Need to patch test profile."
+                    "notes": "PostgreSQL pgbench uses -j $NUM_CPU_CORES for worker threads (already implemented in install.sh). Client count controlled via -c option in test settings"
                 },
-                "pts/redis-2.2.0": {
+                "pts/redis-1.3.1": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "redis-benchmark:--threads",
                     "sve2_support": false,
-                    "notes": "Need to revisit."
+                    "notes": "redis-benchmark needs --threads $NUM_CPU_CORES option added to install.sh. Redis server supports I/O threading (v6.0+) via io-threads config. Client connections via -c option (already set to 50)"
                 }
             }
         },
@@ -203,27 +195,27 @@
             "items": {
                 "pts/stream-1.3.4": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
                     "vcpu_scaling": "env:OMP_NUM_THREADS",
                     "sve2_support": false,
-                    "notes": "Need to set -fopenmp at build, export OMP_NUM_THREADS=`nproc`"
+                    "notes": "Uses OpenMP with OMP_NUM_THREADS=$NUM_CPU_CORES. Need to set -fopenmp at build, export OMP_NUM_THREADS=`nproc`"
                 },
                 "pts/tinymembench-1.0.2": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": true,
+                    "THChange_at_runtime": false,
+                    "vcpu_scaling": "single-threaded",
                     "sve2_support": false,
-                    "notes": "No need to support SIMD. Single thread only."
+                    "notes": "Memory bandwidth test; single-threaded by design. No need to support SIMD. Single thread only."
                 },
                 "pts/pmbench-1.0.2": {
                     "enabled": false,
-                    "THFix_in_compile": "TBD",
-                    "THChange_at_runtime": "TBD",
-                    "vcpu_scaling": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "vcpu_scaling": "test-option:-j",
                     "sve2_support": false,
-                    "notes": "Need to revisit."
+                    "notes": "Thread count controlled via -j option in test settings (1/2/4/8/16/32). Need to revisit."
                 }
             }
         }
