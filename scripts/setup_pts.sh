@@ -7,6 +7,29 @@ DOWNLOAD_URL="https://phoronix-test-suite.com/releases/${ARCHIVE}"
 INSTALL_DIR="/opt/phoronix-test-suite"
 LAUNCHER="/usr/local/bin/phoronix-test-suite"
 
+# Check for --fix-permissions flag
+if [[ "${1:-}" == "--fix-permissions" ]]; then
+    echo "=== Fixing PTS Permissions Only ==="
+
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "[ERROR] PTS installation directory not found: $INSTALL_DIR"
+        echo "Please run this script without --fix-permissions to install PTS first"
+        exit 1
+    fi
+
+    echo "Setting ownership to current user: $USER"
+    sudo chown -R $USER:$USER "$INSTALL_DIR"
+
+    echo "Setting write permissions for user"
+    sudo chmod -R u+w "$INSTALL_DIR"
+
+    echo ""
+    echo "[OK] Permissions fixed successfully"
+    echo "Current ownership:"
+    ls -ld "$INSTALL_DIR"
+    exit 0
+fi
+
 # Function to setup user config directories
 setup_user_config() {
     PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -87,6 +110,12 @@ exec /opt/phoronix-test-suite/phoronix-test-suite "$@"
 EOF
     sudo chmod +x "$LAUNCHER"
 
+    # Fix permissions for PTS directories to allow current user write access
+    # This is necessary for PTS to create cache and temporary files
+    echo "Setting appropriate permissions for PTS directories..."
+    sudo chown -R $USER:$USER "$INSTALL_DIR"
+    sudo chmod -R u+w "$INSTALL_DIR"
+
     # Cleanup
     rm -f "$ARCHIVE"
 
@@ -161,4 +190,8 @@ fi
 
 echo ""
 echo "=== Setup completed successfully ==="
-echo "To run benchmarks, use: ./scripts/run_pts_benchmark.sh <benchmark-name>"
+echo ""
+echo "Usage:"
+echo "  Install/reinstall PTS: ./scripts/setup_pts.sh"
+echo "  Fix permissions only:  ./scripts/setup_pts.sh --fix-permissions"
+echo "  Run benchmarks:        ./scripts/run_pts_benchmark.sh <benchmark-name>"

@@ -382,17 +382,26 @@ PYTHON_EOF
     input_fifo=$(mktemp -u)
     mkfifo "$input_fifo"
 
-    # Feed test option followed by empty lines to handle prompts
-    # First line: test option (e.g., "3")
-    # Second line: empty (confirms selection for multiple-choice tests)
-    # Remaining lines: empty (handles any additional prompts)
-    (echo "$TEST_OPTION"; yes "") > "$input_fifo" &
+    # Feed test option followed by newlines to handle any prompts
+    # Use timeout to prevent infinite blocking if FIFO isn't being read
+    # Background process will be killed after benchmark completes
+    (
+        echo "$TEST_OPTION"
+        # Send 'n' responses to decline all prompts (view results, upload, etc.)
+        for i in {1..100}; do
+            echo "n"
+            sleep 0.1
+        done
+    ) > "$input_fifo" 2>/dev/null &
     yes_pid=$!
 
     # Run benchmark with clean output
     # - Remove ANSI/ESC sequences for cleaner logs
     # - PHP deprecation warnings are suppressed at system level (via suppress_php_warnings.sh)
     # - All test settings are configured via merged user-config.xml
+    # - DISPLAY_COMPACT_RESULTS=1 prevents "Do you want to view results" prompt
+    # - SKIP_TEST_RESULT_PARSE=1 prevents result parsing prompts
+    # - PHP_ERROR_REPORTING forces PHP to ignore deprecation warnings (critical for Ubuntu 25/PHP 8.3+)
     if TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
@@ -400,10 +409,17 @@ PYTHON_EOF
        SKIP_ALL_TEST_OPTION_CHECKS=1 \
        SKIP_TEST_OPTION_HANDLING=1 \
        AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE \
+       DISPLAY_COMPACT_RESULTS=1 \
+       SKIP_TEST_RESULT_PARSE=1 \
+       SKIP_ALL_PROMPTS=1 \
        NO_COLOR=1 \
+       PHP_ERROR_REPORTING=0 \
        taskset -c $cpu_list \
        phoronix-test-suite benchmark "$BENCHMARK_FULL" < "$input_fifo" 2>&1 | \
-       sed -r 's/\x1B\[[0-9;]*[mK]//g'; then
+       sed -r 's/\x1B\[[0-9;]*[mK]//g' | \
+       grep -v "trim(): Passing null" | \
+       grep -v "Deprecated" | \
+       grep -v "\[8192\]"; then
         benchmark_result=0
     else
         benchmark_result=1
