@@ -42,6 +42,41 @@ CONFIG_FILE="$CONFIG_DIR/user-config.xml"
 
 BENCHMARK_NAME="${BENCHMARK%%-*}"  # ベンチマーク名を取得（例: coremark-1.0.1 -> coremark）
 
+# Validate test-specific XML config file exists early (before expensive setup)
+# Config file name uses underscore instead of slash: pts_coremark-1.0.1.config
+BENCHMARK_CONFIG_NAME="${BENCHMARK_FULL//\//_}"  # pts/coremark-1.0.1 -> pts_coremark-1.0.1
+REPO_TEST_CONFIG="$PROJECT_ROOT/user_config/test-options/${BENCHMARK_CONFIG_NAME}.config"
+if [ ! -f "$REPO_TEST_CONFIG" ]; then
+    echo "[ERROR] Test-specific config file not found: $REPO_TEST_CONFIG"
+    echo "[ERROR] All benchmarks must have a corresponding XML config file in user_config/test-options/"
+    echo "[ERROR] Config file should be in XML format with test-specific PTS settings"
+    echo ""
+    echo "Example XML format:"
+    echo '<?xml version="1.0"?>'
+    echo '<PhoronixTestSuite>'
+    echo '  <Options>'
+    echo '    <TestResultValidation>'
+    echo '      <DynamicRunCount>FALSE</DynamicRunCount>'
+    echo '      <LimitDynamicToTestLength>20</LimitDynamicToTestLength>'
+    echo '    </TestResultValidation>'
+    echo '  </Options>'
+    echo '  <TestOptions>'
+    echo '    <Test>'
+    echo '      <Identifier>pts/coremark-1.0.1</Identifier>'
+    echo '      <Option>1</Option>'
+    echo '    </Test>'
+    echo '  </TestOptions>'
+    echo '</PhoronixTestSuite>'
+    exit 1
+fi
+echo "[OK] Test-specific config file found: $REPO_TEST_CONFIG"
+
+# Validate python3 is available for XML merging
+if ! command -v python3 &> /dev/null; then
+    echo "[ERROR] python3 is required to merge XML config files"
+    exit 1
+fi
+
 # 設定ファイルの存在と内容を確認
 if [ -f "$CONFIG_FILE" ]; then
     echo "[OK] Config file found: $CONFIG_FILE"
@@ -243,55 +278,73 @@ for threads in $(seq 1 $MAX_THREADS); do
         echo
     } > "$FREQ_FILE" 2>/dev/null || true
 
-    # Configure PTS user-config.xml for non-interactive batch mode
+    # Configure PTS user-config.xml by merging base config with test-specific config
     PTS_CONFIG_DIR=~/.phoronix-test-suite
     PTS_USER_CONFIG="$PTS_CONFIG_DIR/user-config.xml"
+    mkdir -p "$PTS_CONFIG_DIR"
 
-    # Get the directory where this script is located
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-    TEMPLATE_CONFIG="$REPO_ROOT/user_config/user-config.xml"
+    # Merge base user-config.xml with test-specific XML config using Python
+    echo "[INFO] Merging base config with test-specific config..."
+    TEST_OPTION=$(python3 << PYTHON_EOF
+import xml.etree.ElementTree as ET
 
-    # Use pre-configured user-config.xml if available
-    if [ -f "$TEMPLATE_CONFIG" ]; then
-        mkdir -p "$PTS_CONFIG_DIR"
-        cp "$TEMPLATE_CONFIG" "$PTS_USER_CONFIG"
-        echo "[INFO] Using pre-configured PTS user-config.xml from $TEMPLATE_CONFIG"
-    elif [ ! -f "$PTS_USER_CONFIG" ]; then
-        # Fallback: run batch-setup to create initial config
-        echo "y" | phoronix-test-suite batch-setup > /dev/null 2>&1 || true
+def merge_xml_elements(base_elem, override_elem):
+    """Recursively merge override_elem into base_elem"""
+    base_children = {child.tag: child for child in base_elem}
+    for override_child in override_elem:
+        if override_child.tag in base_children:
+            base_child = base_children[override_child.tag]
+            if len(override_child) > 0:
+                merge_xml_elements(base_child, override_child)
+            else:
+                base_child.text = override_child.text
+                base_child.attrib.update(override_child.attrib)
+        else:
+            base_elem.append(override_child)
 
-        # Apply critical settings via sed
-        if [ -f "$PTS_USER_CONFIG" ]; then
-            sed -i 's|<BatchMode>.*</BatchMode>|<BatchMode>TRUE</BatchMode>|' "$PTS_USER_CONFIG" 2>/dev/null || true
-            sed -i 's|<AlwaysUploadResultsToOpenBenchmarking>.*</AlwaysUploadResultsToOpenBenchmarking>|<AlwaysUploadResultsToOpenBenchmarking>FALSE</AlwaysUploadResultsToOpenBenchmarking>|' "$PTS_USER_CONFIG" 2>/dev/null || true
-            sed -i 's|<PromptForTestDescription>.*</PromptForTestDescription>|<PromptForTestDescription>FALSE</PromptForTestDescription>|' "$PTS_USER_CONFIG" 2>/dev/null || true
-            sed -i 's|<PromptForTestIdentifier>.*</PromptForTestIdentifier>|<PromptForTestIdentifier>FALSE</PromptForTestIdentifier>|' "$PTS_USER_CONFIG" 2>/dev/null || true
-            sed -i 's|<RunAllTestOptions>.*</RunAllTestOptions>|<RunAllTestOptions>FALSE</RunAllTestOptions>|' "$PTS_USER_CONFIG" 2>/dev/null || true
-        fi
-    fi
+# Read and merge configs
+base_tree = ET.parse('$CONFIG_FILE')
+base_root = base_tree.getroot()
+test_tree = ET.parse('$REPO_TEST_CONFIG')
+test_root = test_tree.getroot()
+merge_xml_elements(base_root, test_root)
 
-    # Pre-configure test options for OpenSSL to avoid interactive prompts
-    # This creates a saved test configuration that PTS will use automatically
+# Extract test option
+test_option = "1"
+for test_opts in test_root.findall('.//TestOptions/Test'):
+    opt = test_opts.find('Option')
+    if opt is not None:
+        test_option = opt.text
+        break
+
+# Write merged config
+base_tree.write('$PTS_USER_CONFIG', encoding='utf-8', xml_declaration=True)
+print(test_option)
+PYTHON_EOF
+)
+
+    echo "[OK] Merged config written to $PTS_USER_CONFIG"
+    echo "[INFO] Test option: $TEST_OPTION"
+
+    # Pre-configure test options to avoid interactive prompts
+    # Use BENCHMARK_CONFIG_NAME (pts_coremark-1.0.1) instead of BENCHMARK_FULL (pts/coremark-1.0.1)
     TEST_OPTION_DIR=~/.phoronix-test-suite/test-options
     mkdir -p "$TEST_OPTION_DIR"
+    echo "$TEST_OPTION" > "$TEST_OPTION_DIR/${BENCHMARK_CONFIG_NAME}.config"
+    echo "[INFO] Using test option '$TEST_OPTION' for $BENCHMARK_FULL"
 
-    # For OpenSSL tests, create a default option file selecting "Test All Options"
-    if [[ "$BENCHMARK_FULL" == *"openssl"* ]]; then
-        echo "3" > "$TEST_OPTION_DIR/${BENCHMARK_FULL}.config" 2>/dev/null || true
-    fi
-
-    # Create a named pipe for unlimited input
+    # Create a named pipe for unlimited input to handle any unexpected remaining prompts
     input_fifo=$(mktemp -u)
     mkfifo "$input_fifo"
 
-    # Feed unlimited newlines to the pipe in background
-    (yes "" > "$input_fifo") &
+    # Feed empty responses to handle any unexpected prompts beyond the configured options
+    yes "" > "$input_fifo" &
     yes_pid=$!
 
     # Run benchmark with clean output
     # - Remove ANSI/ESC sequences for cleaner logs
     # - PHP deprecation warnings are suppressed at system level (via suppress_php_warnings.sh)
+    # - All test settings are configured via merged user-config.xml
     if TEST_RESULTS_NAME="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_IDENTIFIER="${BENCHMARK}-${threads}threads" \
        TEST_RESULTS_DESCRIPTION="Benchmark with ${threads} thread(s)" \
@@ -300,7 +353,6 @@ for threads in $(seq 1 $MAX_THREADS); do
        SKIP_TEST_OPTION_HANDLING=1 \
        AUTO_UPLOAD_RESULTS_TO_OPENBENCHMARKING=FALSE \
        NO_COLOR=1 \
-       FORCE_TIMES_TO_RUN=1 \
        taskset -c $cpu_list \
        phoronix-test-suite benchmark "$BENCHMARK_FULL" < "$input_fifo" 2>&1 | \
        sed -r 's/\x1B\[[0-9;]*[mK]//g'; then
