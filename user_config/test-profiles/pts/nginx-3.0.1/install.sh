@@ -3,7 +3,7 @@ mkdir $HOME/nginx_
 tar -xf http-test-files-1.tar.xz
 tar -xf nginx-1.23.3.tar.gz
 cd nginx-1.23.3
-CFLAGS="-Wno-error -O3 -march=native $CFLAGS" CXXFLAGS="-Wno-error -O3 -march=native $CFLAGS" ./configure --prefix=$HOME/nginx_ --without-http_rewrite_module --without-http-cache  --with-http_ssl_module
+CFLAGS="-Wno-error -std=gnu99 -O3 -march=native $CFLAGS" CXXFLAGS="-Wno-error -std=gnu++11 -O3 -march=native $CFLAGS" ./configure --prefix=$HOME/nginx_ --without-http_rewrite_module --without-http-cache  --with-http_ssl_module
 make -j $NUM_CPU_CORES
 echo $? > ~/install-exit-status
 make install

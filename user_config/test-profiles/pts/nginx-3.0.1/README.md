@@ -4,16 +4,28 @@
 
 This custom test profile overrides the default PTS nginx-3.0.1 test profile to enable multi-process nginx server for proper multi-core benchmarking.
 
-## Modification
+## Modifications
 
 **File:** `install.sh`
 
-**Change:** Enable nginx `worker_processes auto;` by removing the comment-out.
+### Change 1: Enable nginx `worker_processes auto;`
 
 ```diff
 - sed -i "s/worker_processes  1;/#worker_processes  auto;/g" nginx_/conf/nginx.conf
 + sed -i "s/worker_processes  1;/worker_processes  auto;/g" nginx_/conf/nginx.conf
 ```
+
+### Change 2: Fix OpenSSL 3.2+ compatibility (Ubuntu 25.04 ARM64)
+
+```diff
+- CFLAGS="-Wno-error -O3 -march=native $CFLAGS"
++ CFLAGS="-Wno-error -std=gnu99 -O3 -march=native $CFLAGS"
+
+- CXXFLAGS="-Wno-error -O3 -march=native $CFLAGS"
++ CXXFLAGS="-Wno-error -std=gnu++11 -O3 -march=native $CFLAGS"
+```
+
+**Reason:** nginx 1.23.3 has compilation errors with OpenSSL 3.2+ due to `crypto/modes/modes_local.h` syntax. Adding `-std=gnu99` enables Elvis operator (`?:`) support.
 
 **Result in nginx.conf:**
 ```diff

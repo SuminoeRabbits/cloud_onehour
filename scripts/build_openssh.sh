@@ -8,9 +8,16 @@ INSTALL_PREFIX="/usr/local"
 
 echo "Building OpenSSL ${VERSION} with current CFLAGS: ${CFLAGS:-none}"
 
+# Check zlib dependency
+if ! ldconfig -p | grep -q libz.so; then
+    echo "Error: zlib not found. Please run build_zlib.sh first."
+    echo "OpenSSL requires zlib for compression support."
+    exit 1
+fi
+
 # Check if OpenSSL is already installed with the correct version
 if [ -x "${INSTALL_PREFIX}/bin/openssl" ]; then
-    INSTALLED_VERSION=$("${INSTALL_PREFIX}/bin/openssl" version 2>/dev/null | awk '{print $2}')
+    INSTALLED_VERSION=$("${INSTALL_PREFIX}/bin/openssl" version 2>/dev/null | awk '{print $2}' | cut -d'-' -f1)
     if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
         echo "=== OpenSSL ${VERSION} is already installed ==="
         echo "Skipping installation. To reinstall, remove ${INSTALL_PREFIX}/bin/openssl first."
@@ -102,12 +109,12 @@ echo "OpenSSL ${VERSION} installed to ${INSTALL_PREFIX}"
 echo "To use it, ensure ${INSTALL_PREFIX}/bin is in your PATH"
 
 # Add to bashrc only if not already present
-if ! grep -q "export PATH=${INSTALL_PREFIX}/bin:" ~/.bashrc 2>/dev/null; then
+if ! grep -qE "export PATH=.*${INSTALL_PREFIX}/bin" ~/.bashrc 2>/dev/null; then
     echo "export PATH=${INSTALL_PREFIX}/bin:\$PATH" >> ~/.bashrc
     echo "Added PATH to ~/.bashrc"
 fi
 
-if ! grep -q "export LD_LIBRARY_PATH=${LIBDIR}:" ~/.bashrc 2>/dev/null; then
-    echo "export LD_LIBRARY_PATH=${LIBDIR}:\$LD_LIBRARY_PATH" >> ~/.bashrc
+if ! grep -qE "export LD_LIBRARY_PATH=.*${LIBDIR}" ~/.bashrc 2>/dev/null; then
+    echo "export LD_LIBRARY_PATH=${LIBDIR}\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" >> ~/.bashrc
     echo "Added LD_LIBRARY_PATH to ~/.bashrc"
 fi

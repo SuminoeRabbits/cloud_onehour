@@ -33,8 +33,8 @@ echo "Building zlib ${VERSION} with current CFLAGS: ${CFLAGS:-none}"
 echo "Detected architecture: $ARCH -> Using library directory: $LIBSUBDIR"
 
 # Check if zlib is already installed with the correct version
-if [ -f "${LIBDIR}/libz.so" ]; then
-    INSTALLED_VERSION=$(strings "${LIBDIR}/libz.so" 2>/dev/null | grep -oP '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+if [ -f "${INSTALL_PREFIX}/include/zlib.h" ]; then
+    INSTALLED_VERSION=$(grep '#define ZLIB_VERSION' "${INSTALL_PREFIX}/include/zlib.h" 2>/dev/null | awk '{print $3}' | tr -d '"')
     if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
         echo "=== zlib ${VERSION} is already installed ==="
         echo "Skipping installation. To reinstall, remove ${LIBDIR}/libz.so first."
@@ -46,8 +46,11 @@ if [ -f "${LIBDIR}/libz.so" ]; then
 fi
 
 # dependencies
-sudo apt-get update
-sudo apt-get install -y make cmake
+if ! command -v make &>/dev/null; then
+    echo "Installing make..."
+    sudo apt-get update
+    sudo apt-get install -y make
+fi
 
 # Set LDFLAGS to ensure RPATH is embedded
 export LDFLAGS="-Wl,-rpath,${LIBDIR}"
