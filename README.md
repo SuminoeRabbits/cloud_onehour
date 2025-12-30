@@ -82,7 +82,7 @@ Config file: `user_config/test-options/pts_openssl-3.6.0.config`
 
 **Note**: All tests in `test_suite.json` already have pre-configured XML files. Modify these to customize test behavior per benchmark. The script is completely generic - all test-specific settings are in the XML config files.
 
-## Run benchmark
+## Run benchmark on local
 
 ### Simple run
 
@@ -90,6 +90,15 @@ Config file: `user_config/test-options/pts_openssl-3.6.0.config`
 # Compiler environment is automatically loaded by run_pts_benchmark.sh
 ./scripts/run_pts_benchmark.sh coremark-1.0.1 2>&1 | tee -a stdout.log
 ./scripts/run_pts_benchmark.sh openssl-3.0.1 2>&1 | tee -a stdout.log
+```
+
+## Run benchmark on cloud
+
+### AWS CLI authentification
+
+Check you have been authorized to use aws cli.
+```
+aws configure list
 ```
 
 ### Total run

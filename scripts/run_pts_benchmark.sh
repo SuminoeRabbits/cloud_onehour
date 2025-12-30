@@ -462,23 +462,148 @@ mkdir -p "$BENCHMARK_RESULTS_DIR"
 # PTSはベンチマーク実行時に~/にCSVファイルを直接生成する
 # これらのファイルを適切な場所に移動する
 
-echo ">>> Organizing CSV results..."
+echo ">>> Exporting and organizing results..."
 for threads in $(seq 1 $MAX_THREADS); do
     RESULT_IDENTIFIER="${BENCHMARK}-${threads}threads"
 
-    # PTSが生成するCSVファイル名のパターン
-    # 例: coremark-101-1threads-16.csv (最後の数字は実行回数)
-    CSV_PATTERN="${BENCHMARK_NAME}-*-${threads}threads*.csv"
+    # PTSが生成するtest-resultsディレクトリから結果を取得
+    # 例: ~/.phoronix-test-suite/test-results/coremark-101-1threads/
+    PTS_RESULTS_DIR=~/.phoronix-test-suite/test-results
+    RESULT_DIR_PATTERN="${BENCHMARK_NAME}-*-${threads}threads"
 
-    # ホームディレクトリでCSVファイルを検索
-    CSV_FILES=$(ls -t $HOME/${CSV_PATTERN} 2>/dev/null | head -1)
+    # 最新の結果ディレクトリを検索
+    RESULT_DIR=$(ls -td $PTS_RESULTS_DIR/${RESULT_DIR_PATTERN} 2>/dev/null | head -1)
 
-    if [ -n "$CSV_FILES" ]; then
-        CSV_FILE="$CSV_FILES"
-        echo "  Moving CSV for $threads thread(s): $(basename $CSV_FILE)"
-        mv "$CSV_FILE" "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.csv"
+    if [ -n "$RESULT_DIR" ] && [ -d "$RESULT_DIR" ]; then
+        echo "  Processing results for $threads thread(s): $(basename $RESULT_DIR)"
+
+        # composite.xmlをコピー
+        if [ -f "$RESULT_DIR/composite.xml" ]; then
+            cp "$RESULT_DIR/composite.xml" "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.xml"
+            echo "    Saved: ${RESULT_IDENTIFIER}.xml"
+        fi
+
+        # PTSのCSVエクスポート機能を使ってCSVを生成
+        # result-file-to-csvコマンドで結果をCSV形式に変換
+        if phoronix-test-suite result-file-to-csv "$(basename $RESULT_DIR)" > "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.csv" 2>/dev/null; then
+            echo "    Exported: ${RESULT_IDENTIFIER}.csv"
+        else
+            # CSVエクスポートが失敗した場合、XMLから直接パース
+            echo "    [INFO] Parsing results from XML..."
+            python3 << PYTHON_EOF
+import xml.etree.ElementTree as ET
+import csv
+
+try:
+    tree = ET.parse('$RESULT_DIR/composite.xml')
+    root = tree.getroot()
+
+    # Extract result data
+    results = []
+    for result in root.findall('.//Result'):
+        title = result.find('Title')
+        description = result.find('Description')
+        scale = result.find('Scale')
+
+        title_text = title.text if title is not None else 'Unknown'
+        desc_text = description.text if description is not None else 'Unknown'
+        scale_text = scale.text if scale is not None else 'Unknown'
+
+        for entry in result.findall('.//Data/Entry'):
+            identifier = entry.find('Identifier')
+            value = entry.find('Value')
+            raw_string = entry.find('RawString')
+
+            if value is not None:
+                results.append({
+                    'test': title_text,
+                    'description': desc_text,
+                    'identifier': identifier.text if identifier is not None else '',
+                    'value': value.text,
+                    'unit': scale_text,
+                    'raw_values': raw_string.text if raw_string is not None else ''
+                })
+
+    # Write CSV
+    if results:
+        with open('$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}.csv', 'w', newline='') as csvfile:
+            fieldnames = ['test', 'description', 'identifier', 'value', 'unit', 'raw_values']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in results:
+                writer.writerow(row)
+        print("    Exported: ${RESULT_IDENTIFIER}.csv (from XML)")
+    else:
+        print("    [WARN] No results found in XML")
+except Exception as e:
+    print(f"    [ERROR] Failed to parse XML: {e}")
+PYTHON_EOF
+        fi
+
+        # 人間が読みやすいテキストサマリーを生成
+        echo "    Generating summary..."
+        python3 << PYTHON_EOF > "$BENCHMARK_RESULTS_DIR/${RESULT_IDENTIFIER}-summary.txt" 2>/dev/null
+import xml.etree.ElementTree as ET
+
+try:
+    tree = ET.parse('$RESULT_DIR/composite.xml')
+    root = tree.getroot()
+
+    # Print header
+    gen = root.find('Generated')
+    if gen is not None:
+        title = gen.find('Title')
+        desc = gen.find('Description')
+        last_mod = gen.find('LastModified')
+        print("=" * 80)
+        print(f"Benchmark: {title.text if title is not None else 'Unknown'}")
+        print(f"Description: {desc.text if desc is not None else 'Unknown'}")
+        print(f"Date: {last_mod.text if last_mod is not None else 'Unknown'}")
+        print("=" * 80)
+        print()
+
+    # Print system info
+    system = root.find('System')
+    if system is not None:
+        hw = system.find('Hardware')
+        sw = system.find('Software')
+        if hw is not None:
+            print(f"Hardware: {hw.text}")
+        if sw is not None:
+            print(f"Software: {sw.text}")
+        print()
+
+    # Print results
+    for result in root.findall('.//Result'):
+        title = result.find('Title')
+        description = result.find('Description')
+        scale = result.find('Scale')
+
+        print("-" * 80)
+        print(f"Test: {title.text if title is not None else 'Unknown'}")
+        print(f"Metric: {description.text if description is not None else 'Unknown'}")
+        print(f"Unit: {scale.text if scale is not None else 'Unknown'}")
+        print()
+
+        for entry in result.findall('.//Data/Entry'):
+            identifier = entry.find('Identifier')
+            value = entry.find('Value')
+            raw_string = entry.find('RawString')
+
+            if value is not None:
+                print(f"  Result: {value.text}")
+                if raw_string is not None and raw_string.text:
+                    print(f"  Raw values: {raw_string.text}")
+                print()
+
+    print("=" * 80)
+except Exception as e:
+    print(f"Error parsing XML: {e}")
+PYTHON_EOF
+        echo "    Saved: ${RESULT_IDENTIFIER}-summary.txt"
+
     else
-        echo "  [WARN] CSV file not found for $threads thread(s) (pattern: ${CSV_PATTERN})"
+        echo "  [WARN] Result directory not found for $threads thread(s) (pattern: ${RESULT_DIR_PATTERN})"
     fi
 done
 
