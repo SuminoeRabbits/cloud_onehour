@@ -82,6 +82,23 @@ uninstall_pts() {
     echo "Uninstall completed (including cache cleanup)"
 }
 
+# Function to clean up broken PPA for Ubuntu 25.x
+cleanup_broken_ppa() {
+    # Detect Ubuntu version
+    UBUNTU_VERSION=$(lsb_release -rs 2>/dev/null || echo "unknown")
+    UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || echo "unknown")
+
+    # Clean up broken ondrej/php PPA if exists (for Ubuntu 25.x)
+    if [[ "$UBUNTU_VERSION" =~ ^25\. ]] || [[ "$UBUNTU_CODENAME" == "questing" ]]; then
+        if ls /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources 2>/dev/null || ls /etc/apt/sources.list.d/ondrej-ubuntu-php-*.list 2>/dev/null; then
+            echo "=== Removing unsupported ondrej/php PPA for Ubuntu 25.x ==="
+            sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources
+            sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.list
+            echo "[OK] Broken PPA removed"
+        fi
+    fi
+}
+
 # Function to install PTS
 install_pts() {
     echo "=== Installing Phoronix Test Suite ${VERSION} ==="
@@ -100,15 +117,6 @@ install_pts() {
 
     echo "Ubuntu version: $UBUNTU_VERSION ($UBUNTU_CODENAME)"
     echo "Current PHP version: $CURRENT_PHP_VERSION"
-
-    # Clean up broken ondrej/php PPA if exists (for Ubuntu 25.x)
-    if [[ "$UBUNTU_VERSION" =~ ^25\. ]] || [[ "$UBUNTU_CODENAME" == "questing" ]]; then
-        if [ -f "/etc/apt/sources.list.d/ondrej-ubuntu-php-${UBUNTU_CODENAME}.sources" ]; then
-            echo "Removing unsupported ondrej/php PPA for Ubuntu 25.x..."
-            sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources
-            sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.list
-        fi
-    fi
 
     # Strategy based on Ubuntu version
     if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
@@ -193,6 +201,9 @@ EOF
 
 # Main logic: Always perform clean install to ensure cache is cleared
 echo "=== Checking PTS installation status ==="
+
+# Clean up broken PPA first (before any apt operations)
+cleanup_broken_ppa
 
 if [ -x "$LAUNCHER" ]; then
     # PTS is installed - get version and uninstall
