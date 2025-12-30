@@ -2,13 +2,22 @@
 
 ## Purpose
 
-This custom test profile overrides the default PTS compress-7zip-1.9.0 test profile to enable explicit multi-threading control for proper vCPU scaling benchmarks.
+This custom test profile overrides the default PTS compress-7zip-1.9.0 test profile to enable explicit multi-threading control for proper vCPU scaling benchmarks and fix GCC 14 compilation issues.
 
 ## Modifications
 
 **File:** `install.sh`
 
-### Change: Add `-mmt=$NUM_CPU_CORES` to benchmark command
+### Change 1: Fix GCC 14 compilation error
+
+```diff
+- make -j $NUM_CPU_CORES -f makefile.gcc
++ CFLAGS="$CFLAGS -Wno-error=dangling-pointer" CXXFLAGS="$CXXFLAGS -Wno-error=dangling-pointer" make -j $NUM_CPU_CORES -f makefile.gcc
+```
+
+**Reason:** 7-Zip 22.00 has compilation errors with GCC 14 due to stricter dangling pointer checks in `LzmaEnc.c`. Adding `-Wno-error=dangling-pointer` downgrades this error to a warning.
+
+### Change 2: Add `-mmt=$NUM_CPU_CORES` to benchmark command
 
 ```diff
 - ./CPP/7zip/Bundles/Alone2/_o/7zz b > \$LOG_FILE 2>&1

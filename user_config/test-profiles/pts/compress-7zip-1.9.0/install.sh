@@ -2,7 +2,7 @@
 
 tar -xf 7z2200-src.tar.xz
 cd CPP/7zip/Bundles/Alone2
-make -j $NUM_CPU_CORES -f makefile.gcc
+CFLAGS="$CFLAGS -Wno-error=dangling-pointer" CXXFLAGS="$CXXFLAGS -Wno-error=dangling-pointer" make -j $NUM_CPU_CORES -f makefile.gcc
 echo $? > ~/install-exit-status
 cd ~
 echo "#!/bin/sh
