@@ -91,6 +91,7 @@ Config file: `user_config/test-options/pts_openssl-3.6.0.config`
 ./scripts/run_pts_benchmark.py coremark-1.0.1 100 2>&1 | tee -a stdout.log
 ./scripts/run_pts_benchmark.py openssl-3.6.0 2>&1 | tee -a stdout.log
 ./scripts/run_pts_benchmark.py sysbench-1.1.0 2>&1 | tee -a stdout.log
+./scripts/run_pts_benchmark.py nginx-3.0.1 2>&1 | tee -a stdout.log
 
 ```
 
