@@ -68,7 +68,7 @@
                     "notes": ""
                 },
                 "pts/compress-xz-1.1.0": {
-                    "enabled": false
+                    "enabled": false,
                     "vcpu_scaling": false,
                     "sve2_support": false,
                     "notes": ""
@@ -125,7 +125,7 @@
                     "notes": "No need to support SIMD."
                 },
                 "pts/spark-1.0.0": {
-                    "enabled": false
+                    "enabled": false,
                     "vcpu_scaling": false,
                     "sve2_support": false,
                     "notes": "No need to support SIMD."
