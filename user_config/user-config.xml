@@ -19,7 +19,7 @@
       </ResultsViewer>
     </General>
     <Modules>
-      <AutoLoadModules>toggle_screensaver, perf_tips</AutoLoadModules>
+      <AutoLoadModules>toggle_screensaver</AutoLoadModules>
     </Modules>
     <Installation>
       <RemoveDownloadFiles>FALSE</RemoveDownloadFiles>
