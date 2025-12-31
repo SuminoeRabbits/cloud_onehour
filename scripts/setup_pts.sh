@@ -93,27 +93,40 @@ if [[ "$SKIP_PHP_INSTALL" == "false" ]]; then
         # Ubuntu 22.04 LTS: Use default PHP 8.1
         echo "Ubuntu 22.04 LTS: Installing default PHP 8.1"
         sudo apt-get update
-        sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+        if ! sudo apt-get install -y php-cli php-xml php-gd php-curl unzip; then
+            echo "[ERROR] Failed to install PHP on Ubuntu 22.04"
+            exit 1
+        fi
 
     elif [[ "$UBUNTU_VERSION" == "24.04" ]]; then
         # Ubuntu 24.04 LTS: Install PHP 8.1 from ondrej PPA
         echo "Ubuntu 24.04 LTS: Installing PHP 8.1 from ondrej/php PPA"
         sudo apt-get install -y software-properties-common
-        sudo add-apt-repository -y ppa:ondrej/php
-        sudo apt-get update
-        sudo apt-get install -y \
-            php8.1-cli \
-            php8.1-xml \
-            php8.1-json \
-            php8.1-gd \
-            php8.1-curl \
-            unzip
-        sudo update-alternatives --set php /usr/bin/php8.1
-        echo "[OK] PHP 8.1 installed and set as default"
+
+        if sudo add-apt-repository -y ppa:ondrej/php; then
+            sudo apt-get update
+            if sudo apt-get install -y \
+                php8.1-cli \
+                php8.1-xml \
+                php8.1-gd \
+                php8.1-curl \
+                unzip; then
+                sudo update-alternatives --set php /usr/bin/php8.1
+                echo "[OK] PHP 8.1 installed and set as default"
+            else
+                echo "[WARN] Failed to install PHP 8.1, trying system default"
+                sudo apt-get install -y php-cli php-xml php-gd php-curl unzip
+            fi
+        else
+            echo "[WARN] Failed to add ondrej/php PPA, using system default"
+            sudo apt-get update
+            sudo apt-get install -y php-cli php-xml php-gd php-curl unzip
+        fi
 
     elif [[ "$UBUNTU_VERSION" =~ ^25\. ]] || [[ "$UBUNTU_CODENAME" == "questing" ]]; then
-        # Ubuntu 25.x: Try ondrej PPA, fallback to system default
-        echo "Ubuntu 25.x: Attempting PHP 8.1 installation from ondrej/php PPA"
+        # Ubuntu 25.x: ondrej PPA not supported, use system default PHP
+        echo "Ubuntu 25.x: ondrej/php PPA not supported for this version"
+        echo "Installing system default PHP (may not be 8.1)..."
 
         # Remove broken ondrej/php PPA if exists
         if ls /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources 2>/dev/null || \
@@ -121,22 +134,25 @@ if [[ "$SKIP_PHP_INSTALL" == "false" ]]; then
             echo "Removing existing ondrej/php PPA..."
             sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources
             sudo rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.list
+            # Clean apt cache to remove PPA metadata
+            sudo apt-get clean
         fi
 
-        sudo apt-get install -y software-properties-common
-        if sudo add-apt-repository -y ppa:ondrej/php 2>/dev/null; then
-            sudo apt-get update
-            if sudo apt-get install -y php8.1-cli php8.1-xml php8.1-json php8.1-gd php8.1-curl unzip 2>/dev/null; then
-                sudo update-alternatives --set php /usr/bin/php8.1
-                echo "[OK] PHP 8.1 installed and set as default"
-            else
-                echo "[WARN] PHP 8.1 not available in PPA, using system default PHP"
-                sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
-            fi
+        echo "Updating package lists..."
+        sudo apt-get update 2>&1 | grep -v "does not have a Release file" | grep -v "can't be done securely" || true
+
+        if ! sudo apt-get install -y php-cli php-xml php-gd php-curl unzip; then
+            echo "[ERROR] Failed to install PHP on Ubuntu 25.x"
+            exit 1
+        fi
+
+        INSTALLED_PHP=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "unknown")
+        if [[ "$INSTALLED_PHP" != "8.1" ]]; then
+            echo "[WARN] PHP 8.1 not available on Ubuntu 25.x"
+            echo "[WARN] Installed PHP $INSTALLED_PHP instead"
+            echo "[WARN] PTS may have compatibility issues with PHP != 8.1"
         else
-            echo "[WARN] Failed to add ondrej/php PPA, using system default PHP"
-            sudo apt-get update
-            sudo apt-get install -y php-cli php-xml php-json php-gd php-curl unzip
+            echo "[OK] PHP 8.1 installed"
         fi
 
     else
