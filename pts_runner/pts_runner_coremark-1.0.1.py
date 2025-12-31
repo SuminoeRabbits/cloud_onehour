@@ -10,6 +10,7 @@ Based on test_suite.json configuration:
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -228,6 +229,133 @@ class CoreMarkRunner:
 
         return True
 
+    def export_results(self):
+        """Export benchmark results to CSV and JSON formats."""
+        print(f"\n{'='*80}")
+        print(f">>> Exporting benchmark results")
+        print(f"{'='*80}")
+
+        pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
+
+        for num_threads in self.thread_list:
+            result_name = f"coremark-{num_threads}threads"
+
+            # Check if result exists
+            result_dir = pts_results_dir / result_name
+            if not result_dir.exists():
+                print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
+                continue
+
+            print(f"\n[INFO] Exporting results for {num_threads} thread(s)...")
+
+            # Export to CSV
+            csv_output = self.results_dir / f"{num_threads}-thread.csv"
+            print(f"  [EXPORT] CSV: {csv_output}")
+            result = subprocess.run(
+                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                # PTS saves to ~/result_name.csv, move it to our results directory
+                home_csv = Path.home() / f"{result_name}.csv"
+                if home_csv.exists():
+                    shutil.move(str(home_csv), str(csv_output))
+                    print(f"  [OK] Saved: {csv_output}")
+            else:
+                print(f"  [WARN] CSV export failed: {result.stderr}")
+
+            # Export to JSON
+            json_output = self.results_dir / f"{num_threads}-thread.json"
+            print(f"  [EXPORT] JSON: {json_output}")
+            result = subprocess.run(
+                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                # PTS saves to ~/result_name.json, move it to our results directory
+                home_json = Path.home() / f"{result_name}.json"
+                if home_json.exists():
+                    shutil.move(str(home_json), str(json_output))
+                    print(f"  [OK] Saved: {json_output}")
+            else:
+                print(f"  [WARN] JSON export failed: {result.stderr}")
+
+        print(f"\n[OK] Export completed")
+
+    def generate_summary(self):
+        """Generate summary.log and summary.json from all thread results."""
+        print(f"\n{'='*80}")
+        print(f">>> Generating summary")
+        print(f"{'='*80}")
+
+        summary_log = self.results_dir / "summary.log"
+        summary_json_file = self.results_dir / "summary.json"
+
+        # Collect results from all JSON files
+        all_results = []
+        for num_threads in self.thread_list:
+            json_file = self.results_dir / f"{num_threads}-thread.json"
+            if json_file.exists():
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    # Extract benchmark result
+                    for result_id, result in data.get('results', {}).items():
+                        for system_id, system_result in result.get('results', {}).items():
+                            all_results.append({
+                                'threads': num_threads,
+                                'value': system_result.get('value'),
+                                'raw_values': system_result.get('raw_values', []),
+                                'test_name': result.get('title'),
+                                'description': result.get('description'),
+                                'unit': result.get('scale')
+                            })
+
+        if not all_results:
+            print("[WARN] No results found for summary generation")
+            return
+
+        # Generate summary.log (human-readable)
+        with open(summary_log, 'w') as f:
+            f.write("="*80 + "\n")
+            f.write(f"CoreMark 1.0.1 Benchmark Summary\n")
+            f.write(f"Machine: {self.machine_name}\n")
+            f.write(f"Test Category: {self.test_category}\n")
+            f.write("="*80 + "\n\n")
+
+            for result in all_results:
+                f.write(f"Threads: {result['threads']}\n")
+                f.write(f"  Test: {result['test_name']}\n")
+                f.write(f"  Description: {result['description']}\n")
+                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in result['raw_values']])}\n")
+                f.write("\n")
+
+            f.write("="*80 + "\n")
+            f.write("Summary Table\n")
+            f.write("="*80 + "\n")
+            f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
+            f.write("-"*80 + "\n")
+            for result in all_results:
+                f.write(f"{result['threads']:<10} {result['value']:<15.2f} {result['unit']:<20}\n")
+
+        print(f"[OK] Summary log saved: {summary_log}")
+
+        # Generate summary.json (AI-friendly format)
+        summary_data = {
+            "benchmark": self.benchmark,
+            "test_category": self.test_category,
+            "machine": self.machine_name,
+            "vcpu_count": self.vcpu_count,
+            "results": all_results
+        }
+
+        with open(summary_json_file, 'w') as f:
+            json.dump(summary_data, f, indent=2)
+
+        print(f"[OK] Summary JSON saved: {summary_json_file}")
+
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
@@ -253,6 +381,12 @@ class CoreMarkRunner:
             # Run benchmark
             if not self.run_benchmark(num_threads):
                 failed.append(num_threads)
+
+        # Export results to CSV and JSON
+        self.export_results()
+
+        # Generate summary
+        self.generate_summary()
 
         # Summary
         print(f"\n{'='*80}")
