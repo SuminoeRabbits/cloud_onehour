@@ -57,6 +57,7 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 ベンチマーク結果は results/<machine name>/<test_category>/<testname>/<N>-thread.log
 <test_category>にスペースがある場合は"_"に置換する。
 ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。summaryはすべての<N>のデータを集計する必要があるので、テスト終了後に行われることが期待される。
+テスト実施前にresults/<machine name>/<test_category>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
 
 ## run PTS
 上記の設定を使って、PTSを走行。
