@@ -181,6 +181,28 @@ echo "[OK] PHP installation completed"
 echo "Installed PHP version: $(php --version | head -1)"
 echo ""
 
+# 1.6. Suppress PHP warnings for compatibility
+echo "=== Step 1.6: Suppressing PHP warnings ==="
+
+# Get script directory to find suppress_php_warnings.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUPPRESS_SCRIPT="$SCRIPT_DIR/suppress_php_warnings.sh"
+
+if [ -f "$SUPPRESS_SCRIPT" ]; then
+    echo "Running suppress_php_warnings.sh to prevent PHP compatibility issues..."
+    bash "$SUPPRESS_SCRIPT"
+    if [ $? -eq 0 ]; then
+        echo "[OK] PHP warnings suppressed successfully"
+    else
+        echo "[WARN] Failed to suppress PHP warnings, continuing anyway..."
+    fi
+else
+    echo "[WARN] suppress_php_warnings.sh not found at: $SUPPRESS_SCRIPT"
+    echo "[WARN] PHP warnings may appear during PTS execution"
+fi
+
+echo ""
+
 # 2. Install PTS
 echo "=== Step 2: Installing Phoronix Test Suite ${VERSION} ==="
 
