@@ -183,6 +183,26 @@ error: storing the address of local variable 'outStream' in '*p.rc.outStream' [-
 **Symptoms**: No "[INFO] Architecture" message
 **Solution**: Check that install.sh is being used (run with `phoronix-test-suite force-install`)
 
+### Initial Build Errors During Benchmark Run
+**Symptoms**: See SHA-512 errors at the start of `./scripts/run_pts_benchmark.py` output
+**Cause**: PTS performs initial test installation checks before the script overrides the test-profile
+**Solution**: Ignore initial errors - the script will override the test-profile and successfully rebuild
+**Expected Behavior**:
+```
+# Initial PTS checks (may show errors)
+ERROR: /tmp/ccXXXX.s:232: Error: no such instruction: `vsha512rnds2...
+[PROBLEM] pts/compress-7zip-1.12.0 is not installed.
+
+# Script takes over and overrides test-profile
+[INFO] Overriding PTS test-profile with local version
+[OK] Test-profile copied
+
+# Tests complete successfully
+[OK] Test with 1 threads completed successfully
+[OK] Test with 2 threads completed successfully
+...
+```
+
 ## Development
 
 ### Testing Detection Logic
