@@ -66,9 +66,19 @@ setup_compress_7zip_1_12_0() {
     echo ""
 }
 
+# Setup nginx-3.0.1 cache
+setup_nginx_3_0_1() {
+    echo "--- Setting up nginx-3.0.1 ---"
+    download_file "https://nginx.org/download/nginx-1.23.3.tar.gz" "nginx-1.23.3.tar.gz"
+    download_file "https://github.com/wg/wrk/archive/4.2.0.tar.gz" "wrk-4.2.0.tar.gz"
+    download_file "https://phoronix-test-suite.com/benchmark-files/http-test-files-1.tar.xz" "http-test-files-1.tar.xz"
+    echo ""
+}
+
 # Setup all tests
 setup_all() {
     setup_compress_7zip_1_12_0
+    setup_nginx_3_0_1
     # Add more tests here as needed
 }
 
@@ -76,6 +86,9 @@ setup_all() {
 case "${1:-all}" in
     compress-7zip-1.12.0)
         setup_compress_7zip_1_12_0
+        ;;
+    nginx-3.0.1)
+        setup_nginx_3_0_1
         ;;
     all)
         setup_all
@@ -85,6 +98,7 @@ case "${1:-all}" in
         echo ""
         echo "Available tests:"
         echo "  compress-7zip-1.12.0 - 7-Zip compression benchmark"
+        echo "  nginx-3.0.1          - Nginx web server benchmark"
         echo "  all                  - Setup cache for all tests"
         exit 1
         ;;
@@ -97,3 +111,4 @@ ls -lh "$CACHE_DIR"
 echo ""
 echo "You can now run benchmarks offline:"
 echo "  ./scripts/run_pts_benchmark.py compress-7zip-1.12.0"
+echo "  ./scripts/run_pts_benchmark.py nginx-3.0.1"

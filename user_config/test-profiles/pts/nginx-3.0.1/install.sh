@@ -19,6 +19,11 @@ sed -i "38 i ssl_ciphers          HIGH:!aNULL:!MD5;" nginx_/conf/nginx.conf
 rm -rf wrk-4.2.0
 tar -xf wrk-4.2.0.tar.gz
 cd wrk-4.2.0
+
+# Fix GCC 14 compatibility: Change -std=c99 to -std=gnu99
+# This allows inline assembly (asm keyword) in OpenSSL to work properly
+sed -i 's/-std=c99/-std=gnu99/g' Makefile
+
 make -j $NUM_CPU_CORES
 echo $? > ~/install-exit-status
 cd ~
