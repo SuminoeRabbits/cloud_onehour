@@ -165,6 +165,24 @@ if ! "$LAUNCHER" version >/dev/null 2>&1; then
 fi
 
 echo ""
+
+# 3. Configure batch mode
+echo "=== Step 3: Configuring batch mode ==="
+echo "Setting up batch-mode configuration for automated testing..."
+
+# Run batch-setup with automated responses
+# Y - Save test results when in batch mode
+# N - Open the web browser automatically
+# N - Auto upload to OpenBenchmarking.org
+# N - Prompt for test identifier
+# N - Prompt for test description
+# N - Prompt for saved results file-name
+# Y - Run all test options
+printf "Y\nN\nN\nN\nN\nN\nY\n" | "$LAUNCHER" batch-setup
+
+echo "[OK] Batch mode configured"
+echo ""
+
 echo "=== Setup completed successfully ==="
 echo "PHP version: $(php --version | head -1)"
 "$LAUNCHER" version
