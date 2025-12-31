@@ -13,12 +13,19 @@ GIving about "one hour" equivalent benchmark workload for cloud instance with Ph
 ### Automated setup (recommended)
 
 This will install all dependencies including GCC-14, zlib, OpenSSL, and Phoronix Test Suite.
-It will also configure passwordless sudo for automated benchmark runs.
+It will also configure passwordless sudo for automated benchmark runs and **automatically setup download cache** for offline benchmark execution.
 
 ```bash
 cd cloud_onehour/scripts
 ./prepare_tools.sh
 ```
+
+**What happens during setup:**
+- Install system dependencies and compilers
+- Install Phoronix Test Suite v10.8.4
+- **Download and cache benchmark source files** (e.g., 7z2500-src.tar.xz)
+- Configure PTS for offline operation
+- Setup passwordless sudo
 
 **Note**: You will be asked for your sudo password once during setup. After that, sudo commands will run without password prompts.
 
@@ -92,6 +99,7 @@ Config file: `user_config/test-options/pts_openssl-3.6.0.config`
 ./scripts/run_pts_benchmark.py openssl-3.6.0 2>&1 | tee -a stdout.log
 ./scripts/run_pts_benchmark.py sysbench-1.1.0 2>&1 | tee -a stdout.log
 ./scripts/run_pts_benchmark.py nginx-3.0.1 2>&1 | tee -a stdout.log
+./scripts/run_pts_benchmark.py compress-7zip-1.9.0  2>&1 | tee -a stdout.log
 
 ```
 

@@ -2,8 +2,8 @@
 
 tar -xf 7z2200-src.tar.xz
 cd CPP/7zip/Bundles/Alone2
-# Patch makefile to remove -Werror
-sed -i 's/-Werror/-Wno-error=dangling-pointer/g' ../../7zip_gcc.mak
+# Patch makefile to fix GCC 14 dangling-pointer error
+sed -i 's/CFLAGS_WARN_WALL = -Wall -Werror -Wextra/CFLAGS_WARN_WALL = -Wall -Wno-error=dangling-pointer -Wextra/g' ../../7zip_gcc.mak
 make -j $NUM_CPU_CORES -f makefile.gcc
 echo $? > ~/install-exit-status
 cd ~

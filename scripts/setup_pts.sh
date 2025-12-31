@@ -99,6 +99,25 @@ cleanup_broken_ppa() {
     fi
 }
 
+# Function to setup download cache
+setup_download_cache() {
+    echo "=== Setting up PTS download cache ==="
+
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CACHE_SCRIPT="$SCRIPT_DIR/setup_download_cache.sh"
+
+    if [ -f "$CACHE_SCRIPT" ]; then
+        echo "Running: $CACHE_SCRIPT all"
+        bash "$CACHE_SCRIPT" all
+        echo "[OK] Download cache setup completed"
+    else
+        echo "[WARN] setup_download_cache.sh not found at: $CACHE_SCRIPT"
+        echo "[WARN] Skipping download cache setup"
+        echo "[INFO] Benchmarks will require internet connectivity to download files"
+    fi
+    echo ""
+}
+
 # Function to install PTS
 install_pts() {
     echo "=== Installing Phoronix Test Suite ${VERSION} ==="
@@ -221,10 +240,12 @@ if [ -x "$LAUNCHER" ]; then
 
     uninstall_pts "${INSTALLED_VERSION:-unknown}"
     install_pts
+    setup_download_cache  # Setup cache after clean install
 else
     # PTS not installed - clean install
     echo "=== No existing PTS installation found ==="
     install_pts
+    setup_download_cache  # Setup cache after first install
 fi
 
 # Setup user config directory

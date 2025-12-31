@@ -15,6 +15,7 @@ from pathlib import Path
 import tempfile
 import signal
 import time
+import shutil
 
 
 class PTSBenchmarkRunner:
@@ -177,6 +178,10 @@ class PTSBenchmarkRunner:
     def force_install_test(self):
         """Force rebuild test with current compiler settings."""
         print(">>> Forcing rebuild with current compiler settings...")
+
+        # Re-override test-profile to ensure it's used during force-install
+        # (PTS may have downloaded a fresh copy)
+        self.override_test_profile()
 
         # Load compiler environment if available
         compiler_env_script = self.script_dir / "setup_compiler_env.sh"
@@ -556,6 +561,23 @@ class PTSBenchmarkRunner:
         except:
             pass
 
+    def override_test_profile(self):
+        """Override PTS test-profile with local version if it exists."""
+        local_test_profile = self.config_dir / "test-profiles" / "pts" / self.benchmark
+        pts_test_profile = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark
+
+        if local_test_profile.exists():
+            print(f"[INFO] Overriding PTS test-profile with local version: {local_test_profile}")
+            pts_test_profile.parent.mkdir(parents=True, exist_ok=True)
+
+            # Copy all files from local test-profile to PTS directory
+            if pts_test_profile.exists():
+                shutil.rmtree(pts_test_profile)
+            shutil.copytree(local_test_profile, pts_test_profile)
+            print(f"[OK] Test-profile copied to {pts_test_profile}")
+        else:
+            print(f"[INFO] No local test-profile override found for {self.benchmark}")
+
     def run(self):
         """Main execution flow."""
         print(f"[INFO] Machine name: {os.environ.get('MACHINE_NAME', os.uname().nodename)}")
@@ -566,6 +588,9 @@ class PTSBenchmarkRunner:
 
         # Determine execution mode
         self.determine_execution_mode()
+
+        # Override test-profile BEFORE any PTS operations
+        self.override_test_profile()
 
         # Set CPU governor
         self.set_cpu_governor_performance()
