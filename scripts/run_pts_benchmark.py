@@ -261,8 +261,20 @@ class PTSBenchmarkRunner:
         if 'CXXFLAGS' in env:
             env['EXTRA_CXXFLAGS'] = env['CXXFLAGS']
 
+        # First, remove any existing installation
+        # This ensures install.sh is executed fresh, not just recompiled
+        print(f"[INFO] Removing existing installation of {self.benchmark_full}...")
         subprocess.run(
-            ['phoronix-test-suite', 'force-install', self.benchmark_full],
+            ['bash', '-c', f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        # Now do a fresh install (not force-install, which skips install.sh execution)
+        print(f"[INFO] Performing fresh installation of {self.benchmark_full}...")
+        subprocess.run(
+            ['phoronix-test-suite', 'install', self.benchmark_full],
             env=env
         )
 
