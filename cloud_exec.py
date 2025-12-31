@@ -535,6 +535,56 @@ def process_instance(cloud, inst, config, key_path):
 
         ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
 
+        # Set hostname if specified in instance configuration
+        if 'hostname' in inst and inst['hostname']:
+            hostname = inst['hostname']
+
+            # Validate hostname format (alphanumeric and hyphens only, no leading/trailing hyphens)
+            import re
+            if not re.match(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$', hostname):
+                msg = f"Invalid hostname format: {hostname}. Must contain only lowercase letters, numbers, and hyphens."
+                if DEBUG_MODE == True:
+                    log(msg, "ERROR")
+                else:
+                    print(f"[Error] {msg}")
+            else:
+                progress(instance_name, f"Setting hostname to: {hostname}")
+
+                if DEBUG_MODE == True:
+                    log(f"Setting hostname to: {hostname}")
+                elif DEBUG_MODE == False:
+                    print(f"  [Hostname] Setting to: {hostname}")
+
+                ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
+                ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={'yes' if ssh_strict else 'no'} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
+                ssh_user = config['common']['ssh_user']
+
+                # Set hostname using hostnamectl and update /etc/hosts
+                hostname_cmd = f"sudo hostnamectl set-hostname {hostname} && sudo sed -i '/127.0.1.1/d' /etc/hosts && echo '127.0.1.1 {hostname}' | sudo tee -a /etc/hosts > /dev/null"
+
+                try:
+                    result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{hostname_cmd}'", capture=False, timeout=30)
+
+                    if result is not None:
+                        progress(instance_name, f"Hostname set successfully")
+
+                        if DEBUG_MODE == True:
+                            log(f"Hostname set to: {hostname}")
+                        elif DEBUG_MODE == False:
+                            print(f"  [Hostname] Successfully set to: {hostname}")
+                    else:
+                        msg = f"Failed to set hostname to: {hostname}"
+                        if DEBUG_MODE == True:
+                            log(msg, "WARN")
+                        else:
+                            print(f"  [Warning] {msg}")
+                except Exception as e:
+                    msg = f"Error setting hostname: {e}"
+                    if DEBUG_MODE == True:
+                        log(msg, "ERROR")
+                    else:
+                        print(f"  [Error] {msg}")
+
         # Run all commands sequentially
         commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name)
         if not commands_success:

@@ -26,6 +26,7 @@
         "name": "aws-benchmark-instance",
         "type": "t3.medium",
         "arch": "amd64",
+        "hostname": "aws-t3-medium-amd64",
         "vcpus": 2,
         "enable": true
       }
@@ -40,6 +41,7 @@
         "name": "gcp-benchmark-instance",
         "type": "e2-medium",
         "arch": "amd64",
+        "hostname": "gcp-e2-medium-amd64",
         "vcpus": 2,
         "enable": true
       }
@@ -54,6 +56,7 @@
         "name": "oci-benchmark-instance",
         "type": "VM.Standard.E4.Flex",
         "arch": "amd64",
+        "hostname": "oci-vm-standard-e4-flex-amd64",
         "vcpus": 2,
         "enable": false
       }
