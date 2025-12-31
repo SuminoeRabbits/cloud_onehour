@@ -118,7 +118,8 @@ class CoreMarkRunner:
 
         # Build install command with environment variables
         # Environment must be set before the command (as per README)
-        install_cmd = f'NUM_CPU_CORES={num_threads} CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite install {self.benchmark_full}'
+        # Use batch-install to suppress prompts
+        install_cmd = f'NUM_CPU_CORES={num_threads} CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
@@ -165,16 +166,17 @@ class CoreMarkRunner:
         # PTS_USER_PATH_OVERRIDE: use our batch-mode configured user-config.xml
         # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
-        batch_env = f'PTS_USER_PATH_OVERRIDE={user_config_dir} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 TEST_RESULTS_NAME=coremark-{num_threads}threads TEST_RESULTS_IDENTIFIER=coremark-{num_threads}threads'
+        # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
+        batch_env = f'PTS_USER_PATH_OVERRIDE={user_config_dir} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=coremark-{num_threads}threads TEST_RESULTS_IDENTIFIER=coremark-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
-            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} phoronix-test-suite benchmark {self.benchmark_full}'
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
         else:
             # Partial vCPU mode - use taskset with affinity
             cpu_list = self.get_cpu_affinity_list(num_threads)
-            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} taskset -c {cpu_list} phoronix-test-suite benchmark {self.benchmark_full}'
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
         print(f"[INFO] {cpu_info}")

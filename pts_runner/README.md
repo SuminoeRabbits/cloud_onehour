@@ -6,9 +6,8 @@ phoronix-test-suite --help
 ```
 を参照。
 
-## Find <testname>
-<testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。
-今回はデバッグの為に<testname>=coremark-1.0.1に固定。
+## Find <testname> 
+<testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。../test_suite.jsonに登録されていない<testname>は不正。
 
 ## setup
 PTSのCacheをすべてクリアする。
@@ -16,7 +15,14 @@ PTSのCacheをすべてクリアする。
 
 ## clean up
 PTSから<testname>をPTSのInstallコマンドを使ってクリーンインストールする、その際にはGcc-14を使って毎回Nativeでコンパイルを行う。環境としてはUbuntu22以上、Hardwareはarm64/amd64の両方を前提とする。
-なおデバッグの為に、このPTSのクリーンインストールコマンドを標準出力に出す。
+
+- なおデバッグの為に、このPTSのクリーンインストールコマンドを標準出力に出す。
+
+- クリーンインストール時のBuildは、"THFix_in_compile": trueの場合はNUM_CPU_CORES=vCPU数 としてビルドを行う。
+
+- クリーンインストール時のBuildは、"THFix_in_compile": falseの場合はNUM_CPU_CORESを指定しない。
+
+- PTSのインストールコマンドはbatch-installを使う事。
 
 ## set <N>=number of threads
 
@@ -46,15 +52,17 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 ## set output directory
 ベンチマーク結果は results/<machine name>/<test_category>/<testname>/<N>-thread.log
 <test_category>にスペースがある場合は"_"に置換する。
-ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。
+ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。summaryはすべての<N>のデータを集計する必要があるので、テスト終了後に行われることが期待される。
 
 ## run PTS
 上記の設定を使って、PTSを走行。
 その際のPTSコマンドはデバッグの為に標準出力する。
 
-その際の標準出力、標準エラー出力は
+- 標準出力、標準エラー出力は
 results/<machine name>/<test_category>/<testname>/stdout.log
 にteeコマンドでダンプしながら、ターミナルにも出力。
+
+- PTSのbatch-runコマンドを利用
 
 - 環境設定はPTS実施の先に来ないとだめ。
 例えば $> NUM_CPU_CORES=4 phoronix-test-suite benchmark
