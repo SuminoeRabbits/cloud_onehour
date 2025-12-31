@@ -47,6 +47,9 @@ CURRENT_PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/
 echo "Ubuntu version: $UBUNTU_VERSION ($UBUNTU_CODENAME)"
 echo "Current PHP version: $CURRENT_PHP_VERSION"
 
+# Initialize flag
+SKIP_PHP_INSTALL=false
+
 # Function to remove existing PHP installations
 remove_existing_php() {
     echo "Removing existing PHP installation..."
@@ -62,8 +65,17 @@ remove_existing_php() {
     echo "[OK] Existing PHP removed"
 }
 
+# Check if PHP 8.1 is already installed
+if [[ "$CURRENT_PHP_VERSION" == "8.1" ]]; then
+    echo "[INFO] PHP 8.1 already installed, skipping installation"
+    echo "[OK] PHP installation completed"
+    echo "Installed PHP version: $(php --version | head -1)"
+    echo ""
+    SKIP_PHP_INSTALL=true
+fi
+
 # Check if PHP 8.2+ is installed and needs rollback
-if [[ "$CURRENT_PHP_VERSION" != "none" && "$CURRENT_PHP_VERSION" != "8.1" ]]; then
+if [[ "$SKIP_PHP_INSTALL" == "false" && "$CURRENT_PHP_VERSION" != "none" ]]; then
     # Extract major.minor version for comparison
     PHP_MAJOR=$(echo "$CURRENT_PHP_VERSION" | cut -d. -f1)
     PHP_MINOR=$(echo "$CURRENT_PHP_VERSION" | cut -d. -f2)
@@ -72,17 +84,11 @@ if [[ "$CURRENT_PHP_VERSION" != "none" && "$CURRENT_PHP_VERSION" != "8.1" ]]; th
     if [[ "$PHP_MAJOR" -eq 8 && "$PHP_MINOR" -ge 2 ]] || [[ "$PHP_MAJOR" -gt 8 ]]; then
         echo "[INFO] PHP $CURRENT_PHP_VERSION detected (>= 8.2), rolling back to PHP 8.1..."
         remove_existing_php
-    elif [[ "$CURRENT_PHP_VERSION" == "8.1" ]]; then
-        echo "[INFO] PHP 8.1 already installed, skipping installation"
-        echo "[OK] PHP installation completed"
-        echo "Installed PHP version: $(php --version | head -1)"
-        echo ""
-        # Skip to next step
-        SKIP_PHP_INSTALL=true
+        # Continue to install PHP 8.1 below
     fi
 fi
 
-if [[ "$SKIP_PHP_INSTALL" != "true" ]]; then
+if [[ "$SKIP_PHP_INSTALL" == "false" ]]; then
     if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
         # Ubuntu 22.04 LTS: Use default PHP 8.1
         echo "Ubuntu 22.04 LTS: Installing default PHP 8.1"
