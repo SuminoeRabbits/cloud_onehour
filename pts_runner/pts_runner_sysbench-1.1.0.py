@@ -123,7 +123,9 @@ class SysbenchRunner:
         # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
         # Thread control is done at runtime, not compile time
         # Use batch-install to suppress prompts
-        install_cmd = f'CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
+        nproc = os.cpu_count() or 1
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")

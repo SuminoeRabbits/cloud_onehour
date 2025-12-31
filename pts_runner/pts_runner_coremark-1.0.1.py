@@ -119,7 +119,10 @@ class CoreMarkRunner:
         # Build install command with environment variables
         # Environment must be set before the command (as per README)
         # Use batch-install to suppress prompts
-        install_cmd = f'NUM_CPU_CORES={num_threads} CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        # NUM_CPU_CORES: sets thread count in the binary (for THFix_in_compile=true)
+        # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
+        nproc = os.cpu_count() or 1
+        install_cmd = f'NUM_CPU_CORES={num_threads} MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
