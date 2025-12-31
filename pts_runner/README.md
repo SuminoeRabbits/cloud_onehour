@@ -5,6 +5,7 @@ pts_runner/pts_runner_<testname>.pyでやりたいことを書きます。
 phoronix-test-suite --help
 ```
 を参照。
+すべてのpts_runner/pts_runner_<testname>.pyにおいて可能な限り関数名、構造を共通化。個別対応が必要な部分はそれが個別であることがわかるように実装。
 
 ## Find <testname> 
 <testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。../test_suite.jsonに登録されていない<testname>は不正。
@@ -18,7 +19,7 @@ PTSから<testname>をPTSのInstallコマンドを使ってクリーンインス
 
 - なおデバッグの為に、このPTSのクリーンインストールコマンドを標準出力に出す。
 
-- クリーンインストール時のBuildは、"THFix_in_compile": trueの場合はNUM_CPU_CORES=vCPU数 としてビルドを行う。
+- クリーンインストール時のBuildは、"THFix_in_compile": trueの場合はNUM_CPU_CORES=vCPU数でBinaryの対応するスレッド数設定、コンパイル時は最大限並列化させたいので -j`nproc` としてビルドを行う。
 
 - クリーンインストール時のBuildは、"THFix_in_compile": falseの場合はNUM_CPU_CORESを指定しない。
 
