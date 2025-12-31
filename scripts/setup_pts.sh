@@ -203,6 +203,26 @@ fi
 
 echo ""
 
+# 1.7. Install build dependencies for PTS benchmarks
+echo "=== Step 1.7: Installing build dependencies ==="
+echo "Installing essential build tools for benchmark compilation..."
+
+# Essential build tools required by most PTS benchmarks
+BUILD_DEPS="build-essential pkg-config autoconf automake libtool cmake git"
+
+# Additional common dependencies
+EXTRA_DEPS="libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev"
+EXTRA_DEPS="$EXTRA_DEPS libncurses-dev libffi-dev liblzma-dev"
+
+echo "Installing: $BUILD_DEPS $EXTRA_DEPS"
+if sudo apt-get install -y $BUILD_DEPS $EXTRA_DEPS; then
+    echo "[OK] Build dependencies installed"
+else
+    echo "[WARN] Some dependencies failed to install, continuing anyway..."
+fi
+
+echo ""
+
 # 2. Install PTS
 echo "=== Step 2: Installing Phoronix Test Suite ${VERSION} ==="
 

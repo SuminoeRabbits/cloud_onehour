@@ -61,12 +61,35 @@ else
     echo "[OK] Added display_startup_errors = Off"
 fi
 
+# Also disable error_log to prevent logging to stderr
+CURRENT_LOG=$(grep -E "^error_log\s*=" "$PHP_INI" || echo "")
+
+if [ -n "$CURRENT_LOG" ]; then
+    # Comment out existing error_log
+    sudo sed -i 's/^error_log\s*=.*;/; error_log disabled by suppress_php_warnings.sh/' "$PHP_INI"
+    echo "[OK] Disabled error_log"
+else
+    echo "; error_log disabled by suppress_php_warnings.sh" | sudo tee -a "$PHP_INI" > /dev/null
+fi
+
+# Set log_errors to Off to completely disable error logging
+CURRENT_LOG_ERRORS=$(grep -E "^log_errors\s*=" "$PHP_INI" || echo "")
+
+if [ -n "$CURRENT_LOG_ERRORS" ]; then
+    sudo sed -i 's/^log_errors\s*=.*/log_errors = Off/' "$PHP_INI"
+    echo "[OK] Updated log_errors to Off"
+else
+    echo "log_errors = Off" | sudo tee -a "$PHP_INI" > /dev/null
+    echo "[OK] Added log_errors = Off"
+fi
+
 # Verify the changes
 echo ""
 echo "=== Final PHP Configuration ==="
 grep -E "^error_reporting\s*=" "$PHP_INI"
 grep -E "^display_errors\s*=" "$PHP_INI"
 grep -E "^display_startup_errors\s*=" "$PHP_INI"
+grep -E "^log_errors\s*=" "$PHP_INI"
 
 echo ""
 echo "[OK] PHP deprecation warnings completely suppressed"
