@@ -210,12 +210,15 @@ echo "Installing essential build tools for benchmark compilation..."
 # Essential build tools required by most PTS benchmarks
 BUILD_DEPS="build-essential pkg-config autoconf automake libtool cmake git"
 
+# Linux kernel build requirements
+KERNEL_DEPS="flex bison bc libelf-dev libssl-dev"
+
 # Additional common dependencies
 EXTRA_DEPS="libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev"
 EXTRA_DEPS="$EXTRA_DEPS libncurses-dev libffi-dev liblzma-dev"
 
-echo "Installing: $BUILD_DEPS $EXTRA_DEPS"
-if sudo apt-get install -y $BUILD_DEPS $EXTRA_DEPS; then
+echo "Installing: $BUILD_DEPS $KERNEL_DEPS $EXTRA_DEPS"
+if sudo apt-get install -y $BUILD_DEPS $KERNEL_DEPS $EXTRA_DEPS; then
     echo "[OK] Build dependencies installed"
 else
     echo "[WARN] Some dependencies failed to install, continuing anyway..."
