@@ -12,9 +12,11 @@
 # test_suite.jsonで "enabled": true, のテストのみを有効とします。
 # "test_category"の層で"enabled": false, の場合、
 # その配下のテストは全て無効となります。
+#
 # 2. <testname>の決定
 # 有効なテストの"items"配下の"pts/<testname>"で開始するフィールドを
 # <testname>とします。
+#
 # 3. <number>の決定
 # <number>はtest_suite.jsonの有効なテストの"items"配下の
 # "pts/<testname>"配下の
@@ -27,14 +29,20 @@
 #       <number> は何も指定してはいけない。
 #    else
 #       <number>=1
-# 4. 実行コマンドの生成
-# test_suite.jsonで1-3までが終了しすべての実行コマンドが生成されたら
-# 一度デバッグの為に標準出力に出力します。
+#
+# 4. 有効なrunnerスクリプトが存在するかの確認   
+# test_suite.jsonでは有効なテストがpts_runner/pts_runner_<testname>.py 
+# として存在しない場合は、警告を出してください。
+# ただし、コマンドの生成は続行してください。
+#
+# 5. 実行コマンドの生成
+# test_suite.jsonで1-4までが終了しすべての実行コマンドが生成されたら
+# 一度デバッグの為に標準出力に出力します。この出力はそのままターミナルに
+# コピー＆ペーストして実行できる形式にしてください。
 #
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -129,6 +137,12 @@ def generate_test_commands(test_suite):
             # Build command
             runner_script = f"./pts_runner/pts_runner_{testname}.py"
 
+            # Check if runner script exists (requirement #4)
+            runner_path = Path(runner_script)
+            if not runner_path.exists():
+                print(f"  [WARN] Runner script not found: {runner_script}")
+                print(f"  [INFO] Command will be generated anyway, but execution may fail")
+
             if number_arg is None:
                 cmd = runner_script
             else:
@@ -140,63 +154,23 @@ def generate_test_commands(test_suite):
     return commands
 
 
-def execute_commands(commands, dry_run=False):
+def print_commands(commands):
     """
-    Execute generated commands.
+    Print generated commands to stdout in copy-pasteable format.
 
     Args:
         commands: List of command strings
-        dry_run: If True, only print commands without executing
-
-    Returns:
-        int: Number of failed commands
     """
     if not commands:
-        print("\n[WARN] No commands to execute")
-        return 0
+        print("\n[WARN] No commands to generate")
+        return
 
     print(f"\n{'='*80}")
-    print(f"Generated {len(commands)} test command(s)")
+    print(f"Generated {len(commands)} test command(s) - Copy & Paste Ready")
     print(f"{'='*80}")
-    for i, cmd in enumerate(commands, 1):
-        print(f"{i}. {cmd}")
+    for cmd in commands:
+        print(cmd)
     print(f"{'='*80}\n")
-
-    if dry_run:
-        print("[INFO] Dry run mode - commands not executed")
-        return 0
-
-    failed = []
-
-    for i, cmd in enumerate(commands, 1):
-        print(f"\n{'='*80}")
-        print(f"Executing command {i}/{len(commands)}: {cmd}")
-        print(f"{'='*80}\n")
-
-        result = subprocess.run(cmd, shell=True)
-
-        if result.returncode != 0:
-            print(f"\n[ERROR] Command failed with exit code {result.returncode}: {cmd}")
-            failed.append(cmd)
-        else:
-            print(f"\n[OK] Command completed successfully: {cmd}")
-
-    # Summary
-    print(f"\n{'='*80}")
-    print(f"Execution Summary")
-    print(f"{'='*80}")
-    print(f"Total commands: {len(commands)}")
-    print(f"Successful: {len(commands) - len(failed)}")
-    print(f"Failed: {len(failed)}")
-
-    if failed:
-        print(f"\nFailed commands:")
-        for cmd in failed:
-            print(f"  - {cmd}")
-
-    print(f"{'='*80}\n")
-
-    return len(failed)
 
 
 def main():
@@ -204,12 +178,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='PTS Regression Test Runner',
+        description='PTS Regression Test Command Generator',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                    # Generate and execute all enabled tests
-  %(prog)s --dry-run          # Show commands without executing
+  %(prog)s                    # Generate commands from test_suite.json
   %(prog)s --suite custom.json # Use custom test suite file
         """
     )
@@ -220,20 +193,13 @@ Examples:
         help='Path to test suite JSON file (default: test_suite.json)'
     )
 
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Print commands without executing them'
-    )
-
     args = parser.parse_args()
 
     print(f"{'='*80}")
-    print(f"PTS Regression Test Runner")
+    print(f"PTS Regression Test Command Generator")
     print(f"{'='*80}")
     print(f"Test suite: {args.suite}")
     print(f"CPU count: {get_cpu_count()}")
-    print(f"Dry run: {args.dry_run}")
     print(f"{'='*80}\n")
 
     # Load test suite
@@ -242,11 +208,8 @@ Examples:
     # Generate commands
     commands = generate_test_commands(test_suite)
 
-    # Execute commands
-    failed_count = execute_commands(commands, dry_run=args.dry_run)
-
-    # Exit with appropriate code
-    sys.exit(0 if failed_count == 0 else 1)
+    # Print commands
+    print_commands(commands)
 
 
 if __name__ == "__main__":

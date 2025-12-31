@@ -28,10 +28,10 @@
             }
         },
         "Build Process": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/build-linux-kernel-1.17.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
@@ -39,7 +39,7 @@
                     "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation"
                 },
                 "pts/build-llvm-1.6.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
@@ -47,7 +47,7 @@
                     "notes": "Uses cmake --build . -- -j $NUM_CPU_CORES"
                 },
                 "pts/build-gcc-1.5.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
@@ -68,7 +68,7 @@
                     "notes": "7-Zip benchmark uses -mmt=$NUM_CPU_CORES for thread control (custom install.sh). Default auto-detects all threads without this option."
                 },
                 "pts/compress-zstd-1.6.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
@@ -76,7 +76,7 @@
                     "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument"
                 },
                 "pts/compress-xz-1.1.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
@@ -97,7 +97,7 @@
                     "notes": "Uses -multi $NUM_CPU_CORES runtime CLI argument"
                 },
                 "pts/nginx-3.0.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
