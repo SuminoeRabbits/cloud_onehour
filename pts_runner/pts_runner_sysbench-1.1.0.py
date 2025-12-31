@@ -163,15 +163,12 @@ class SysbenchRunner:
         # If N >= vCPU: don't use taskset (all vCPUs assigned)
         # If N < vCPU: use taskset with CPU affinity
 
-        # Get user_config directory path
-        user_config_dir = self.project_root / "user_config"
-
         # Environment variables to suppress all prompts
-        # PTS_USER_PATH_OVERRIDE: use our batch-mode configured user-config.xml
         # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
-        batch_env = f'PTS_USER_PATH_OVERRIDE={user_config_dir} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=sysbench-{num_threads}threads TEST_RESULTS_IDENTIFIER=sysbench-{num_threads}threads'
+        # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
+        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=sysbench-{num_threads}threads TEST_RESULTS_IDENTIFIER=sysbench-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
