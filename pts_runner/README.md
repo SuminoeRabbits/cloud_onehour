@@ -7,6 +7,9 @@ phoronix-test-suite --help
 を参照。
 すべてのpts_runner/pts_runner_<testname>.pyにおいて可能な限り関数名、構造を共通化。個別対応が必要な部分はそれが個別であることがわかるように実装。
 
+## Python version
+Python3.10で動作すること。
+
 ## Find <testname> 
 <testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。../test_suite.jsonに登録されていない<testname>は不正。
 
