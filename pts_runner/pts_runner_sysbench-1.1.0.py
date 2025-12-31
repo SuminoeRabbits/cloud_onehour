@@ -374,6 +374,14 @@ class SysbenchRunner:
         print(f"[INFO] Results directory: {self.results_dir}")
         print()
 
+        # Clean existing results directory before starting
+        if self.results_dir.exists():
+            print(f">>> Cleaning existing results directory...")
+            print(f"  [INFO] Removing: {self.results_dir}")
+            shutil.rmtree(self.results_dir)
+            print(f"  [OK] Results directory cleaned")
+            print()
+
         # Clean cache once at the beginning
         self.clean_pts_cache()
 
