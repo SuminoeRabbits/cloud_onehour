@@ -175,9 +175,59 @@ class PTSBenchmarkRunner:
             print(f"[ERROR] Failed to parse config file: {e}")
             sys.exit(1)
 
+    def clean_test_cache(self):
+        """
+        Clean all PTS cache for the current test to ensure fresh installation.
+
+        This removes:
+        1. Test profile cache (~/.phoronix-test-suite/test-profiles/pts/{test}/)
+        2. Installed test binaries (~/.phoronix-test-suite/installed-tests/pts/{test}/)
+
+        Download cache (~/.phoronix-test-suite/download-cache/) is preserved
+        to avoid re-downloading source files.
+        """
+        print(">>> Cleaning test cache to ensure fresh installation...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+        test_name = self.benchmark  # e.g., "nginx-3.0.1"
+
+        # Directories to clean
+        test_profile_dir = pts_home / 'test-profiles' / 'pts' / test_name
+        installed_test_dir = pts_home / 'installed-tests' / 'pts' / test_name
+
+        removed_count = 0
+
+        # Remove test profile cache
+        if test_profile_dir.exists():
+            print(f"  [CLEAN] Removing test profile cache: {test_profile_dir}")
+            shutil.rmtree(test_profile_dir)
+            removed_count += 1
+
+        # Remove installed test binaries
+        if installed_test_dir.exists():
+            print(f"  [CLEAN] Removing installed test: {installed_test_dir}")
+            shutil.rmtree(installed_test_dir)
+            removed_count += 1
+
+        if removed_count == 0:
+            print("  [INFO] No cached files found (clean state)")
+        else:
+            print(f"  [OK] Cleaned {removed_count} cache location(s)")
+
+        # Preserve download cache
+        download_cache_dir = pts_home / 'download-cache'
+        if download_cache_dir.exists():
+            cache_files = list(download_cache_dir.glob('*'))
+            if cache_files:
+                print(f"  [INFO] Preserved download cache: {len(cache_files)} file(s)")
+
     def force_install_test(self):
         """Force rebuild test with current compiler settings."""
         print(">>> Forcing rebuild with current compiler settings...")
+
+        # Clean all test cache before installation
+        # This ensures user_config/test-profiles override is always used
+        self.clean_test_cache()
 
         # Re-override test-profile to ensure it's used during force-install
         # (PTS may have downloaded a fresh copy)
@@ -328,14 +378,11 @@ class PTSBenchmarkRunner:
                     text=True
                 )
 
-            success = result.returncode == 0
-            if success:
-                print(f"[OK] Test with {threads} threads completed successfully")
-            else:
-                print(f"[ERROR] Test with {threads} threads failed")
-
-            # Capture POST-RUN CPU frequency
+            # Capture POST-RUN CPU frequency before checking results
             self.capture_cpu_frequency(threads, 'POST-RUN')
+
+            # Enhanced error detection
+            success = self.verify_test_execution(threads, result.returncode)
 
             return success
 
@@ -345,6 +392,79 @@ class PTSBenchmarkRunner:
                 os.unlink(input_fifo)
             except:
                 pass
+
+    def verify_test_execution(self, threads: int, pts_returncode: int) -> bool:
+        """
+        Verify that the test actually ran and produced results.
+
+        Checks:
+        1. PTS command succeeded (returncode 0)
+        2. Test exit status (~/test-exit-status file)
+        3. Result directory was created
+        4. Result file (composite.xml) exists and is non-empty
+
+        Returns:
+            bool: True if test succeeded and produced results, False otherwise
+        """
+        print(f">>> Verifying test execution for {threads} thread(s)...")
+
+        # Check 1: PTS command returncode
+        if pts_returncode != 0:
+            print(f"  [ERROR] PTS command failed with return code {pts_returncode}")
+            return False
+        print(f"  [OK] PTS command completed (returncode={pts_returncode})")
+
+        # Check 2: Test exit status file
+        test_status_file = Path.home() / "test-exit-status"
+        if test_status_file.exists():
+            try:
+                test_status = int(test_status_file.read_text().strip())
+                if test_status != 0:
+                    print(f"  [ERROR] Test execution failed with exit status {test_status}")
+                    print(f"  [INFO] This usually means the test binary failed to run")
+                    print(f"  [INFO] Check if test was properly installed")
+                    return False
+                print(f"  [OK] Test exit status: {test_status}")
+            except (ValueError, IOError) as e:
+                print(f"  [WARN] Could not read test-exit-status file: {e}")
+        else:
+            print(f"  [WARN] Test exit status file not found: {test_status_file}")
+
+        # Check 3: Result directory exists
+        pts_results_dir = Path.home() / '.phoronix-test-suite' / 'test-results'
+        result_pattern = f"{self.benchmark_name}-*-{threads}threads"
+        matching_dirs = sorted(pts_results_dir.glob(result_pattern),
+                              key=lambda p: p.stat().st_mtime,
+                              reverse=True)
+
+        if not matching_dirs:
+            print(f"  [ERROR] No result directory found matching pattern: {result_pattern}")
+            print(f"  [INFO] Search path: {pts_results_dir}")
+            print(f"  [INFO] This means PTS did not save any benchmark results")
+            print(f"  [INFO] Possible causes:")
+            print(f"         - Test binary is missing or failed to execute")
+            print(f"         - Test ran but produced no measurable output")
+            print(f"         - PTS configuration issue preventing result save")
+            return False
+
+        result_dir = matching_dirs[0]
+        print(f"  [OK] Result directory found: {result_dir.name}")
+
+        # Check 4: Result file exists and is non-empty
+        composite_xml = result_dir / 'composite.xml'
+        if not composite_xml.exists():
+            print(f"  [ERROR] Result file missing: {composite_xml}")
+            print(f"  [INFO] Result directory exists but contains no composite.xml")
+            return False
+
+        file_size = composite_xml.stat().st_size
+        if file_size == 0:
+            print(f"  [ERROR] Result file is empty: {composite_xml}")
+            return False
+
+        print(f"  [OK] Result file exists: composite.xml ({file_size} bytes)")
+        print(f"[OK] Test with {threads} threads completed successfully and produced results")
+        return True
 
     def capture_cpu_frequency(self, threads: int, stage: str):
         """Capture CPU frequency snapshot (PRE-RUN or POST-RUN)."""
