@@ -54,10 +54,10 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 今の時点では未定。
 
 ## set output directory
-ベンチマーク結果は results/<machine name>/<test_category>/<testname>/<N>-thread.log
-<test_category>にスペースがある場合は"_"に置換する。
+ベンチマーク結果は results/<machinename>/<testcategory>/<testname>/<N>-thread.log
+<testcategory>の文字列にスペースがある場合は"_"に置換する。
 ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。
-テスト実施前にresults/<machine name>/<test_category>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
+テスト実施前にresults/<machinename>/<testcategory>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
 
 
 ### summary file format
@@ -95,17 +95,23 @@ results/<machine name>/<test_category>/<testname>/stdout.log
 cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > <output_dir>/<N>-thread_freq_start.txt
 
 # perf statでベンチマーク実行（CPU毎の統計取得）
-perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations \
+# 重要: 環境変数は perf stat の前に配置すること
+NUM_CPU_CORES=<N> BATCH_MODE=1 ... perf stat -e cycles,instructions,... \
     -A -a \
     -o <output_dir>/<N>-thread_perf_stats.txt \
-    taskset -c <cpu_list> env NUM_CPU_CORES=<N> \
-    phoronix-test-suite batch-run <benchmark>
+    taskset -c <cpu_list> phoronix-test-suite batch-run <benchmark>
 
 # ベンチマーク終了後にCPU周波数を記録
 cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > <output_dir>/<N>-thread_freq_end.txt
 ```
 
-**重要**: `perf stat`に`-A`（per-CPU統計）および`-a`（全CPU監視）オプションを使用することで、CPU毎のメトリクスを取得。
+**重要な注意点**:
+1. `perf stat`に`-A`（per-CPU統計）および`-a`（全CPU監視）オプションを使用することで、CPU毎のメトリクスを取得
+2. **環境変数は必ず `perf stat` コマンドの前に配置すること**
+   - ❌ 間違い: `perf stat -e ... -o output.txt NUM_CPU_CORES=4 phoronix-test-suite ...`
+   - ✅ 正しい: `NUM_CPU_CORES=4 perf stat -e ... -o output.txt phoronix-test-suite ...`
+   - 理由: `perf stat` は引数として渡された環境変数を実行するコマンドに伝播しない
+3. PTSが設定する `$LOG_FILE` などの環境変数が正しく渡されないと "No such file or directory" エラーが発生する
 
 ### 出力ファイル
 results/<machine name>/<test_category>/<testname>/に以下を保存:
@@ -172,9 +178,24 @@ results/<machine name>/<test_category>/<testname>/に以下を保存:
   - `cpu_list`: 使用したCPUリスト（例: "0,2,4"）
 - **戻り値**: dict型のperf_summary
 
+### システム要件
+**perf_event_paranoid の設定**:
+- `perf stat -A -a`（per-CPU統計 + system-wide監視）を使用するため、`perf_event_paranoid <= 0` が必要
+- 各pts_runnerスクリプトは起動時に自動的に以下を実行:
+  1. `/proc/sys/kernel/perf_event_paranoid` の値を確認
+  2. 値が 1 以上の場合、`sudo sysctl -w kernel.perf_event_paranoid=0` で一時的に変更
+  3. sudo権限がない場合は警告を表示して制限モードで続行（per-CPUメトリクスなし）
+
+**perf_event_paranoid の値の意味**:
+- `-1`: ほぼ全てのイベントをユーザーが使用可能（最も緩い）
+- `0`: rawイベントとftraceトレースポイントを無効化（system-wide監視が可能）
+- `1`: system-wideイベントアクセスを無効化（デフォルト）
+- `2`: カーネルプロファイリングを無効化（最も厳しい）
+
 ### 注意事項
 - パフォーマンス影響: < 0.01%（無視できるレベル）
 - 時系列データは取得できない（ベンチマーク全体の平均値のみ）
 - アーキテクチャ固有イベント（cache-misses等）は使用しない（互換性のため）
 - `perf stat -A`はCPU毎の統計を出力（フォーマット: `CPU<n>`プレフィックス付き）
 - CPU周波数はkHz単位で保存されているため、GHzへの変換が必要（÷ 1,000,000）
+- 設定変更は一時的（再起動で元に戻る）、永続化は /etc/sysctl.conf に追加
