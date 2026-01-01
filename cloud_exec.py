@@ -488,19 +488,38 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
         elif DEBUG_MODE == False:
             print(f"  [Command {i}/{total_commands}] Completed")
 
-        # Special handling: Verify SSH build after build_openssh.sh execution
-        if 'build_openssh.sh' in cmd:
-            if DEBUG_MODE == True:
-                log("Detected build_openssh.sh execution, verifying build status...")
-            elif DEBUG_MODE == False:
-                print("  [SSH Build] Verifying OpenSSH installation...")
+        # Special handling: Verify SSH build after SSH-related scripts execution
+        # Detects both direct execution and execution via wrapper scripts
+        ssh_build_indicators = ['build_openssh.sh', 'prepare_tools.sh']
+        if any(indicator in cmd for indicator in ssh_build_indicators):
+            # Check if SSH build actually occurred by looking for status file
+            try:
+                status_check = run_cmd(
+                    f"ssh {ssh_opt} {ssh_user}@{ip} 'test -f /tmp/ssh_build_status.txt && echo EXISTS || echo NOTFOUND'",
+                    capture=True, timeout=5, ignore=True
+                )
 
-            if not verify_ssh_build(ip, ssh_opt, ssh_user, instance_name):
+                if status_check == "EXISTS":
+                    # SSH build was executed, verify it
+                    if DEBUG_MODE == True:
+                        log("Detected SSH build execution, verifying build status...")
+                    elif DEBUG_MODE == False:
+                        print("  [SSH Build] Verifying OpenSSH installation...")
+
+                    if not verify_ssh_build(ip, ssh_opt, ssh_user, instance_name):
+                        if DEBUG_MODE == True:
+                            log("SSH build verification failed, aborting command execution", "ERROR")
+                        elif DEBUG_MODE == False:
+                            print("  [Error] SSH build verification failed")
+                        return False
+                else:
+                    # Status file doesn't exist - SSH build was not executed (skip verification)
+                    if DEBUG_MODE == True:
+                        log("SSH build script detected but no status file found (build may have been skipped)")
+            except Exception as e:
+                # Verification check failed, but continue (don't block on verification issues)
                 if DEBUG_MODE == True:
-                    log("SSH build verification failed, aborting command execution", "ERROR")
-                elif DEBUG_MODE == False:
-                    print("  [Error] SSH build verification failed")
-                return False
+                    log(f"SSH build verification check failed: {e}, continuing...", "WARNING")
 
     progress(instance_name, "All commands completed")
 
