@@ -40,8 +40,14 @@
 # 一度デバッグの為に標準出力に出力します。この出力はそのままターミナルに
 # コピー＆ペーストして実行できる形式にしてください。
 #
-# 6. 実行コマンドの実行
+# 6. 実行コマンドの実行（実行オプション--all の場合のみ実施）
 # 5.で生成したコマンドを実際に実行します。
+#
+# 7. 実行オプションの追加
+# --max : 3.で<number>が決定されますが、それをすべて288と変更します。
+#         <number>が空白の場合でも、288と変更します。
+#　　　　　ただし<number>=1が指定されている場合は、１のまま変更しません。
+# --help: オプション一覧を表示します。
 #
 
 import json
@@ -79,12 +85,13 @@ def get_cpu_count():
     return os.cpu_count() or 1
 
 
-def generate_test_commands(test_suite):
+def generate_test_commands(test_suite, max_threads=None):
     """
     Generate test commands from test_suite.json.
 
     Args:
         test_suite: Parsed test_suite.json content
+        max_threads: If specified, override thread count to this value (except for single-threaded tests)
 
     Returns:
         list: List of command strings to execute
@@ -137,6 +144,22 @@ def generate_test_commands(test_suite):
                     number_arg = "1"
                     print(f"  [INFO] {testname}: Single thread mode, using 1 thread")
 
+            # Apply --max override if specified
+            # Override to 288 for all cases except single-threaded (number_arg="1")
+            if max_threads is not None:
+                if number_arg == "1":
+                    # Single-threaded: keep as 1
+                    print(f"  [INFO] --max: Single-threaded test, keeping 1 thread")
+                elif number_arg is None:
+                    # Scaling mode: override to 288
+                    number_arg = str(max_threads)
+                    print(f"  [INFO] --max override: scaling mode -> {number_arg} threads")
+                else:
+                    # Fixed thread count: override to 288
+                    original_arg = number_arg
+                    number_arg = str(max_threads)
+                    print(f"  [INFO] --max override: {original_arg} -> {number_arg} threads")
+
             # Build command
             runner_script = f"./pts_runner/pts_runner_{testname}.py"
 
@@ -155,6 +178,7 @@ def generate_test_commands(test_suite):
             print(f"  [OK] Generated command: {cmd}")
 
     return commands
+
 
 
 def print_commands(commands):
@@ -244,10 +268,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                         # Generate and execute commands from test_suite.json
-  %(prog)s --dry-run               # Generate commands but don't execute them
+  %(prog)s                         # Generate commands (dry-run mode)
+  %(prog)s --all                   # Generate and execute all commands
+  %(prog)s --max                   # Override thread count to 288 (except single-threaded)
+  %(prog)s --max --all             # Override to 288 threads and execute
   %(prog)s --suite custom.json     # Use custom test suite file
-  %(prog)s --no-execute            # Same as --dry-run
+  %(prog)s --dry-run               # Generate commands but don't execute (default)
         """
     )
 
@@ -258,9 +284,21 @@ Examples:
     )
 
     parser.add_argument(
+        '--all',
+        action='store_true',
+        help='Execute generated commands (default: dry-run mode)'
+    )
+
+    parser.add_argument(
+        '--max',
+        action='store_true',
+        help='Override thread count to 288 (except for single-threaded tests)'
+    )
+
+    parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Generate commands but do not execute them'
+        help='Generate commands but do not execute them (default behavior)'
     )
 
     parser.add_argument(
@@ -272,13 +310,19 @@ Examples:
     args = parser.parse_args()
 
     # Determine if we should execute
-    should_execute = not (args.dry_run or args.no_execute)
+    # Execution requires --all flag explicitly
+    should_execute = args.all and not (args.dry_run or args.no_execute)
+
+    # Determine max_threads
+    max_threads = 288 if args.max else None
 
     print(f"{'='*80}")
     print(f"PTS Regression Test Command Generator")
     print(f"{'='*80}")
     print(f"Test suite: {args.suite}")
     print(f"CPU count: {get_cpu_count()}")
+    if max_threads:
+        print(f"Thread override: {max_threads} (--max enabled)")
     print(f"Execution mode: {'Execute' if should_execute else 'Dry-run (no execution)'}")
     print(f"{'='*80}\n")
 
@@ -286,7 +330,7 @@ Examples:
     test_suite = load_test_suite(args.suite)
 
     # Generate commands
-    commands = generate_test_commands(test_suite)
+    commands = generate_test_commands(test_suite, max_threads=max_threads)
 
     # Print commands
     print_commands(commands)
@@ -297,7 +341,8 @@ Examples:
         sys.exit(1 if failed_count > 0 else 0)
     else:
         print("[INFO] Dry-run mode: Commands not executed")
-        print("[INFO] To execute commands, run without --dry-run or --no-execute flag\n")
+        print("[INFO] To execute commands, run with --all flag\n")
+
 
 
 if __name__ == "__main__":
