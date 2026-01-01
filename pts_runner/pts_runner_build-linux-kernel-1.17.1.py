@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.10
 """
 PTS Runner for build-linux-kernel-1.17.1
 
