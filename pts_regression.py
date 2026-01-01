@@ -176,6 +176,65 @@ def print_commands(commands):
     print(f"{'='*80}\n")
 
 
+def execute_commands(commands):
+    """
+    Execute the generated commands sequentially.
+
+    Args:
+        commands: List of command strings to execute
+
+    Returns:
+        int: Number of failed commands
+    """
+    import subprocess
+
+    if not commands:
+        print("[WARN] No commands to execute")
+        return 0
+
+    print(f"\n{'='*80}")
+    print(f"Executing {len(commands)} test command(s)")
+    print(f"{'='*80}\n")
+
+    failed_count = 0
+    for i, cmd in enumerate(commands, 1):
+        print(f"[{i}/{len(commands)}] Executing: {cmd}")
+        print(f"{'-'*80}")
+
+        try:
+            # Execute command and capture output
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                check=False,
+                text=True,
+                capture_output=False  # Show output in real-time
+            )
+
+            if result.returncode == 0:
+                print(f"[OK] Command completed successfully")
+            else:
+                print(f"[ERROR] Command failed with exit code {result.returncode}")
+                failed_count += 1
+
+        except Exception as e:
+            print(f"[ERROR] Exception occurred: {e}")
+            failed_count += 1
+
+        print(f"{'-'*80}\n")
+
+    # Summary
+    print(f"{'='*80}")
+    print(f"Execution Summary")
+    print(f"{'='*80}")
+    print(f"Total commands: {len(commands)}")
+    print(f"Successful: {len(commands) - failed_count}")
+    print(f"Failed: {failed_count}")
+    print(f"{'='*80}\n")
+
+    return failed_count
+
+
 def main():
     """Main execution flow."""
     import argparse
@@ -185,8 +244,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                    # Generate commands from test_suite.json
-  %(prog)s --suite custom.json # Use custom test suite file
+  %(prog)s                         # Generate and execute commands from test_suite.json
+  %(prog)s --dry-run               # Generate commands but don't execute them
+  %(prog)s --suite custom.json     # Use custom test suite file
+  %(prog)s --no-execute            # Same as --dry-run
         """
     )
 
@@ -196,13 +257,29 @@ Examples:
         help='Path to test suite JSON file (default: test_suite.json)'
     )
 
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Generate commands but do not execute them'
+    )
+
+    parser.add_argument(
+        '--no-execute',
+        action='store_true',
+        help='Generate commands but do not execute them (alias for --dry-run)'
+    )
+
     args = parser.parse_args()
+
+    # Determine if we should execute
+    should_execute = not (args.dry_run or args.no_execute)
 
     print(f"{'='*80}")
     print(f"PTS Regression Test Command Generator")
     print(f"{'='*80}")
     print(f"Test suite: {args.suite}")
     print(f"CPU count: {get_cpu_count()}")
+    print(f"Execution mode: {'Execute' if should_execute else 'Dry-run (no execution)'}")
     print(f"{'='*80}\n")
 
     # Load test suite
@@ -213,6 +290,14 @@ Examples:
 
     # Print commands
     print_commands(commands)
+
+    # Execute commands (step 6)
+    if should_execute:
+        failed_count = execute_commands(commands)
+        sys.exit(1 if failed_count > 0 else 0)
+    else:
+        print("[INFO] Dry-run mode: Commands not executed")
+        print("[INFO] To execute commands, run without --dry-run or --no-execute flag\n")
 
 
 if __name__ == "__main__":
