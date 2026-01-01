@@ -11,7 +11,7 @@ set -euo pipefail
 ./build_zlib.sh
 
 # build openssl
-./build_openssh.sh
+#./build_openssh.sh
 
 # build pts
 ./setup_pts.sh
