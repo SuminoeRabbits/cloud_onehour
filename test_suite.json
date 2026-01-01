@@ -107,10 +107,10 @@
             }
         },
         "Java Applications": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/renaissance-1.4.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "jvm-internal",
@@ -118,7 +118,7 @@
                     "notes": "JVM manages threading internally; different workloads have different parallelism. SVE2 is supported after OpenJDK9."
                 },
                 "pts/java-jmh-1.0.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "jmh:-t max",
@@ -128,10 +128,10 @@
             }
         },
         "Network": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/apache-3.0.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": false,
                     "TH_scaling": "single-threaded",

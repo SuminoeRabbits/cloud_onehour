@@ -56,8 +56,13 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 ## set output directory
 ベンチマーク結果は results/<machine name>/<test_category>/<testname>/<N>-thread.log
 <test_category>にスペースがある場合は"_"に置換する。
-ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。summaryはすべての<N>のデータを集計する必要があるので、テスト終了後に行われることが期待される。
+ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。
 テスト実施前にresults/<machine name>/<test_category>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
+
+
+### summary file format
+summaryはすべての<N>のデータを集計する必要があるので、テスト終了後に行われることが期待される。
+summaryにはデフォルトで生成されるデータに追加し、<N>-thread.jsonに含まれる"test_run_times"もそれぞれのThread/Test毎に統合される。
 
 ## run PTS
 上記の設定を使って、PTSを走行。
@@ -71,3 +76,105 @@ results/<machine name>/<test_category>/<testname>/stdout.log
 
 - 環境設定はPTS実施の先に来ないとだめ。
 例えば $> NUM_CPU_CORES=4 phoronix-test-suite benchmark
+
+## CPU frequency monitoring with perf stat
+ベンチマーク実行中のCPU動作周波数とパフォーマンス統計を取得するため、`perf stat`でPTSコマンドをラップする。
+
+### 取得するメトリクス
+以下のイベントを使用（amd64/arm64互換）:
+- `cycles`: CPUクロックサイクル数
+- `instructions`: 実行命令数
+- `cpu-clock`: CPU時間（ミリ秒）
+- `task-clock`: タスク実行時間
+- `context-switches`: コンテキストスイッチ回数
+- `cpu-migrations`: CPUコア間マイグレーション回数
+
+### 実行方法
+```bash
+# ベンチマーク開始前にCPU周波数を記録
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > <output_dir>/<N>-thread_freq_start.txt
+
+# perf statでベンチマーク実行（CPU毎の統計取得）
+perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations \
+    -A -a \
+    -o <output_dir>/<N>-thread_perf_stats.txt \
+    taskset -c <cpu_list> env NUM_CPU_CORES=<N> \
+    phoronix-test-suite batch-run <benchmark>
+
+# ベンチマーク終了後にCPU周波数を記録
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > <output_dir>/<N>-thread_freq_end.txt
+```
+
+**重要**: `perf stat`に`-A`（per-CPU統計）および`-a`（全CPU監視）オプションを使用することで、CPU毎のメトリクスを取得。
+
+### 出力ファイル
+results/<machine name>/<test_category>/<testname>/に以下を保存:
+- `<N>-thread_perf_stats.txt`: perf statの生出力（CPU毎）
+- `<N>-thread_freq_start.txt`: ベンチマーク開始時のCPU周波数（全CPU）
+- `<N>-thread_freq_end.txt`: ベンチマーク終了時のCPU周波数（全CPU）
+- `<N>-thread_perf_summary.json`: パース済み統計データ（JSON）
+
+### 計算メトリクス（perf_summary.json）
+`parse_perf_stats_and_freq()`関数で生成。以下のフォーマット:
+
+```json
+{
+  "avg_frequency_ghz": {
+    "0": 2.856,
+    "1": 2.912,
+    "2": 2.834
+  },
+  "start_frequency_ghz": {
+    "0": 2.500,
+    "1": 2.500,
+    "2": 2.500
+  },
+  "end_frequency_ghz": {
+    "0": 3.100,
+    "1": 3.200,
+    "2": 3.050
+  },
+  "ipc": {
+    "0": 1.51,
+    "1": 1.48,
+    "2": 1.53
+  },
+  "total_cycles": {
+    "0": 45234567890,
+    "1": 46123456789,
+    "2": 44987654321
+  },
+  "total_instructions": {
+    "0": 68456789012,
+    "1": 68234567890,
+    "2": 68876543210
+  },
+  "cpu_utilization_percent": 198.5,
+  "elapsed_time_sec": 15.88
+}
+```
+
+**計算方法**:
+- `avg_frequency_ghz[cpu]`: CPU毎の平均周波数 = cycles[cpu] / (cpu-clock[cpu] / 1000) / 1e9
+- `start_frequency_ghz[cpu]`: 開始時周波数（sysfsから取得、kHz → GHz変換）
+- `end_frequency_ghz[cpu]`: 終了時周波数（sysfsから取得、kHz → GHz変換）
+- `ipc[cpu]`: CPU毎のInstructions Per Cycle = instructions[cpu] / cycles[cpu]
+- `cpu_utilization_percent`: 全CPUの利用率合計
+
+### 実装モジュール
+すべてのpts_runnerスクリプトで共通関数を使用:
+- **関数名**: `parse_perf_stats_and_freq(perf_stats_file, freq_start_file, freq_end_file, cpu_list)`
+- **配置**: 各pts_runner_<testname>.pyのクラス内メソッド
+- **引数**:
+  - `perf_stats_file`: perf statの出力ファイルパス
+  - `freq_start_file`: 開始時周波数ファイルパス
+  - `freq_end_file`: 終了時周波数ファイルパス
+  - `cpu_list`: 使用したCPUリスト（例: "0,2,4"）
+- **戻り値**: dict型のperf_summary
+
+### 注意事項
+- パフォーマンス影響: < 0.01%（無視できるレベル）
+- 時系列データは取得できない（ベンチマーク全体の平均値のみ）
+- アーキテクチャ固有イベント（cache-misses等）は使用しない（互換性のため）
+- `perf stat -A`はCPU毎の統計を出力（フォーマット: `CPU<n>`プレフィックス付き）
+- CPU周波数はkHz単位で保存されているため、GHzへの変換が必要（÷ 1,000,000）
