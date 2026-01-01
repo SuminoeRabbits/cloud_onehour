@@ -1,122 +1,138 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION="3.5.4"
-ARCHIVE="openssl-${VERSION}.tar.gz"
-DOWNLOAD_URL="https://www.openssl.org/source/${ARCHIVE}"
-INSTALL_PREFIX="/usr/local"
+# --- ターゲットバージョンの設定 ---
+TARGET_SSL_VER="3.5.4"
+TARGET_SSH_VER="10.2"   # OpenSSH 10.2
+TARGET_SSH_FULL="${TARGET_SSH_VER}p1"
 
-echo "Building OpenSSL ${VERSION} with current CFLAGS: ${CFLAGS:-none}"
+SSL_PREFIX="/usr/local/openssl-${TARGET_SSL_VER}"
+SSH_PREFIX="/usr/local/ssh-${TARGET_SSH_VER}"
+BACKUP_DIR="/var/backups/openssl-ssh-compat-$(date +%Y%m%d)"
 
-# Check zlib dependency
-if ! ldconfig -p | grep -qE 'libz\.so\.1[[:space:]]'; then
-    echo "Error: zlib not found. Please run build_zlib.sh first."
-    echo "OpenSSL requires zlib for compression support."
-    exit 1
+# --- 関数: バージョン比較 ---
+# $1 >= $2 なら 0 (真), $1 < $2 なら 1 (偽)
+version_ge() {
+    [ "$(printf '%s\n%s' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+
+echo "=== システム診断開始 ==="
+
+# 1. 現在のバージョン取得
+CUR_SSL_VER=$(openssl version | awk '{print $2}' | sed 's/[a-z]//g') || CUR_SSL_VER="0.0.0"
+CUR_SSH_VER=$(ssh -V 2>&1 | awk -F'[_ ]' '{print $2}' | sed 's/p[0-1]//') || CUR_SSH_VER="0.0.0"
+
+echo "現在のOpenSSL: ${CUR_SSL_VER} (ターゲット: ${TARGET_SSL_VER})"
+echo "現在のOpenSSH: ${CUR_SSH_VER} (ターゲット: ${TARGET_SSH_VER})"
+
+# 2. インストール要否の判定
+# インストールするバージョン(Target)が現在(Cur)より高ければ実行
+DO_SSL=false
+if ! version_ge "$CUR_SSL_VER" "$TARGET_SSL_VER"; then
+    echo "[判定] OpenSSLをアップグレードします。"
+    DO_SSL=true
+else
+    echo "[判定] OpenSSLは既に最新または同等です。ビルドをスキップします。"
 fi
 
-# Check if OpenSSL is already installed with the correct version
-if [ -x "${INSTALL_PREFIX}/bin/openssl" ]; then
-    INSTALLED_VERSION=$("${INSTALL_PREFIX}/bin/openssl" version 2>/dev/null | awk '{print $2}' | cut -d'-' -f1)
-    if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
-        echo "=== OpenSSL ${VERSION} is already installed ==="
-        echo "Ensuring ldconfig cache is up to date..."
-        sudo ldconfig
-        echo "Skipping installation. To reinstall, remove ${INSTALL_PREFIX}/bin/openssl first."
-        exit 0
+DO_SSH=false
+if ! version_ge "$CUR_SSH_VER" "$TARGET_SSH_VER"; then
+    echo "[判定] OpenSSHをアップグレードします。"
+    DO_SSH=true
+else
+    echo "[判定] OpenSSHは既に最新または同等です。ビルドをスキップします。"
+fi
+
+if [ "$DO_SSL" = false ] && [ "$DO_SSH" = false ]; then
+    echo "すべてのコンポーネントが最新です。終了します。"
+    exit 0
+fi
+
+# 3. アーキテクチャ最適化フラグの決定
+ARCH=$(uname -m)
+OPT_FLAGS="-O3 -march=native -pipe"
+
+echo "アーキテクチャ: ${ARCH} を検出。"
+if [[ "$ARCH" == "x86_64" ]]; then
+    if grep -q "avx512" /proc/cpuinfo; then
+        echo "最適化: AVX-512 を有効にします。"
     else
-        echo "Found existing OpenSSL version: ${INSTALLED_VERSION:-unknown}"
-        echo "Will upgrade to version ${VERSION}"
+        echo "最適化: 標準的な x86_64 最適化を適用します。"
+    fi
+elif [[ "$ARCH" == "aarch64" ]]; then
+    if grep -q "sve2" /proc/cpuinfo; then
+        echo "最適化: SVE2 を有効にします。"
+    else
+        echo "最適化: 標準的な ARMv8/v9 最適化を適用します。"
     fi
 fi
 
-# Download source
-wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
+# 4. 依存パッケージとバックアップ
+sudo apt update
+sudo apt install -y build-essential wget zlib1g-dev libpam0g-dev libselinux1-dev libedit-dev
+sudo mkdir -p "${BACKUP_DIR}"
+LIB_PATH="/usr/lib/$(uname -m)-linux-gnu"
 
-# Extract
-tar -xf "$ARCHIVE"
-cd "openssl-${VERSION}" || {
-    echo "Error: Failed to enter directory openssl-${VERSION}"
-    exit 1
-}
+# 5. OpenSSLビルド (必要な場合)
+if [ "$DO_SSL" = true ]; then
+    echo "--- OpenSSL ${TARGET_SSL_VER} のビルド (最適化適用) ---"
+    wget --no-check-certificate -O "openssl-${TARGET_SSL_VER}.tar.gz" "https://www.openssl.org/source/openssl-${TARGET_SSL_VER}.tar.gz"
+    tar -xf "openssl-${TARGET_SSL_VER}.tar.gz"
+    cd "openssl-${TARGET_SSL_VER}"
+    
+    # OpenSSLのconfigは環境変数CFLAGSを尊重する
+    export CFLAGS="${OPT_FLAGS}"
+    ./config --prefix="${SSL_PREFIX}" --openssldir="${SSL_PREFIX}/ssl" --libdir=lib shared zlib
+    make -j"$(nproc)"
+    sudo make install
+    cd ..
+fi
 
-# Detect lib directory based on architecture
-ARCH=$(uname -m)
-case "$ARCH" in
-    x86_64)
-        LIBSUBDIR="lib64"
-        ;;
-    aarch64|arm64)
-        LIBSUBDIR="lib"
-        ;;
-    armv7l|armhf)
-        LIBSUBDIR="lib"
-        ;;
-    i686|i386)
-        LIBSUBDIR="lib"
-        ;;
-    *)
-        echo "Error: Unsupported architecture: $ARCH"
-        echo "Supported architectures: x86_64, aarch64/arm64, armv7l/armhf, i686/i386"
-        exit 1
-        ;;
-esac
-LIBDIR="${INSTALL_PREFIX}/${LIBSUBDIR}"
+# 6. OpenSSHビルド (必要な場合)
+if [ "$DO_SSH" = true ]; then
+    echo "--- OpenSSH ${TARGET_SSH_FULL} のビルド (最適化適用) ---"
+    wget --no-check-certificate -O "openssh-${TARGET_SSH_FULL}.tar.gz" "https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-${TARGET_SSH_FULL}.tar.gz"
+    tar -xf "openssh-${TARGET_SSH_FULL}.tar.gz"
+    cd "openssh-${TARGET_SSH_FULL}"
+    
+    export CFLAGS="${OPT_FLAGS}"
+    # SSL_PREFIXが未設定（SSLを今回ビルドしなかった）場合は、現在のシステムパスを指定
+    SSL_DIR="${SSL_PREFIX}"
+    [ ! -d "$SSL_DIR" ] && SSL_DIR="/usr"
 
-echo "Detected architecture: $ARCH -> Using library directory: $LIBSUBDIR"
+    ./configure --prefix="${SSH_PREFIX}" \
+                --with-ssl-dir="${SSL_DIR}" \
+                --with-pam \
+                --with-libedit \
+                --with-selinux \
+                --sysconfdir=/etc/ssh
+    make -j"$(nproc)"
+    sudo make install
+    cd ..
+fi
 
-# Set LDFLAGS to ensure RPATH is embedded
-export LDFLAGS="-Wl,-rpath,${LIBDIR}"
+# 7. システムへの反映（アトミックに切り替え）
+echo "--- システム環境の更新 ---"
 
-# Configure with CFLAGS/CXXFLAGS from environment
-# OpenSSL's config script respects CC and CFLAGS
-./config --prefix="${INSTALL_PREFIX}" \
-         --openssldir="${INSTALL_PREFIX}/ssl" \
-         --libdir="${LIBSUBDIR}" \
-         shared \
-         zlib
+# バックアップ実行
+[ -f /usr/bin/openssl ] && sudo cp /usr/bin/openssl "${BACKUP_DIR}/"
+[ -f /usr/sbin/sshd ] && sudo cp /usr/sbin/sshd "${BACKUP_DIR}/"
 
-# Build
-NCPUS=$(nproc 2>/dev/null || echo 1)
-echo "Building with ${NCPUS} parallel jobs..."
-make -j"${NCPUS}"
-
-# Skip tests (optional - QUIC tests may fail in some environments)
-# make test
-
-# Install
-sudo make install
-
-# Update shared library cache
-sudo ldconfig
-
-# Add lib directory to ldconfig if not already present
-if [[ ! -f /etc/ld.so.conf.d/local-${LIBSUBDIR}.conf ]]; then
-    echo "${LIBDIR}" | sudo tee /etc/ld.so.conf.d/local-${LIBSUBDIR}.conf
+if [ "$DO_SSL" = true ]; then
+    sudo ln -sf "${SSL_PREFIX}/lib/libssl.so.3" "${LIB_PATH}/libssl.so.3"
+    sudo ln -sf "${SSL_PREFIX}/lib/libcrypto.so.3" "${LIB_PATH}/libcrypto.so.3"
+    sudo ln -sf "${SSL_PREFIX}/bin/openssl" /usr/bin/openssl
     sudo ldconfig
 fi
 
-# Verify installation and flags used
-echo "=== OpenSSL Version ==="
-"${INSTALL_PREFIX}/bin/openssl" version -a
-
-# Cleanup
-cd .. || {
-    echo "Warning: Failed to return to parent directory"
-}
-rm -rf "openssl-${VERSION}" "$ARCHIVE"
-
-echo ""
-echo "OpenSSL ${VERSION} installed to ${INSTALL_PREFIX}"
-echo "To use it, ensure ${INSTALL_PREFIX}/bin is in your PATH"
-
-# Add to bashrc only if not already present
-if ! grep -qE "export PATH=.*${INSTALL_PREFIX}/bin" ~/.bashrc 2>/dev/null; then
-    echo "export PATH=${INSTALL_PREFIX}/bin:\$PATH" >> ~/.bashrc
-    echo "Added PATH to ~/.bashrc"
+if [ "$DO_SSH" = true ]; then
+    for bin in ssh ssh-add ssh-agent ssh-keygen ssh-keyscan; do
+        sudo ln -sf "${SSH_PREFIX}/bin/${bin}" "/usr/bin/${bin}"
+    done
+    sudo ln -sf "${SSH_PREFIX}/sbin/sshd" /usr/sbin/sshd
+    sudo systemctl restart ssh
 fi
 
-if ! grep -qE "export LD_LIBRARY_PATH=.*${LIBDIR}" ~/.bashrc 2>/dev/null; then
-    echo "export LD_LIBRARY_PATH=${LIBDIR}\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" >> ~/.bashrc
-    echo "Added LD_LIBRARY_PATH to ~/.bashrc"
-fi
+echo "=== 換装完了 ==="
+openssl version
+ssh -V
