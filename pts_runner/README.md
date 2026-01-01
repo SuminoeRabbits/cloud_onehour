@@ -10,6 +10,9 @@ phoronix-test-suite --help
 ## Python version
 Python3.10で動作すること。Shebang　で　#!/usr/bin/env python3を指定する。
 
+## Error handle policy
+スクリプト内でエラーが出た場合はエラーコードをSTDOUTに表示しつつも実行を続行、終了することを心がける。
+
 ## Find <testname> 
 <testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。../test_suite.jsonに登録されていない<testname>は不正。
 
