@@ -337,6 +337,86 @@ def launch_oci_instance(inst, config, compartment_id, region):
     return None, None
 
 
+def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True):
+    """
+    Verify SSH build status after build_openssh.sh execution.
+
+    Args:
+        ip: Remote instance IP address
+        ssh_opt: SSH options string
+        ssh_user: SSH username
+        instance_name: Instance name for logging
+        auto_rollback: If True, automatically rollback on verification failure
+
+    Returns:
+        bool: True if build succeeded, False otherwise
+    """
+    try:
+        if DEBUG_MODE == True:
+            log("Verifying SSH build status...")
+
+        # Wait for delayed SSH restart to complete
+        if DEBUG_MODE == True:
+            log("Waiting 10 seconds for SSH service restart...")
+        time.sleep(10)
+
+        # Check build status file
+        status_cmd = f"ssh {ssh_opt} {ssh_user}@{ip} 'cat /tmp/ssh_build_status.txt 2>/dev/null || echo UNKNOWN'"
+        status = run_cmd(status_cmd, capture=True, timeout=10)
+
+        if status == "SUCCESS":
+            if DEBUG_MODE == True:
+                log("SSH build verified successfully", "INFO")
+            elif DEBUG_MODE == False:
+                print("  [SSH Build] ✓ Verification successful")
+            progress(instance_name, "SSH build verified")
+            return True
+        else:
+            if DEBUG_MODE == True:
+                log(f"SSH build verification failed: {status}", "ERROR")
+            elif DEBUG_MODE == False:
+                print(f"  [SSH Build] ✗ Verification failed: {status}")
+            progress(instance_name, f"SSH build failed: {status}")
+
+            # Attempt automatic rollback
+            if auto_rollback and status == "FAILED":
+                if DEBUG_MODE == True:
+                    log("Attempting automatic rollback to previous SSH version...")
+                elif DEBUG_MODE == False:
+                    print("  [SSH Build] Attempting rollback to previous version...")
+
+                rollback_cmd = (
+                    f"ssh {ssh_opt} {ssh_user}@{ip} '"
+                    f"BACKUP_DIR=$(ls -td /var/backups/ssh-pre-upgrade-* 2>/dev/null | head -1) && "
+                    f"[ -n \"$BACKUP_DIR\" ] && [ -f \"$BACKUP_DIR/sshd.orig\" ] && "
+                    f"sudo mv \"$BACKUP_DIR/sshd.orig\" /usr/sbin/sshd && "
+                    f"sudo systemctl restart ssh && "
+                    f"echo ROLLBACK_SUCCESS || echo ROLLBACK_FAILED'"
+                )
+
+                rollback_result = run_cmd(rollback_cmd, capture=True, timeout=30, ignore=True)
+
+                if rollback_result == "ROLLBACK_SUCCESS":
+                    if DEBUG_MODE == True:
+                        log("Rollback successful, SSH restored to previous version", "INFO")
+                    elif DEBUG_MODE == False:
+                        print("  [SSH Build] ✓ Rollback successful")
+                else:
+                    if DEBUG_MODE == True:
+                        log(f"Rollback failed: {rollback_result}", "ERROR")
+                    elif DEBUG_MODE == False:
+                        print(f"  [SSH Build] ✗ Rollback failed: {rollback_result}")
+
+            return False
+
+    except Exception as e:
+        if DEBUG_MODE == True:
+            log(f"SSH build verification error: {e}", "ERROR")
+        elif DEBUG_MODE == False:
+            print(f"  [SSH Build] ✗ Verification error: {e}")
+        return False
+
+
 def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
     """Execute all commands via SSH sequentially with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
@@ -407,6 +487,20 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             log(f"Command {i}/{total_commands} completed")
         elif DEBUG_MODE == False:
             print(f"  [Command {i}/{total_commands}] Completed")
+
+        # Special handling: Verify SSH build after build_openssh.sh execution
+        if 'build_openssh.sh' in cmd:
+            if DEBUG_MODE == True:
+                log("Detected build_openssh.sh execution, verifying build status...")
+            elif DEBUG_MODE == False:
+                print("  [SSH Build] Verifying OpenSSH installation...")
+
+            if not verify_ssh_build(ip, ssh_opt, ssh_user, instance_name):
+                if DEBUG_MODE == True:
+                    log("SSH build verification failed, aborting command execution", "ERROR")
+                elif DEBUG_MODE == False:
+                    print("  [Error] SSH build verification failed")
+                return False
 
     progress(instance_name, "All commands completed")
 

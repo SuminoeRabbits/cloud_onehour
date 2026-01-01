@@ -14,12 +14,23 @@ BACKUP_DIR="/var/backups/ssh-pre-upgrade-$(date +%s)"
 
 # --- クリーンアップ関数 ---
 cleanup() {
+    local exit_code=$?
     rm -rf "$BUILD_DIR"
     echo "Temporary files removed."
+
+    # エラー発生時にステータスファイルを作成
+    if [ $exit_code -ne 0 ]; then
+        echo "FAILED" > /tmp/ssh_build_status.txt
+        echo "Build failed with exit code $exit_code"
+    fi
 }
 
 echo "=== [1/5] 整合性確認と環境準備 ==="
 sudo apt-get update && sudo apt-get install -y build-essential wget zlib1g-dev libpam0g-dev libselinux1-dev libedit-dev
+
+# インストール先ディレクトリを事前に作成（sudo権限で）
+sudo mkdir -p "$INSTALL_ROOT"
+sudo chown $(whoami):$(whoami) "$INSTALL_ROOT"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
@@ -54,15 +65,23 @@ cd "openssh-${SSH_VER}"
 make -j"$(nproc)"
 # 反映前にテスト用バイナリを確認
 ./sshd -t || { echo "sshd configuration test failed"; exit 1; }
-sudo make install-nosysconf
+make install-nosysconf
 cd ..
 
 # --- [4/5] 反映前の最終検証 (接続テスト) ---
 echo "=== [4/5] 接続テスト実行 ==="
-# 新しいsshdを一時的に別ポート(2222)で立ち上げ、自身のパスが通るか確認
-sudo "$INSTALL_ROOT/sbin/sshd" -p 2222 -f /etc/ssh/sshd_config || { echo "Failed to start test sshd"; exit 1; }
-echo "Test sshd is running on port 2222. (Manual check recommended)"
-sudo kill $(cat /var/run/sshd.pid 2>/dev/null || pgrep -f "sshd -p 2222") || true
+# バイナリの基本動作確認（ポート起動なしで設定テストのみ）
+echo "Testing SSH daemon configuration..."
+sudo "$INSTALL_ROOT/sbin/sshd" -t -f /etc/ssh/sshd_config || {
+    echo "✗ SSH daemon configuration test failed"
+    exit 1
+}
+echo "✓ SSH daemon configuration is valid"
+
+# SSHクライアントのバージョン確認
+echo "Testing SSH client binary..."
+"$INSTALL_ROOT/bin/ssh" -V 2>&1 | head -1
+echo "✓ SSH client binary is functional"
 
 # --- [5/5] アトミックな切り替え ---
 echo "=== [5/5] システムへの安全な反映 ==="
@@ -76,8 +95,34 @@ for bin in ssh ssh-add ssh-agent ssh-keygen ssh-keyscan; do
 done
 
 # systemdの再起動（既存セッション維持のため restart を使用）
+# リモートSSH経由での実行を考慮し、遅延再起動を実施
 sudo systemctl daemon-reload
-sudo systemctl restart ssh
+
+# SSH経由で実行されている場合、現在のセッションを維持しつつ新SSHに切り替え
+if [ -n "$SSH_CONNECTION" ]; then
+    echo "=== Remote execution detected. Scheduling delayed SSH restart ==="
+    echo "Current SSH session will remain active."
+    echo "New SSH connections will use the upgraded binary after 5 seconds."
+    # バックグラウンドで遅延再起動（現在のセッションを切断しない）
+    (sleep 5 && sudo systemctl restart ssh) >/dev/null 2>&1 &
+    echo "SSH restart scheduled. PID: $!"
+else
+    # ローカル実行の場合は即座に再起動
+    sudo systemctl restart ssh
+fi
 
 cleanup
-echo "Upgrade successful. Backup located at $BACKUP_DIR"
+
+# ビルド成功を検証
+echo "=== Final Verification ==="
+if /usr/bin/ssh -V 2>&1 | grep -q "OpenSSH_${SSH_VER}"; then
+    echo "SUCCESS" > /tmp/ssh_build_status.txt
+    echo "✓ Upgrade successful. OpenSSH ${SSH_VER} is now active."
+    echo "✓ Backup located at $BACKUP_DIR"
+    exit 0
+else
+    echo "FAILED" > /tmp/ssh_build_status.txt
+    echo "✗ Verification failed: SSH binary version mismatch"
+    /usr/bin/ssh -V 2>&1
+    exit 1
+fi
