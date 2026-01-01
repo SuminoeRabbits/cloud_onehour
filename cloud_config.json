@@ -7,8 +7,8 @@
     "commands": [
       "sudo apt-get -y update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
       "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
-      "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh coremark-1.0.1",
-      "cd ~/cloud_onehour/scripts && ./run_pts_benchmark.sh openssl-3.6.0"
+      "cd ~/cloud_onehour/pts_runner && pts_runner_build-gcc-1.5.0.py",
+      "cd ~/cloud_onehour/pts_runner && pts_runner_build-llvm-1.6.0.py"
     ],
     "cloud_reports_dir": "~/cloud_onehour/reports",
     "host_reports_dir": "bench_results",
