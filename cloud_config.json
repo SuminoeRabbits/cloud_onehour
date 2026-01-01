@@ -11,7 +11,7 @@
       "cd ~/cloud_onehour/pts_runner && pts_runner_build-gcc-1.5.0.py",
       "cd ~/cloud_onehour/pts_runner && pts_runner_build-llvm-1.6.0.py"
     ],
-    "cloud_reports_dir": "~/cloud_onehour/reports",
+    "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
