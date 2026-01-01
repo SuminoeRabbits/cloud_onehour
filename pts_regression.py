@@ -48,6 +48,10 @@
 #         <number>が空白の場合でも、288と変更します。
 #　　　　　ただし<number>=1が指定されている場合は、１のまま変更しません。
 # --help: オプション一覧を表示します。
+# --quick: 実行コマンドの生成で、すべてのコマンドの末尾に --quickを追加します。
+#          それ以外の機能は持たせません。
+# --dry-run: 実行コマンドの生成のみを行い、実行しません。
+# --no-execute: 実行コマンドの生成のみを行い、実行しません。    
 #
 
 import json
@@ -85,13 +89,14 @@ def get_cpu_count():
     return os.cpu_count() or 1
 
 
-def generate_test_commands(test_suite, max_threads=None):
+def generate_test_commands(test_suite, max_threads=None, quick_mode=False):
     """
     Generate test commands from test_suite.json.
 
     Args:
         test_suite: Parsed test_suite.json content
         max_threads: If specified, override thread count to this value (except for single-threaded tests)
+        quick_mode: If True, append --quick to all commands
 
     Returns:
         list: List of command strings to execute
@@ -173,6 +178,10 @@ def generate_test_commands(test_suite, max_threads=None):
                 cmd = runner_script
             else:
                 cmd = f"{runner_script} {number_arg}"
+            
+            # Append --quick flag if quick mode enabled
+            if quick_mode:
+                cmd = f"{cmd} --quick"
 
             commands.append(cmd)
             print(f"  [OK] Generated command: {cmd}")
@@ -296,6 +305,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: append --quick to all commands for development'
+    )
+
+    parser.add_argument(
         '--dry-run',
         action='store_true',
         help='Generate commands but do not execute them (default behavior)'
@@ -330,7 +345,7 @@ Examples:
     test_suite = load_test_suite(args.suite)
 
     # Generate commands
-    commands = generate_test_commands(test_suite, max_threads=max_threads)
+    commands = generate_test_commands(test_suite, max_threads=max_threads, quick_mode=args.quick)
 
     # Print commands
     print_commands(commands)
