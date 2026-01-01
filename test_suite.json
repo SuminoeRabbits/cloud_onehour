@@ -1,7 +1,7 @@
 {
     "_comment": "PTS benchmark test suite definitions",
     "test_category": {
-        "CPU Int/FP": {
+        "CPU IntFP": {
             "enabled": true,
             "items": {
                 "pts/sysbench-1.1.0": {
