@@ -529,7 +529,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     return True
 
 
-def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_checking, instance_name):
+def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key_checking, instance_name):
     """Collect benchmark results from remote instance."""
     progress(instance_name, "Collecting results")
 
@@ -551,12 +551,21 @@ def collect_results(ip, config, cloud, name, key_path, ssh_strict_host_key_check
     )
 
     host_rep_dir = config['common']['host_reports_dir']
-    local_f = f"{host_rep_dir}/{cloud}_{name}.tar.gz"
+    # Use hostname if specified, otherwise fallback to cloud_name format
+    file_basename = inst.get('hostname', f"{cloud}_{name}")
+    # Add timestamp to filename (yymmdd_HHMMSS format)
+    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+    local_f = f"{host_rep_dir}/{file_basename}_{timestamp}.tar.gz"
 
     if DEBUG_MODE == True:
-        log(f"Downloading to {local_f}...")
+        log(f"Downloading to {local_f} via SSH (avoiding SCP OpenSSL mismatch)...")
 
-    run_cmd(f"scp {ssh_opt} {ssh_user}@{ip}:/tmp/reports.tar.gz {local_f}")
+    # Use SSH with stdout redirection instead of SCP to avoid OpenSSL version mismatch
+    # This transfers the file via SSH stdout which is more reliable across different OpenSSL versions
+    run_cmd(
+        f"ssh {ssh_opt} {ssh_user}@{ip} 'cat /tmp/reports.tar.gz' > {local_f}",
+        capture=False,
+    )
 
     progress(instance_name, "Results collected")
 
@@ -709,7 +718,7 @@ def process_instance(cloud, inst, config, key_path):
             return
 
         # Collect results
-        collect_results(ip, config, cloud, name, key_path, ssh_strict, instance_name)
+        collect_results(ip, config, cloud, name, inst, key_path, ssh_strict, instance_name)
 
         progress(instance_name, "Completed successfully")
 

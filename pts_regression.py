@@ -51,8 +51,14 @@
 # --quick: 実行コマンドの生成で、すべてのコマンドの末尾に --quickを追加します。
 #          それ以外の機能は持たせません。
 # --dry-run: 実行コマンドの生成のみを行い、実行しません。
-# --no-execute: 実行コマンドの生成のみを行い、実行しません。    
-#
+# --no-execute: 実行コマンドの生成のみを行い、実行しません。  
+# 
+# 例外処理：
+# - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
+# - test_suite.jsonが存在しない場合は、エラーメッセージを出力して終了する。
+# - pts_runner_<testname>.pyが存在しない場合は、警告メッセージを出力して
+#   動作を続行する。
+# 
 
 import json
 import os
@@ -322,7 +328,26 @@ Examples:
         help='Generate commands but do not execute them (alias for --dry-run)'
     )
 
-    args = parser.parse_args()
+    # Exception handling: Ignore invalid options and continue execution
+    try:
+        args = parser.parse_args()
+    except SystemExit as e:
+        # If argparse fails due to invalid options, print warning and use defaults
+        if e.code != 0:
+            print("[WARN] Invalid command line options detected. Using default settings.")
+            print("[INFO] Run with --help to see available options.\n")
+            # Create default args namespace
+            args = argparse.Namespace(
+                suite='test_suite.json',
+                all=False,
+                max=False,
+                quick=False,
+                dry_run=True,
+                no_execute=False
+            )
+        else:
+            # Normal exit (--help was called)
+            sys.exit(0)
 
     # Determine if we should execute
     # Execution requires --all flag explicitly
