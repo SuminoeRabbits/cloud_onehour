@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-PTS Runner for compress-zstd-1.6.0
+PTS Runner for java-jmh-1.0.1
 
 Based on test_suite.json configuration:
-- test_category: "Compression"
+- test_category: "Java Applications"
 - THFix_in_compile: false - Thread count can be changed at runtime
 - THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
-- TH_scaling: env:NUM_CPU_CORES - Uses -T$NUM_CPU_CORES
+- TH_scaling: jmh:-t max - JMH uses -t max to utilize all available threads
+- sve2_support: true - SVE2 is supported after OpenJDK9
 """
 
 import argparse
@@ -19,17 +20,17 @@ import sys
 from pathlib import Path
 
 
-class CompressZstdRunner:
+class JavaJmhRunner:
     def __init__(self, threads_arg=None):
         """
-        Initialize 7-Zip compression benchmark runner.
+        Initialize JMH benchmark runner.
 
         Args:
             threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
         """
-        self.benchmark = "compress-zstd-1.6.0"
+        self.benchmark = "java-jmh-1.0.1"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "Compression"
+        self.test_category = "Java Applications"
         # Replace spaces with underscores in test_category for directory name
         self.test_category_dir = self.test_category.replace(" ", "_")
 
@@ -100,10 +101,10 @@ class CompressZstdRunner:
 
     def install_benchmark(self):
         """
-        Install compress-zstd-1.6.0 with GCC-14 native compilation.
+        Install java-jmh-1.0.1 with native compilation.
 
-        Note: Unlike coremark, 7-Zip does NOT need reinstallation for each thread count
-        because it supports runtime thread configuration via -mmt argument.
+        Note: Unlike coremark, JMH does NOT need reinstallation for each thread count
+        because it supports runtime thread configuration via -t max argument.
 
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
@@ -125,7 +126,6 @@ class CompressZstdRunner:
         # Thread control is done at runtime, not compile time
         # Use batch-install to suppress prompts
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
-        # Note: Using -O2 (7-Zip default) instead of -O3 to reduce optimization issues
         nproc = os.cpu_count() or 1
         install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
 
@@ -143,8 +143,6 @@ class CompressZstdRunner:
 
         if result.returncode != 0:
             print(f"  [ERROR] Installation failed")
-            print(f"  [INFO] Attempting to patch and rebuild...")
-
             sys.exit(1)
 
         print(f"  [OK] Installation completed")
@@ -337,6 +335,9 @@ class CompressZstdRunner:
         """
         Run benchmark with specified thread count.
 
+        JMH uses -t max to utilize all available threads at runtime.
+        Thread scaling is controlled via NUM_CPU_CORES environment variable.
+
         Args:
             num_threads: Number of threads to use
         """
@@ -364,7 +365,7 @@ class CompressZstdRunner:
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
-        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=compress-7zip-{num_threads}threads TEST_RESULTS_IDENTIFIER=compress-7zip-{num_threads}threads'
+        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=java-jmh-{num_threads}threads TEST_RESULTS_IDENTIFIER=java-jmh-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
@@ -488,7 +489,7 @@ class CompressZstdRunner:
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"compress-7zip-{num_threads}threads"
+            result_name = f"java-jmh-{num_threads}threads"
 
             # Check if result exists
             result_dir = pts_results_dir / result_name
@@ -569,7 +570,7 @@ class CompressZstdRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"7-Zip Compression Benchmark Summary\n")
+            f.write(f"JMH Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -609,12 +610,13 @@ class CompressZstdRunner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"Zstd Compression Benchmark Runner")
+        print(f"JMH Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
         print(f"[INFO] Test category: {self.test_category}")
         print(f"[INFO] Thread mode: Runtime configurable (THChange_at_runtime=true)")
+        print(f"[INFO] Thread control: JMH uses -t max for thread utilization")
         print(f"[INFO] Threads to test: {self.thread_list}")
         print(f"[INFO] Results directory: {self.results_dir}")
         print()
@@ -662,7 +664,7 @@ class CompressZstdRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Zstd Compression Benchmark Runner',
+        description='JMH Benchmark Runner',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -687,7 +689,7 @@ Examples:
         sys.exit(1)
 
     # Run benchmark
-    runner = CompressZstdRunner(args.threads)
+    runner = JavaJmhRunner(args.threads)
     success = runner.run()
 
     sys.exit(0 if success else 1)

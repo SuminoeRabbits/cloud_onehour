@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-PTS Runner for compress-zstd-1.6.0
+PTS Runner for apache-3.0.0
 
 Based on test_suite.json configuration:
-- test_category: "Compression"
-- THFix_in_compile: false - Thread count can be changed at runtime
-- THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
-- TH_scaling: env:NUM_CPU_CORES - Uses -T$NUM_CPU_CORES
+- test_category: "Network"
+- THFix_in_compile: false - Thread count NOT set at compile time
+- THChange_at_runtime: false - **IMPORTANT: This is single-threaded**
+- TH_scaling: "single-threaded"
+- sve2_support: false
+
+Apache is a single-threaded benchmark in this test configuration.
+Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test.
+Thread handling: Always runs with 1 thread regardless of system vCPU count.
 """
 
 import argparse
@@ -19,17 +24,20 @@ import sys
 from pathlib import Path
 
 
-class CompressZstdRunner:
+class ApacheRunner:
     def __init__(self, threads_arg=None):
         """
-        Initialize 7-Zip compression benchmark runner.
+        Initialize Apache web server benchmark runner.
+
+        **CRITICAL**: This is a single-threaded benchmark (THChange_at_runtime=false).
+        Always runs with 1 thread regardless of arguments or system vCPU count.
 
         Args:
-            threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
+            threads_arg: Thread count argument (ignored for this single-threaded benchmark)
         """
-        self.benchmark = "compress-zstd-1.6.0"
+        self.benchmark = "apache-3.0.0"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "Compression"
+        self.test_category = "Network"
         # Replace spaces with underscores in test_category for directory name
         self.test_category_dir = self.test_category.replace(" ", "_")
 
@@ -37,14 +45,9 @@ class CompressZstdRunner:
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
 
-        # Determine thread execution mode
-        if threads_arg is None:
-            # Scaling mode: 1 to vCPU
-            self.thread_list = list(range(1, self.vcpu_count + 1))
-        else:
-            # Fixed mode: single thread count
-            n = min(threads_arg, self.vcpu_count)
-            self.thread_list = [n]
+        # CRITICAL: Single-threaded benchmark - always use thread_list = [1]
+        # Ignore threads_arg parameter completely
+        self.thread_list = [1]
 
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
@@ -100,13 +103,13 @@ class CompressZstdRunner:
 
     def install_benchmark(self):
         """
-        Install compress-zstd-1.6.0 with GCC-14 native compilation.
+        Install apache-3.0.0 with GCC-14 native compilation.
 
-        Note: Unlike coremark, 7-Zip does NOT need reinstallation for each thread count
-        because it supports runtime thread configuration via -mmt argument.
+        Note: Since THChange_at_runtime=false, this is a single-threaded benchmark.
+        No runtime thread configuration is needed; Apache always runs with 1 thread.
 
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
-        Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
+        Apache doesn't use NUM_CPU_CORES for this workload.
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -121,11 +124,9 @@ class CompressZstdRunner:
         )
 
         # Build install command with environment variables
-        # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
-        # Thread control is done at runtime, not compile time
+        # Note: NUM_CPU_CORES is NOT set because this is single-threaded (THChange_at_runtime=false)
         # Use batch-install to suppress prompts
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
-        # Note: Using -O2 (7-Zip default) instead of -O3 to reduce optimization issues
         nproc = os.cpu_count() or 1
         install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
 
@@ -143,8 +144,6 @@ class CompressZstdRunner:
 
         if result.returncode != 0:
             print(f"  [ERROR] Installation failed")
-            print(f"  [INFO] Attempting to patch and rebuild...")
-
             sys.exit(1)
 
         print(f"  [OK] Installation completed")
@@ -337,8 +336,10 @@ class CompressZstdRunner:
         """
         Run benchmark with specified thread count.
 
+        Note: For Apache (single-threaded), num_threads will always be 1.
+
         Args:
-            num_threads: Number of threads to use
+            num_threads: Number of threads to use (always 1 for this benchmark)
         """
         print(f"\n{'='*80}")
         print(f">>> Running benchmark with {num_threads} thread(s)")
@@ -355,27 +356,20 @@ class CompressZstdRunner:
         freq_end_file = self.results_dir / f"{num_threads}-thread_freq_end.txt"
         perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
-        # Build PTS command based on thread count
-        # If N >= vCPU: don't use taskset (all vCPUs assigned)
-        # If N < vCPU: use taskset with CPU affinity
+        # Build PTS command
+        # Since this is single-threaded, we always use CPU 0 with taskset
+        # Apache doesn't scale with vCPUs in this test, so affinity is just for consistency
 
         # Environment variables to suppress all prompts
         # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
-        # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
-        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=compress-7zip-{num_threads}threads TEST_RESULTS_IDENTIFIER=compress-7zip-{num_threads}threads'
+        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=apache-{num_threads}threads TEST_RESULTS_IDENTIFIER=apache-{num_threads}threads'
 
-        if num_threads >= self.vcpu_count:
-            # All vCPUs mode - no taskset needed
-            cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
-            pts_base_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} phoronix-test-suite batch-run {self.benchmark_full}'
-            cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
-        else:
-            # Partial vCPU mode - use taskset with affinity
-            cpu_list = self.get_cpu_affinity_list(num_threads)
-            pts_base_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
-            cpu_info = f"CPU affinity (taskset): {cpu_list}"
+        # Single-threaded: use CPU 0 only with taskset
+        cpu_list = '0'
+        pts_base_cmd = f'{batch_env} taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+        cpu_info = f"Single-threaded benchmark: CPU affinity (taskset): {cpu_list}"
 
         # Wrap PTS command with perf stat
         pts_cmd = f'perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
@@ -488,7 +482,7 @@ class CompressZstdRunner:
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"compress-7zip-{num_threads}threads"
+            result_name = f"apache-{num_threads}threads"
 
             # Check if result exists
             result_dir = pts_results_dir / result_name
@@ -569,9 +563,10 @@ class CompressZstdRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"7-Zip Compression Benchmark Summary\n")
+            f.write(f"Apache Web Server Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
+            f.write(f"Note: Single-threaded benchmark\n")
             f.write("="*80 + "\n\n")
 
             for result in all_results:
@@ -598,6 +593,7 @@ class CompressZstdRunner:
             "test_category": self.test_category,
             "machine": self.machine_name,
             "vcpu_count": self.vcpu_count,
+            "single_threaded": True,
             "results": all_results
         }
 
@@ -609,14 +605,15 @@ class CompressZstdRunner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"Zstd Compression Benchmark Runner")
+        print(f"Apache Web Server Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
         print(f"[INFO] Test category: {self.test_category}")
-        print(f"[INFO] Thread mode: Runtime configurable (THChange_at_runtime=true)")
+        print(f"[INFO] Thread mode: Single-threaded (THChange_at_runtime=false)")
         print(f"[INFO] Threads to test: {self.thread_list}")
         print(f"[INFO] Results directory: {self.results_dir}")
+        print(f"[INFO] Note: Apache is single-threaded; uses wrk for load testing")
         print()
 
         # Clean existing results directory before starting
@@ -630,10 +627,10 @@ class CompressZstdRunner:
         # Clean cache once at the beginning
         self.clean_pts_cache()
 
-        # Install benchmark once (not per thread count, since THFix_in_compile=false)
+        # Install benchmark once (not per thread count, since single-threaded)
         self.install_benchmark()
 
-        # Run for each thread count
+        # Run for each thread count (should only be 1)
         failed = []
         for num_threads in self.thread_list:
             # Run benchmark
@@ -662,13 +659,15 @@ class CompressZstdRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Zstd Compression Benchmark Runner',
+        description='Apache Web Server Benchmark Runner (Single-threaded)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Note: Apache is a single-threaded benchmark that uses wrk for load testing.
+Thread count arguments are ignored; always runs with 1 thread.
+
 Examples:
-  %(prog)s           # Run with 1 to vCPU threads (scaling mode)
-  %(prog)s 4         # Run with 4 threads only
-  %(prog)s 16        # Run with 16 threads (capped at vCPU if exceeded)
+  %(prog)s           # Run with 1 thread (single-threaded)
+  %(prog)s 4         # Also runs with 1 thread (argument ignored)
         """
     )
 
@@ -676,18 +675,18 @@ Examples:
         'threads',
         nargs='?',
         type=int,
-        help='Number of threads (optional, omit for scaling mode)'
+        help='Thread count (ignored; benchmark is always single-threaded)'
     )
 
     args = parser.parse_args()
 
-    # Validate threads argument
+    # Validate threads argument (though it's ignored for this single-threaded benchmark)
     if args.threads is not None and args.threads < 1:
         print(f"[ERROR] Thread count must be >= 1 (got: {args.threads})")
         sys.exit(1)
 
-    # Run benchmark
-    runner = CompressZstdRunner(args.threads)
+    # Run benchmark (always with 1 thread)
+    runner = ApacheRunner(args.threads)
     success = runner.run()
 
     sys.exit(0 if success else 1)
