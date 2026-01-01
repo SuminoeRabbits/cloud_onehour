@@ -29,9 +29,9 @@ class SysbenchRunner:
         """
         self.benchmark = "sysbench-1.1.0"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "CPU Int/FP"
-        # Replace spaces with underscores in test_category for directory name
-        self.test_category_dir = self.test_category.replace(" ", "_")
+        self.test_category = "CPU IntFP"
+        # Replace spaces and slashes with underscores in test_category for directory name
+        self.test_category_dir = self.test_category.replace(" ", "_").replace("/", "_")
 
         # System info
         self.vcpu_count = os.cpu_count() or 1
@@ -50,6 +50,68 @@ class SysbenchRunner:
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
         self.results_dir = self.project_root / "results" / self.machine_name / self.test_category_dir / self.benchmark
+
+        # Check and setup perf permissions
+        self.perf_paranoid = self.check_and_setup_perf_permissions()
+
+    def check_and_setup_perf_permissions(self):
+        """
+        Check perf_event_paranoid setting and adjust if needed.
+
+        Returns:
+            int: Current perf_event_paranoid value after adjustment
+        """
+        print(f"\n{'='*80}")
+        print(">>> Checking perf_event_paranoid setting")
+        print(f"{'='*80}")
+
+        try:
+            # Read current setting
+            result = subprocess.run(
+                ['cat', '/proc/sys/kernel/perf_event_paranoid'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            current_value = int(result.stdout.strip())
+
+            print(f"  [INFO] Current perf_event_paranoid: {current_value}")
+
+            # If too restrictive, try to adjust
+            # Note: -a (system-wide) requires perf_event_paranoid <= 0
+            if current_value >= 1:
+                print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
+                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+
+                result = subprocess.run(
+                    ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print(f"       Per-CPU metrics and hardware counters enabled")
+                    print(f"       Full monitoring mode: perf stat -A -a")
+                    return 0
+                else:
+                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print(f"  [WARN] Running in LIMITED mode:")
+                    print(f"         - No per-CPU metrics (no -A -a flags)")
+                    print(f"         - No hardware counters (cycles, instructions)")
+                    print(f"         - Software events only (aggregated)")
+                    print(f"         - IPC calculation not available")
+                    return current_value
+            else:
+                print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
+                print(f"       Full monitoring mode: perf stat -A -a")
+                return current_value
+
+        except Exception as e:
+            print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
+            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print(f"         Running in LIMITED mode without per-CPU metrics")
+            return 2
 
     def clean_pts_cache(self):
         """Clean all PTS cache for fresh installation."""
@@ -361,23 +423,32 @@ class SysbenchRunner:
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
-        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=sysbench-{num_threads}threads TEST_RESULTS_IDENTIFIER=sysbench-{num_threads}threads'
+        batch_env = f'NUM_CPU_CORES={num_threads} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=sysbench-{num_threads}threads TEST_RESULTS_IDENTIFIER=sysbench-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
-            pts_base_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} phoronix-test-suite batch-run {self.benchmark_full}'
+            pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
         else:
             # Partial vCPU mode - use taskset with affinity
             cpu_list = self.get_cpu_affinity_list(num_threads)
-            pts_base_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+            pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
-        # Wrap PTS command with perf stat
-        pts_cmd = f'perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        # Wrap PTS command with perf stat (mode depends on perf_event_paranoid)
+        # Important: Environment variables must come BEFORE perf stat command
+        if self.perf_paranoid <= 0:
+            # Full monitoring mode: per-CPU stats + hardware counters
+            pts_cmd = f'{batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+            perf_mode = "Full (per-CPU + HW counters)"
+        else:
+            # Limited mode: aggregated software events only (no -A -a, no hardware counters)
+            pts_cmd = f'{batch_env} perf stat -e cpu-clock,task-clock,context-switches,cpu-migrations -o {perf_stats_file} {pts_base_cmd}'
+            perf_mode = "Limited (aggregated SW events only)"
 
         print(f"[INFO] {cpu_info}")
+        print(f"[INFO] Perf monitoring mode: {perf_mode}")
 
         # Print PTS command to stdout for debugging (as per README requirement)
         print(f"\n{'>'*80}")

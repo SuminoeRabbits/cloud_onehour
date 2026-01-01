@@ -51,6 +51,9 @@ class BuildLinuxKernelRunner:
         self.project_root = self.script_dir.parent
         self.results_dir = self.project_root / "results" / self.machine_name / self.test_category_dir / self.benchmark
 
+        # Check and setup perf permissions
+        self.perf_paranoid = self.check_and_setup_perf_permissions()
+
     def clean_pts_cache(self):
         """Clean all PTS cache for fresh installation."""
         print(">>> Cleaning PTS cache...")

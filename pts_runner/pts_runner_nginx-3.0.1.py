@@ -51,6 +51,68 @@ class NginxRunner:
         self.project_root = self.script_dir.parent
         self.results_dir = self.project_root / "results" / self.machine_name / self.test_category_dir / self.benchmark
 
+        # Check and setup perf permissions
+        self.perf_paranoid = self.check_and_setup_perf_permissions()
+
+    def check_and_setup_perf_permissions(self):
+        """
+        Check perf_event_paranoid setting and adjust if needed.
+
+        Returns:
+            int: Current perf_event_paranoid value after adjustment
+        """
+        print(f"\n{'='*80}")
+        print(">>> Checking perf_event_paranoid setting")
+        print(f"{'='*80}")
+
+        try:
+            # Read current setting
+            result = subprocess.run(
+                ['cat', '/proc/sys/kernel/perf_event_paranoid'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            current_value = int(result.stdout.strip())
+
+            print(f"  [INFO] Current perf_event_paranoid: {current_value}")
+
+            # If too restrictive, try to adjust
+            # Note: -a (system-wide) requires perf_event_paranoid <= 0
+            if current_value >= 1:
+                print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
+                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+
+                result = subprocess.run(
+                    ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print(f"       Per-CPU metrics and hardware counters enabled")
+                    print(f"       Full monitoring mode: perf stat -A -a")
+                    return 0
+                else:
+                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print(f"  [WARN] Running in LIMITED mode:")
+                    print(f"         - No per-CPU metrics (no -A -a flags)")
+                    print(f"         - No hardware counters (cycles, instructions)")
+                    print(f"         - Software events only (aggregated)")
+                    print(f"         - IPC calculation not available")
+                    return current_value
+            else:
+                print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
+                print(f"       Full monitoring mode: perf stat -A -a")
+                return current_value
+
+        except Exception as e:
+            print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
+            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print(f"         Running in LIMITED mode without per-CPU metrics")
+            return 2
+
     def clean_pts_cache(self):
         """Clean all PTS cache for fresh installation."""
         print(">>> Cleaning PTS cache...")
