@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """
 PTS Runner for compress-zstd-1.6.0
 

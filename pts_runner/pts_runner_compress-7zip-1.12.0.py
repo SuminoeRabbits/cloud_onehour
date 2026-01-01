@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.10
+#!/usr/bin/env python3
 """
 PTS Runner for compress-7zip-1.12.0
 
