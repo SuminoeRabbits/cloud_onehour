@@ -77,11 +77,140 @@ results/<machine name>/<test_category>/<testname>/stdout.log
 
 - PTSのbatch-runコマンドを利用
 
-- 環境設定はPTS実施の先に来ないとだめ。
-例えば $> NUM_CPU_CORES=4 phoronix-test-suite benchmark
+### 環境変数の配置（重要）
+
+> [!CAUTION]
+> **環境変数は必ず `perf stat` コマンドの前に配置すること**
+> 
+> `perf stat` でPTSコマンドをラップする場合、環境変数を `perf stat` の後に配置すると、`perf stat` が環境変数を実行するコマンドに伝播しないため、PTSが必要とする `$LOG_FILE` などの環境変数が正しく渡されず、**"No such file or directory" エラーが発生します**。
+
+**間違った例（エラーが発生）:**
+```bash
+perf stat -e cycles,instructions -o output.txt NUM_CPU_CORES=4 BATCH_MODE=1 phoronix-test-suite batch-run pts/testname
+```
+
+**正しい例:**
+```bash
+NUM_CPU_CORES=4 BATCH_MODE=1 perf stat -e cycles,instructions -o output.txt phoronix-test-suite batch-run pts/testname
+```
+
+### 完全なコマンド例
+
+#### 1. 全vCPU使用（taskset不要）
+```bash
+NUM_CPU_CORES=4 BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 \
+TEST_RESULTS_NAME=testname-4threads TEST_RESULTS_IDENTIFIER=testname-4threads \
+perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations \
+-A -a -o /path/to/4-thread_perf_stats.txt \
+phoronix-test-suite batch-run pts/testname
+```
+
+#### 2. 一部vCPU使用（tasksetでCPUアフィニティ固定）
+```bash
+NUM_CPU_CORES=2 BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 \
+TEST_RESULTS_NAME=testname-2threads TEST_RESULTS_IDENTIFIER=testname-2threads \
+perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations \
+-A -a -o /path/to/2-thread_perf_stats.txt \
+taskset -c 0,2 phoronix-test-suite batch-run pts/testname
+```
+
+#### 3. perf statを使わない場合（シンプル）
+```bash
+NUM_CPU_CORES=4 BATCH_MODE=1 phoronix-test-suite batch-run pts/testname
+```
+
+### Pythonでの実装例
+
+#### パターン1: 全vCPU使用（taskset不要）
+```python
+if num_threads >= self.vcpu_count:
+    # All vCPUs mode - no taskset needed
+    cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
+    pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
+    cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
+else:
+    # Partial vCPU mode - use taskset with affinity
+    cpu_list = self.get_cpu_affinity_list(num_threads)
+    pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+    cpu_info = f"CPU affinity (taskset): {cpu_list}"
+
+# CRITICAL: Environment variables MUST come BEFORE perf stat
+pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+```
+
+#### パターン2: Single-threaded benchmark（apache等）
+```python
+# Single-threaded: use CPU 0 only with taskset
+cpu_list = '0'
+pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+cpu_info = f"Single-threaded benchmark: CPU affinity (taskset): {cpu_list}"
+
+# Environment variables BEFORE perf stat
+pts_cmd = f'{batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+```
+
+**重要**: `pts_base_cmd`には環境変数を含めず、PTSコマンドのみを記述すること。
+
+## 実装チェックリスト（新規テスト作成時の必須確認事項）
+
+新しいpts_runner_*.pyを作成する際は、以下を必ず確認してください：
+
+### ✅ 必須実装項目
+
+1. **環境変数の配置**
+   - [ ] `NUM_CPU_CORES`と`batch_env`が`perf stat`の**前**に配置されている
+   - [ ] `pts_base_cmd`には環境変数を含めない（PTSコマンドのみ）
+   - [ ] 正しいパターン: `NUM_CPU_CORES=N batch_env perf stat ... pts_base_cmd`
+
+2. **CPU周波数監視**
+   - [ ] `/proc/cpuinfo`方式を使用（sysfsは使用禁止）
+   - [ ] 開始時と終了時の2箇所で実装
+   - [ ] awkコマンド: `grep "cpu MHz" /proc/cpuinfo | awk '{printf "%.0f\\n", $4 * 1000}'`
+
+3. **perf_event_paranoid設定**
+   - [ ] `check_and_setup_perf_permissions()`メソッドを実装
+   - [ ] 起動時に自動チェック・調整を実行
+
+4. **コマンド構築ロジック**
+   - [ ] 全vCPU使用時: taskset不要、環境変数のみ
+   - [ ] 一部vCPU使用時: tasksetでアフィニティ固定
+   - [ ] CPUリスト: HyperThread最適化 `{0,2,4...1,3,5...}`
+
+### ⚠️ よくある間違い
+
+**間違い1: 環境変数を`pts_base_cmd`に含める**
+```python
+# ❌ 間違い
+pts_base_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} phoronix-test-suite ...'
+pts_cmd = f'perf stat ... {pts_base_cmd}'
+```
+
+**正解:**
+```python
+# ✅ 正しい
+pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
+pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat ... {pts_base_cmd}'
+```
+
+**間違い2: sysfs方式でCPU周波数を取得**
+```python
+# ❌ 間違い（ハードウェア依存）
+subprocess.run(['bash', '-c', f'cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > {file}'])
+```
+
+**正解:**
+```python
+# ✅ 正しい（ハードウェア非依存）
+cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \\'{{printf "%.0f\\\\n", $4 * 1000}}\\' > {file}'
+command = cmd_template.format(file=freq_start_file)
+subprocess.run(['bash', '-c', command])
+```
 
 ## CPU frequency monitoring with perf stat
 ベンチマーク実行中のCPU動作周波数とパフォーマンス統計を取得するため、`perf stat`でPTSコマンドをラップする。
+
+> [!NOTE]
+> 環境変数の配置については、[run PTS セクションの「環境変数の配置（重要）」](#環境変数の配置重要)を参照してください。
 
 ### 取得するメトリクス
 以下のイベントを使用（amd64/arm64互換）:
@@ -96,20 +225,62 @@ results/<machine name>/<test_category>/<testname>/stdout.log
 /proc/cpuinfo で得られた周波数データをAwkで整形して各コアの周波数サンプルとする。それ以外の方法、例えば
 `cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`
 などはハードウェア依存性があるので利用しない。サンプルのタイミングは`perf stat`の実行前後。
-```
+```python
 # 終了時サンプルの例
 cmd_template = 'grep "cpu MHz" /proc/cpuinfo | \
     awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
 command = cmd_template.format(file=freq_end_file)
 ```
 
-**重要な注意点**:
+### 完全な実装例
+
+```python
+def run_benchmark(self, num_threads):
+    # ... (省略)
+    
+    # Record CPU frequency before benchmark
+    # Use /proc/cpuinfo method to avoid hardware dependencies (as per README)
+    print(f"[INFO] Recording CPU frequency before benchmark...")
+    cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \\'{{printf "%.0f\\\\n", $4 * 1000}}\\' > {file}'
+    command = cmd_template.format(file=freq_start_file)
+    result = subprocess.run(
+        ['bash', '-c', command],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"  [WARN] Failed to record start frequency: {result.stderr}")
+    else:
+        print(f"  [OK] Start frequency recorded")
+    
+    # Execute PTS command
+    # ... (省略)
+    
+    # Record CPU frequency after benchmark
+    # Use /proc/cpuinfo method to avoid hardware dependencies (as per README)
+    print(f"\n[INFO] Recording CPU frequency after benchmark...")
+    cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \\'{{printf "%.0f\\\\n", $4 * 1000}}\\' > {file}'
+    command = cmd_template.format(file=freq_end_file)
+    result = subprocess.run(
+        ['bash', '-c', command],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"  [WARN] Failed to record end frequency: {result.stderr}")
+    else:
+        print(f"  [OK] End frequency recorded")
+```
+
+**注意事項**:
+- 必ず**開始時と終了時の2箇所**で実装すること
+- `freq_start_file`と`freq_end_file`のファイル名を間違えないこと
+- エラーハンドリングを含めること（`returncode`チェック）
+
+### perf stat オプション
 1. `perf stat`に`-A`（per-CPU統計）および`-a`（全CPU監視）オプションを使用することで、CPU毎のメトリクスを取得
-2. **環境変数は必ず `perf stat` コマンドの前に配置すること**
-   - ❌ 間違い: `perf stat -e ... -o output.txt NUM_CPU_CORES=4 phoronix-test-suite ...`
-   - ✅ 正しい: `NUM_CPU_CORES=4 perf stat -e ... -o output.txt phoronix-test-suite ...`
-   - 理由: `perf stat` は引数として渡された環境変数を実行するコマンドに伝播しない
-3. PTSが設定する `$LOG_FILE` などの環境変数が正しく渡されないと "No such file or directory" エラーが発生する
+2. `-e` オプションでイベントを指定: `cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations`
+3. `-o` オプションで出力ファイルを指定
 
 ### 出力ファイル
 results/<machine name>/<test_category>/<testname>/に以下を保存:
@@ -197,3 +368,17 @@ results/<machine name>/<test_category>/<testname>/に以下を保存:
 - `perf stat -A`はCPU毎の統計を出力（フォーマット: `CPU<n>`プレフィックス付き）
 - CPU周波数はkHz単位で保存されているため、GHzへの変換が必要（÷ 1,000,000）
 - 設定変更は一時的（再起動で元に戻る）、永続化は /etc/sysctl.conf に追加
+
+---
+
+## 新規テスト作成時の参考資料
+
+新しいpts_runner_*.pyを作成する際は、以下を参照してください：
+
+### コード構造テンプレート
+詳細なテンプレートとサンプルコードは [`CODE_TEMPLATE.md`](./CODE_TEMPLATE.md) を参照。
+
+### 参考実装
+- `pts_runner_build-llvm-1.6.0.py` - 最も完全で正しい実装
+- `pts_runner_coremark-1.0.1.py` - シンプルな実装例
+- `pts_runner_apache-3.0.0.py` - Single-threaded benchmarkの例

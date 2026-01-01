@@ -555,9 +555,12 @@ class Compress7zipRunner:
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
+        # Use /proc/cpuinfo method to avoid hardware dependencies (as per README)
         print(f"[INFO] Recording CPU frequency before benchmark...")
+        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
+        command = cmd_template.format(file=freq_start_file)
         result = subprocess.run(
-            ['bash', '-c', f'cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > {freq_start_file}'],
+            ['bash', '-c', command],
             capture_output=True,
             text=True
         )
@@ -597,9 +600,12 @@ class Compress7zipRunner:
             returncode = process.returncode
 
         # Record CPU frequency after benchmark
+        # Use /proc/cpuinfo method to avoid hardware dependencies (as per README)
         print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
+        command = cmd_template.format(file=freq_end_file)
         result = subprocess.run(
-            ['bash', '-c', f'cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > {freq_end_file}'],
+            ['bash', '-c', command],
             capture_output=True,
             text=True
         )

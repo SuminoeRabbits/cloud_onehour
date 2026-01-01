@@ -430,11 +430,13 @@ class ApacheRunner:
 
         # Single-threaded: use CPU 0 only with taskset
         cpu_list = '0'
-        pts_base_cmd = f'{batch_env} taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+        pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
         cpu_info = f"Single-threaded benchmark: CPU affinity (taskset): {cpu_list}"
 
         # Wrap PTS command with perf stat
-        pts_cmd = f'perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        # CRITICAL: Environment variables MUST come BEFORE perf stat (README)
+        # Otherwise perf stat won't propagate them to the actual command
+        pts_cmd = f'{batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
 
         print(f"[INFO] {cpu_info}")
 
@@ -453,9 +455,12 @@ class ApacheRunner:
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
+        # Use /proc/cpuinfo method to avoid hardware dependencies (as per README)
         print(f"[INFO] Recording CPU frequency before benchmark...")
+        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
+        command = cmd_template.format(file=freq_start_file)
         result = subprocess.run(
-            ['bash', '-c', f'cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > {freq_start_file}'],
+            ['bash', '-c', command],
             capture_output=True,
             text=True
         )
@@ -495,9 +500,12 @@ class ApacheRunner:
             returncode = process.returncode
 
         # Record CPU frequency after benchmark
+        # Use /proc/cpuinfo method to avoid hardware dependencies (as per README)
         print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
+        command = cmd_template.format(file=freq_end_file)
         result = subprocess.run(
-            ['bash', '-c', f'cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > {freq_end_file}'],
+            ['bash', '-c', command],
             capture_output=True,
             text=True
         )
