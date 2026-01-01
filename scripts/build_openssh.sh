@@ -84,7 +84,7 @@ if [ "$DO_SSL" = true ]; then
     export CFLAGS="${OPT_FLAGS}"
     ./config --prefix="${SSL_PREFIX}" --openssldir="${SSL_PREFIX}/ssl" --libdir=lib shared zlib
     make -j"$(nproc)"
-    sudo make install
+    sudo make install_sw
     cd ..
 fi
 
@@ -100,14 +100,20 @@ if [ "$DO_SSH" = true ]; then
     SSL_DIR="${SSL_PREFIX}"
     [ ! -d "$SSL_DIR" ] && SSL_DIR="/usr"
 
+    # 変数 SSL_PREFIX は OpenSSL 3.5.4 のインストール先
+    # 例: SSL_PREFIX="/usr/local/openssl-3.5.4"
+
+    LDFLAGS="-L${SSL_PREFIX}/lib -Wl,-rpath,${SSL_PREFIX}/lib" \
+    CPPFLAGS="-I${SSL_PREFIX}/include" \
+    LD_LIBRARY_PATH="${SSL_PREFIX}/lib" \
     ./configure --prefix="${SSH_PREFIX}" \
-                --with-ssl-dir="${SSL_DIR}" \
+                --with-ssl-dir="${SSL_PREFIX}" \
                 --with-pam \
                 --with-libedit \
                 --with-selinux \
                 --sysconfdir=/etc/ssh
     make -j"$(nproc)"
-    sudo make install
+    sudo make install-nosysconf
     cd ..
 fi
 
