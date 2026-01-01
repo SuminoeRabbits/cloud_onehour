@@ -6,7 +6,7 @@
 
 ```python
 class BenchmarkRunner:
-    def __init__(self, threads_arg=None):
+    def __init__(self, threads_arg=None, quick_mode=False):
         # System info
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
@@ -17,6 +17,9 @@ class BenchmarkRunner:
         else:
             n = min(threads_arg, self.vcpu_count)
             self.thread_list = [n]
+        
+        # Quick mode for development
+        self.quick_mode = quick_mode
         
         # Check perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -43,7 +46,9 @@ class BenchmarkRunner:
     def run_benchmark(self, num_threads):
         """Run benchmark with specified thread count."""
         # 1. Setup environment variables
-        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        # Quick mode: FORCE_TIMES_TO_RUN=1 for development (60-70% time reduction)
+        quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
         
         # 2. Build PTS command (NO environment variables in pts_base_cmd!)
         if num_threads >= self.vcpu_count:
@@ -78,11 +83,41 @@ class BenchmarkRunner:
         """Parse perf stat output and CPU frequency files."""
         # 実装は既存のpts_runner_build-llvm-1.6.0.pyを参照
         pass
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Benchmark Runner'
+    )
+    
+    parser.add_argument(
+        'threads',
+        nargs='?',
+        type=int,
+        help='Number of threads (optional, omit for scaling mode)'
+    )
+    
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+    )
+    
+    args = parser.parse_args()
+    
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
+    
+    # Run benchmark
+    runner = BenchmarkRunner(args.threads, quick_mode=args.quick)
+    success = runner.run()
+    
+    sys.exit(0 if success else 1)
 ```
 
 ### 参考実装
 
 完全な実装例は以下を参照:
+- `pts_runner_coremark-1.0.1.py` - --quickフラグ実装済み（最新）
 - `pts_runner_build-llvm-1.6.0.py` - 最も完全で正しい実装
-- `pts_runner_coremark-1.0.1.py` - シンプルな実装例
 - `pts_runner_apache-3.0.0.py` - Single-threaded benchmarkの例

@@ -21,12 +21,13 @@ from pathlib import Path
 
 
 class JavaJmhRunner:
-    def __init__(self, threads_arg=None):
+    def __init__(self, threads_arg=None, quick_mode=False):
         """
         Initialize JMH benchmark runner.
 
         Args:
             threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
+            quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
         self.benchmark = "java-jmh-1.0.1"
         self.benchmark_full = f"pts/{self.benchmark}"
@@ -51,6 +52,9 @@ class JavaJmhRunner:
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
         self.results_dir = self.project_root / "results" / self.machine_name / self.test_category_dir / self.benchmark
+
+        # Quick mode for development
+        self.quick_mode = quick_mode
 
         # Check and setup perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -427,7 +431,8 @@ class JavaJmhRunner:
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
-        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=java-jmh-{num_threads}threads TEST_RESULTS_IDENTIFIER=java-jmh-{num_threads}threads'
+        quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=java-jmh-{num_threads}threads TEST_RESULTS_IDENTIFIER=java-jmh-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
@@ -750,8 +755,18 @@ Examples:
         type=int,
         help='Number of threads (optional, omit for scaling mode)'
     )
+    
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+    )
 
     args = parser.parse_args()
+    
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
     # Validate threads argument
     if args.threads is not None and args.threads < 1:
@@ -759,7 +774,7 @@ Examples:
         sys.exit(1)
 
     # Run benchmark
-    runner = JavaJmhRunner(args.threads)
+    runner = JavaJmhRunner(args.threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)

@@ -56,6 +56,46 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 これらの設定は、<testname>毎に固有でPTSでテストを実行時にのみ利用される。
 今の時点では未定。
 
+## --quick フラグ（開発モード）
+
+すべてのpts_runner_*.pyスクリプトは`--quick`フラグをサポートしています。
+
+### 目的
+開発・デバッグ時のテスト時間を短縮（60-70%削減）
+
+### 動作
+- `FORCE_TIMES_TO_RUN=1`を環境変数に設定
+- テストを1回のみ実行（通常は3回以上）
+- 統計的信頼性は低下するが、機能確認には十分
+
+### 使用例
+
+#### 開発モード（高速）
+```bash
+./pts_runner/pts_runner_coremark-1.0.1.py 4 --quick
+./pts_runner/pts_runner_build-llvm-1.6.0.py --quick
+```
+
+#### 本番モード（通常）
+```bash
+./pts_runner/pts_runner_coremark-1.0.1.py 4
+./pts_runner/pts_runner_build-llvm-1.6.0.py
+```
+
+### 期待される時間短縮
+
+| テスト | 通常時間 | Quick時間 | 短縮率 |
+|--------|---------|-----------|--------|
+| CoreMark | 6分30秒 | 2分 | 69% |
+| Build-LLVM | 30-60分 | 10-20分 | 66% |
+| Build-GCC | 20-40分 | 7-13分 | 66% |
+
+### 注意事項
+- ⚠️ 開発・デバッグ専用
+- ⚠️ 本番ベンチマークには使用しない
+- ⚠️ 標準偏差が計算できない
+- ⚠️ 外れ値の影響を受けやすい
+
 ## set output directory
 ベンチマーク結果は results/<machinename>/<testcategory>/<testname>/<N>-thread.log
 <testcategory>の文字列にスペースがある場合は"_"に置換する。

@@ -25,7 +25,7 @@ from pathlib import Path
 
 
 class ApacheRunner:
-    def __init__(self, threads_arg=None):
+    def __init__(self, threads_arg=None, quick_mode=False):
         """
         Initialize Apache web server benchmark runner.
 
@@ -34,6 +34,7 @@ class ApacheRunner:
 
         Args:
             threads_arg: Thread count argument (ignored for this single-threaded benchmark)
+            quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
         self.benchmark = "apache-3.0.0"
         self.benchmark_full = f"pts/{self.benchmark}"
@@ -53,6 +54,9 @@ class ApacheRunner:
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
         self.results_dir = self.project_root / "results" / self.machine_name / self.test_category_dir / self.benchmark
+
+        # Quick mode for development
+        self.quick_mode = quick_mode
 
         # Check and setup perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -426,7 +430,8 @@ class ApacheRunner:
         # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
-        batch_env = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=apache-{num_threads}threads TEST_RESULTS_IDENTIFIER=apache-{num_threads}threads'
+        quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=apache-{num_threads}threads TEST_RESULTS_IDENTIFIER=apache-{num_threads}threads'
 
         # Single-threaded: use CPU 0 only with taskset
         cpu_list = '0'
@@ -747,8 +752,18 @@ Examples:
         type=int,
         help='Thread count (ignored; benchmark is always single-threaded)'
     )
+    
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+    )
 
     args = parser.parse_args()
+    
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
     # Validate threads argument (though it's ignored for this single-threaded benchmark)
     if args.threads is not None and args.threads < 1:
@@ -756,7 +771,7 @@ Examples:
         sys.exit(1)
 
     # Run benchmark (always with 1 thread)
-    runner = ApacheRunner(args.threads)
+    runner = ApacheRunner(args.threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)
