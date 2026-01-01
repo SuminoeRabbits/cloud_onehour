@@ -8,7 +8,7 @@ phoronix-test-suite --help
 すべてのpts_runner/pts_runner_<testname>.pyにおいて可能な限り関数名、構造を共通化。個別対応が必要な部分はそれが個別であることがわかるように実装。
 
 ## Python version
-Python3.10で動作すること。
+Python3.10で動作すること。Shebang　で　#!/usr/bin/env python3を指定する。
 
 ## Find <testname> 
 <testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。../test_suite.jsonに登録されていない<testname>は不正。
@@ -89,20 +89,15 @@ results/<machine name>/<test_category>/<testname>/stdout.log
 - `context-switches`: コンテキストスイッチ回数
 - `cpu-migrations`: CPUコア間マイグレーション回数
 
-### 実行方法
-```bash
-# ベンチマーク開始前にCPU周波数を記録
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > <output_dir>/<N>-thread_freq_start.txt
-
-# perf statでベンチマーク実行（CPU毎の統計取得）
-# 重要: 環境変数は perf stat の前に配置すること
-NUM_CPU_CORES=<N> BATCH_MODE=1 ... perf stat -e cycles,instructions,... \
-    -A -a \
-    -o <output_dir>/<N>-thread_perf_stats.txt \
-    taskset -c <cpu_list> phoronix-test-suite batch-run <benchmark>
-
-# ベンチマーク終了後にCPU周波数を記録
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq > <output_dir>/<N>-thread_freq_end.txt
+### 周波数サンプルの実装
+/proc/cpuinfo で得られた周波数データをAwkで整形して各コアの周波数サンプルとする。それ以外の方法、例えば
+`cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`
+などはハードウェア依存性があるので利用しない。サンプルのタイミングは`perf stat`の実行前後。
+```
+# 終了時サンプルの例
+cmd_template = 'grep "cpu MHz" /proc/cpuinfo | \
+    awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
+command = cmd_template.format(file=freq_end_file)
 ```
 
 **重要な注意点**:

@@ -8,8 +8,8 @@
       "sudo apt-get -y update && sudo apt-get install -y git",
       "git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
       "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
-      "cd ~/cloud_onehour/pts_runner && pts_runner_build-gcc-1.5.0.py",
-      "cd ~/cloud_onehour/pts_runner && pts_runner_build-llvm-1.6.0.py"
+      "cd ~/cloud_onehour/pts_runner && ./pts_runner_sysbench-1.1.0.py 100",
+      "cd ~/cloud_onehour/pts_runner && ./pts_runner_build-llvm-1.6.0.py 100"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
