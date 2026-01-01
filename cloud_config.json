@@ -5,7 +5,8 @@
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
     "commands": [
-      "sudo apt-get -y update && sudo apt-get install -y git && git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
+      "sudo apt-get -y update && sudo apt-get install -y git",
+      "git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
       "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
       "cd ~/cloud_onehour/pts_runner && pts_runner_build-gcc-1.5.0.py",
       "cd ~/cloud_onehour/pts_runner && pts_runner_build-llvm-1.6.0.py"
