@@ -51,7 +51,9 @@
 # --quick: 実行コマンドの生成で、すべてのコマンドの末尾に --quickを追加します。
 #          それ以外の機能は持たせません。
 # --dry-run: 実行コマンドの生成のみを行い、実行しません。
-# --no-execute: 実行コマンドの生成のみを行い、実行しません。  
+# --no-execute: 実行コマンドの生成のみを行い、実行しません。
+# --split-1st: 実行コマンドを総数の半分に分割し、前半分のみを生成・実行します。
+# --split-2nd: 実行コマンドを総数の半分に分割し、後半分のみを生成・実行します。  
 # 
 # 例外処理：
 # - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
@@ -289,6 +291,8 @@ Examples:
   %(prog)s --max --all             # Override to 288 threads and execute
   %(prog)s --suite custom.json     # Use custom test suite file
   %(prog)s --dry-run               # Generate commands but don't execute (default)
+  %(prog)s --split-1st --all       # Execute first half of tests only
+  %(prog)s --split-2nd --all       # Execute second half of tests only
         """
     )
 
@@ -328,6 +332,18 @@ Examples:
         help='Generate commands but do not execute them (alias for --dry-run)'
     )
 
+    parser.add_argument(
+        '--split-1st',
+        action='store_true',
+        help='Execute only the first half of tests (for splitting long runs)'
+    )
+
+    parser.add_argument(
+        '--split-2nd',
+        action='store_true',
+        help='Execute only the second half of tests (for splitting long runs)'
+    )
+
     # Exception handling: Ignore invalid options and continue execution
     try:
         args = parser.parse_args()
@@ -343,7 +359,9 @@ Examples:
                 max=False,
                 quick=False,
                 dry_run=True,
-                no_execute=False
+                no_execute=False,
+                split_1st=False,
+                split_2nd=False
             )
         else:
             # Normal exit (--help was called)
@@ -371,6 +389,23 @@ Examples:
 
     # Generate commands
     commands = generate_test_commands(test_suite, max_threads=max_threads, quick_mode=args.quick)
+
+    # Apply split filter if requested
+    if args.split_1st and args.split_2nd:
+        print("[ERROR] Cannot use both --split-1st and --split-2nd at the same time")
+        sys.exit(1)
+
+    if args.split_1st or args.split_2nd:
+        total_commands = len(commands)
+        split_point = (total_commands + 1) // 2  # Round up for first half
+
+        if args.split_1st:
+            commands = commands[:split_point]
+            print(f"[INFO] Split mode: Executing first half (1-{split_point} of {total_commands})")
+        else:  # args.split_2nd
+            commands = commands[split_point:]
+            print(f"[INFO] Split mode: Executing second half ({split_point+1}-{total_commands} of {total_commands})")
+        print()
 
     # Print commands
     print_commands(commands)
