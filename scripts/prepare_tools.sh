@@ -18,4 +18,5 @@ set -euo pipefail
 
 # install cpupower
 sudo apt-get -y install linux-tools-common linux-tools-$(uname -r)
+sudo apt-get -y install sysstat htop
 
