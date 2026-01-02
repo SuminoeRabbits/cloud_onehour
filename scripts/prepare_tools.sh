@@ -4,8 +4,8 @@ set -euo pipefail
 ./setup_gcc14.sh
 ./setup_binutil244.sh
 
-# setup jdk25
-./setup_jdk25.sh
+# setup jdkxx, see the version in setup_jdkxx.sh.
+./setup_jdkxx.sh
 
 # build zlib
 ./build_zlib.sh
