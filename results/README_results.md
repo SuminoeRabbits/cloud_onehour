@@ -3,8 +3,9 @@
 その後のデータベース作成向けJSONファイル(one_big_json.json)実装仕様を説明する。
 
 # Directory and structure
-`results/<machinename>/<os>/<testcategory>/<benchmark>/files`
-のディレクトリ構造。今後の命名規則として下記の通りにする。
+まず`${PROJECT_ROOT}`に対して
+`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>/files`
+というディレクトリ構造になっている。今後の命名規則として下記の通りにする。
 "machinename"=<machinename>
 "os"=<os>
 "testcategory"=<testcategory>
@@ -51,6 +52,7 @@
 
 # Extracting one big JSON
 まずデータ構造を説明し、その後にそれぞれに入力されるべきデータを説明する。
+
 ## Definition of one big JSON structure
 
 ```
@@ -84,5 +86,28 @@
     }
 }
 ```
+## Definition data source
+
+#### "machinename":"<machinename>"
+`${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
+#### "os":"<os>"
+`<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。`${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名が<os>に相当する。
+
+#### "total_vcpu":"<vcpu>"
+`<machinename>`に含まれる文字列で決定される数字である。対応表は下記の通り。
+
+|\<machinename\>が含む文字列|CSP | vcpu |cpu name | ISA |
+| :---                   | :---:| :---:| :---: |
+| "rpi5"                 |local | 4 | Cortex-A76 | v8.2A |
+|"t3" and "medium"       |AWS   | 2 | | |
+|"m8a" and "2xlarge"     |AWS   | 8 | | |
+|"m8i" and "2xlarge"     |AWS   | 8 | | |
+|"m8g" and "2xlarge"     |AWS   | 8 | Neoverse-V2 | v9.0A |
+
+
+
+
+#### "testcategory":"<testcategory>"
+#### "benchmark":"<benchmark>"
 
 # Search, analysis and report by AI

@@ -5,6 +5,7 @@ import time
 import sys
 import signal
 import threading
+import re
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -550,16 +551,40 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                 elif marker_check == "FAILED":
                     if DEBUG_MODE == True:
                         log(f"Workload {i}/{total_workloads} failed", "ERROR")
-                    elif DEBUG_MODE == False:
+                    else:
                         print(f"  [Error] Workload {i}/{total_workloads} failed")
 
                     # Fetch log file for debugging
+                    print(f"  [Debug] Fetching error log from {log_file}...")
                     log_output = run_cmd(
-                        f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {log_file} 2>/dev/null'",
-                        capture=True, timeout=10, ignore=True
+                        f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {log_file} 2>/dev/null || echo \"[Error] Could not read log file\"'",
+                        capture=True, timeout=30, ignore=True
                     )
-                    if log_output:
-                        print(f"  [Error Log] Last 50 lines:\n{log_output}")
+                    if log_output and log_output.strip():
+                        print(f"  [Error Log] Last 100 lines from {log_file}:")
+                        print("  " + "="*78)
+                        for line in log_output.strip().split('\n'):
+                            print(f"  {line}")
+                        print("  " + "="*78)
+                    else:
+                        print(f"  [Warning] Could not fetch error log")
+
+                    # Also check if there's any useful info in the workload output log
+                    # Extract log file path from the workload command (e.g., "> /tmp/xxx.log")
+                    workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', cmd)
+                    if workload_log_match:
+                        workload_log_path = workload_log_match.group(1)
+                        print(f"  [Debug] Checking workload output log: {workload_log_path}...")
+                        workload_log = run_cmd(
+                            f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {workload_log_path} 2>/dev/null || echo \"No workload log found\"'",
+                            capture=True, timeout=30, ignore=True
+                        )
+                        if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
+                            print(f"  [Workload Log] Last 50 lines from {workload_log_path}:")
+                            print("  " + "="*78)
+                            for line in workload_log.strip().split('\n'):
+                                print(f"  {line}")
+                            print("  " + "="*78)
 
                     return False
                 elif marker_check and marker_check != "RUNNING":
