@@ -553,9 +553,12 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     host_rep_dir = config['common']['host_reports_dir']
     # Use hostname if specified, otherwise fallback to cloud_name format
     file_basename = inst.get('hostname', f"{cloud}_{name}")
+    # Format OS version: "25.04" -> "ubuntu25_04"
+    os_version = config['common']['os_version'].replace('.', '_')
+    os_label = f"ubuntu{os_version}"
     # Add timestamp to filename (yymmdd_HHMMSS format)
     timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
-    local_f = f"{host_rep_dir}/{file_basename}_{timestamp}.tar.gz"
+    local_f = f"{host_rep_dir}/{file_basename}_{os_label}_{timestamp}.tar.gz"
 
     if DEBUG_MODE == True:
         log(f"Downloading to {local_f} via SSH (avoiding SCP OpenSSL mismatch)...")

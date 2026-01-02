@@ -7,9 +7,8 @@
     "commands": [
       "sudo apt-get -y update && sudo apt-get install -y git",
       "git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
-      //      "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
-      //      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --all"
-      "ls -la"
+      "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
+      "cd ~/cloud_onehour && ./pts_regression.py --quick --max"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
