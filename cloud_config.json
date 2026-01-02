@@ -5,10 +5,10 @@
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
     "commands": [
-      "sudo apt-get -y update && sudo apt-get install -y git",
-      "git clone https://github.com/SuminoeRabbits/cloud_onehour.git",
-      "cd ~/cloud_onehour/scripts && ./prepare_tools.sh",
-      "cd ~/cloud_onehour && ./pts_regression.py --quick --max"
+      "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
+      "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
+      "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --all > /tmp/benchmark_output.log 2>&1"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
@@ -28,7 +28,35 @@
         "arch": "amd64",
         "hostname": "aws-t3-medium-amd64",
         "vcpus": 2,
-        "enable": true
+        "enable": false,
+        "cost_hour[730h-mo]": 0.0183
+      },
+      {
+        "name": "aws-benchmark-instance",
+        "type": "m8a.2xlarge",
+        "arch": "amd64",
+        "hostname": "aws-m8a-2xlarge-amd64",
+        "vcpus": 8,
+        "enable": true,
+        "cost_hour[730h-mo]": 0.2967
+      },
+      {
+        "name": "aws-benchmark-instance",
+        "type": "m8i.2xlarge",
+        "arch": "amd64",
+        "hostname": "aws-m8i-2xlarge-amd64",
+        "vcpus": 8,
+        "enable": false,
+        "cost_hour[730h-mo]": 0.2397
+      },
+      {
+        "name": "aws-benchmark-instance",
+        "type": "m8g.2xlarge",
+        "arch": "arm64",
+        "hostname": "aws-m8g-2xlarge-arm64",
+        "vcpus": 8,
+        "enable": false,
+        "cost_hour[730h-mo]": 0.2077
       }
     ]
   },
@@ -39,11 +67,48 @@
     "instances": [
       {
         "name": "gcp-benchmark-instance",
-        "type": "e2-medium",
+        "type": "e2-standard-2",
         "arch": "amd64",
-        "hostname": "gcp-e2-medium-amd64",
+        "hostname": "gcp-e2-standard-2-amd64",
         "vcpus": 2,
-        "enable": true
+        "enable": false,
+        "cost_hour[730h-mo]": 0.0683
+      },
+      {
+        "name": "gcp-benchmark-instance",
+        "type": "c4d-standard-8",
+        "arch": "amd64",
+        "hostname": "gcp-c4d-standard-8-amd64",
+        "vcpus": 8,
+        "enable": false,
+        "cost_hour[730h-mo]": 0.3790
+      },
+      {
+        "name": "gcp-benchmark-instance",
+        "type": "c4-standard-8",
+        "arch": "amd64",
+        "hostname": "gcp-c4-standard-8-amd64",
+        "vcpus": 8,
+        "enable": false,
+        "cost_hour[730h-mo]": 0.3964
+      },
+      {
+        "name": "gcp-benchmark-instance",
+        "type": "c4a-standard-8",
+        "arch": "arm64",
+        "hostname": "gcp-c4a-standard-8-arm64",
+        "vcpus": 8,
+        "enable": false,
+        "cost_hour[730h-mo]": 0.3602
+      },
+    {
+        "name": "gcp-benchmark-instance",
+        "type": "t2a-standard-8",
+        "arch": "arm64",
+        "hostname": "gcp-t2a-standard-8-arm64",
+        "vcpus": 8,
+        "enable": false,
+        "cost_hour": 0.3093
       }
     ]
   },

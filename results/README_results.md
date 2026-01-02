@@ -50,30 +50,32 @@
     1つのベンチマークに複数の<test_name>が存在する場合があり、その時は<test_name>毎にベンチマーク結果が記載される。。
 
 # Extracting one big JSON
+まずデータ構造を説明し、その後にそれぞれに入力されるべきデータを説明する。
+## Definition of one big JSON structure
 
-## Definition of one big JSON format
+```
 {
-    machinename:"<machinename>"{
-        total_vcpu:"<vcpu>"
-        os:"<os>"{
-            testcategory:"<testcategory>"{
-                benchmark:"<benchmark>"{
-                    test_name:"<testname>"{
-                        description:"<description>"
-                        threads:"<N>"{
-                            perf_stat:{                            
-                                start_freq:{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
-                                end_freq:{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
-                                ipc:{"ipc_0":<ipc_0>, "ipc_1":<ipc_1>, "ipc_2":<ipc_2>, ...}
-                                total_cycles:{"total_cycles_0":<total_cycles_0>, "total_cycles_1":<total_cycles_1>, "total_cycles_2":<total_cycles_2>, ...}
-                                total_instructions:{"total_instructions_0":<total_instructions_0>, "total_instructions_1":<total_instructions_1>, "total_instructions_2":<total_instructions_2>, ...}
-                                cpu_utilization_percent:<cpu_utilization_percent>
-                                elapsed_time_sec:<elapsed_time_sec>
-                            }
-                            pts:{
+    "machinename":"<machinename>"{
+        "total_vcpu":"<vcpu>"
+        "os":"<os>"{
+            "testcategory":"<testcategory>"{
+                "benchmark":"<benchmark>"{
+                    "threads":"<N>"{
+                        "perf_stat":{                            
+                            "start_freq":{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
+                            "end_freq":{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
+                            "ipc":{"ipc_0":<ipc_0>, "ipc_1":<ipc_1>, "ipc_2":<ipc_2>, ...}
+                            "total_cycles":{"total_cycles_0":<total_cycles_0>, "total_cycles_1":<total_cycles_1>, "total_cycles_2":<total_cycles_2>, ...}
+                            "total_instructions":{"total_instructions_0":<total_instructions_0>, "total_instructions_1":<total_instructions_1>, "total_instructions_2":<total_instructions_2>, ...}
+                            "cpu_utilization_percent":<cpu_utilization_percent>
+                            "elapsed_time_sec":<elapsed_time_sec>
+                        }
+                        "test_name":"<testname>"{
+                            "description":"<description>"
                             "values":"<values>"
                             "unit":"<unit>"
-                            }    
+                            "time":"<time>"
+                            "cost":"<cost>"
                         }
                     }
                 }
@@ -81,6 +83,6 @@
         }
     }
 }
-
+```
 
 # Search, analysis and report by AI
