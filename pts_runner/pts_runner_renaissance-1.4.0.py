@@ -204,14 +204,43 @@ class RenaissanceRunner:
         # Execute install command
         result = subprocess.run(
             ['bash', '-c', install_cmd],
+            capture_output=True,
             text=True
         )
 
+        # Check for installation failure
+        # PTS may return 0 even if download failed, so check stdout/stderr for error messages
+        install_failed = False
         if result.returncode != 0:
+            install_failed = True
+        elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
+            install_failed = True
+        elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower()):
+            install_failed = True
+
+        if install_failed:
             print(f"  [ERROR] Installation failed")
+            if result.stdout:
+                print(f"  [ERROR] stdout: {result.stdout[-500:]}")  # Last 500 chars
+            if result.stderr:
+                print(f"  [ERROR] stderr: {result.stderr[-500:]}")
             sys.exit(1)
 
-        print(f"  [OK] Installation completed")
+        # Verify installation by checking if test is actually installed
+        verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+        verify_result = subprocess.run(
+            ['bash', '-c', verify_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if verify_result.returncode != 0 or 'not found' in verify_result.stdout.lower():
+            print(f"  [ERROR] Installation verification failed - test not found")
+            print(f"  [INFO] This may be due to download/checksum failures")
+            print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+            sys.exit(1)
+
+        print(f"  [OK] Installation completed and verified")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """

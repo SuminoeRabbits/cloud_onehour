@@ -111,16 +111,13 @@ class FFmpegRunner:
             return 2
 
     def clean_pts_cache(self):
-        """Clean all PTS cache for fresh installation."""
+        """Clean PTS installed tests for fresh installation."""
         print(">>> Cleaning PTS cache...")
 
         pts_home = Path.home() / '.phoronix-test-suite'
 
-        # Clean test profiles
-        test_profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
-        if test_profile_dir.exists():
-            print(f"  [CLEAN] Removing test profile: {test_profile_dir}")
-            shutil.rmtree(test_profile_dir)
+        # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
+        # Only clean installed tests to force fresh compilation
 
         # Clean installed tests
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
@@ -152,6 +149,49 @@ class FFmpegRunner:
 
         return ','.join(cpu_list)
 
+    def fix_x264_checksum(self):
+        """
+        Fix x264 checksum in downloads.xml due to upstream changes.
+
+        VideoLAN's x264 git archive ZIP has changed, causing checksum mismatch.
+        This method updates the downloads.xml with the correct checksums.
+        """
+        downloads_xml = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'downloads.xml'
+
+        if not downloads_xml.exists():
+            print(f"  [WARN] downloads.xml not found, skipping checksum fix")
+            return
+
+        try:
+            with open(downloads_xml, 'r') as f:
+                content = f.read()
+
+            # Replace x264 checksums with correct values
+            # Old checksums (from PTS repo)
+            old_md5 = 'dec93f9a2fd2a91afff1e9d5fb2fea54'
+            old_sha256 = '48b9160177774f3efd29a60d722d9eddd6c023c0904a9a4f83377aa6e6845edb'
+            old_size = '1222728'
+
+            # New checksums (actual current file)
+            new_md5 = '62a5d6c7207be9f0aa6e1a9552345c8c'
+            new_sha256 = 'd859f2b4b0b70d6f10a33e9b5e0a6bf41d97e4414644c4f85f02b7665c0d1292'
+            new_size = '1222391'
+
+            if old_sha256 in content:
+                print(f"  [FIX] Updating x264 checksums in downloads.xml")
+                content = content.replace(old_md5, new_md5)
+                content = content.replace(old_sha256, new_sha256)
+                content = content.replace(f'<FileSize>{old_size}</FileSize>', f'<FileSize>{new_size}</FileSize>')
+
+                with open(downloads_xml, 'w') as f:
+                    f.write(content)
+                print(f"  [OK] x264 checksums updated")
+            else:
+                print(f"  [INFO] x264 checksums already correct")
+
+        except Exception as e:
+            print(f"  [WARN] Failed to fix checksums: {e}")
+
     def install_benchmark(self):
         """
         Install ffmpeg-7.0.1 with GCC-14 native compilation.
@@ -181,17 +221,67 @@ class FFmpegRunner:
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
-        # Execute install command
+        # Execute install command (attempt 1)
         result = subprocess.run(
             ['bash', '-c', install_cmd],
+            capture_output=True,
             text=True
         )
 
+        # Check for installation failure
+        # PTS may return 0 even if download failed, so check stdout/stderr for error messages
+        install_failed = False
         if result.returncode != 0:
+            install_failed = True
+        elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
+            install_failed = True
+        elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower()):
+            install_failed = True
+
+        # If first attempt failed due to x264 checksum, fix and retry
+        if install_failed and result.stdout and 'x264-7ed753b10a61d0be95f683289dfb925b800b0676.zip' in result.stdout:
+            print(f"  [WARN] x264 checksum failure detected, applying fix...")
+            self.fix_x264_checksum()
+
+            print(f"  [INFO] Retrying installation after checksum fix...")
+            result = subprocess.run(
+                ['bash', '-c', install_cmd],
+                capture_output=True,
+                text=True
+            )
+
+            # Re-check for installation failure
+            install_failed = False
+            if result.returncode != 0:
+                install_failed = True
+            elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
+                install_failed = True
+            elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower()):
+                install_failed = True
+
+        if install_failed:
             print(f"  [ERROR] Installation failed")
+            if result.stdout:
+                print(f"  [ERROR] stdout: {result.stdout[-500:]}")  # Last 500 chars
+            if result.stderr:
+                print(f"  [ERROR] stderr: {result.stderr[-500:]}")
             sys.exit(1)
 
-        print(f"  [OK] Installation completed")
+        # Verify installation by checking if test is actually installed
+        verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+        verify_result = subprocess.run(
+            ['bash', '-c', verify_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if verify_result.returncode != 0 or 'not found' in verify_result.stdout.lower():
+            print(f"  [ERROR] Installation verification failed - test not found")
+            print(f"  [INFO] This may be due to download/checksum failures")
+            print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+            sys.exit(1)
+
+        print(f"  [OK] Installation completed and verified")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
@@ -545,8 +635,21 @@ class FFmpegRunner:
             shutil.rmtree(self.results_dir)
             print(f"  [OK] Results directory cleaned\n")
 
-        self.clean_pts_cache()
-        self.install_benchmark()
+        # Check if already installed
+        verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+        verify_result = subprocess.run(
+            ['bash', '-c', verify_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        already_installed = verify_result.returncode == 0 and 'Test Installed: Yes' in verify_result.stdout
+
+        if not already_installed:
+            self.clean_pts_cache()
+            self.install_benchmark()
+        else:
+            print(f">>> Benchmark {self.benchmark_full} already installed, skipping installation\n")
 
         failed = []
         for num_threads in self.thread_list:

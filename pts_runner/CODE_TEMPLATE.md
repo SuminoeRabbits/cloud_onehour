@@ -84,6 +84,70 @@ class BenchmarkRunner:
         # 実装は既存のpts_runner_build-llvm-1.6.0.pyを参照
         pass
 
+    def install_benchmark(self):
+        """
+        Install benchmark with error detection and verification.
+
+        CRITICAL: PTS may return exit code 0 even when download fails.
+        This method implements robust error detection.
+        """
+        print(f"\n>>> Installing {self.benchmark_full}...")
+
+        # Remove existing installation first
+        print(f"  [INFO] Removing existing installation...")
+        remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
+        subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Build install command
+        nproc = os.cpu_count() or 1
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+
+        print(f"\n{'>'*80}")
+        print(f"[PTS INSTALL COMMAND]")
+        print(f"  {install_cmd}")
+        print(f"{'<'*80}\n")
+
+        # Execute install command with output capture (REQUIRED for error detection)
+        result = subprocess.run(
+            ['bash', '-c', install_cmd],
+            capture_output=True,  # ← CRITICAL: Must capture to detect errors
+            text=True
+        )
+
+        # Check for installation failure
+        # PTS may return 0 even if download failed, so check stdout/stderr for error messages
+        install_failed = False
+        if result.returncode != 0:
+            install_failed = True
+        elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
+            install_failed = True
+        elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower()):
+            install_failed = True
+
+        if install_failed:
+            print(f"  [ERROR] Installation failed")
+            if result.stdout:
+                print(f"  [ERROR] stdout: {result.stdout[-500:]}")  # Last 500 chars
+            if result.stderr:
+                print(f"  [ERROR] stderr: {result.stderr[-500:]}")
+            sys.exit(1)
+
+        # Verify installation by checking if test is actually installed
+        verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+        verify_result = subprocess.run(
+            ['bash', '-c', verify_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if verify_result.returncode != 0 or 'not found' in verify_result.stdout.lower():
+            print(f"  [ERROR] Installation verification failed - test not found")
+            print(f"  [INFO] This may be due to download/checksum failures")
+            print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+            sys.exit(1)
+
+        print(f"  [OK] Installation completed and verified")
+
 def main():
     parser = argparse.ArgumentParser(
         description='Benchmark Runner'

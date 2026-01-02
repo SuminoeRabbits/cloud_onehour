@@ -31,6 +31,78 @@ PTSから<testname>をPTSのInstallコマンドを使ってクリーンインス
 
 - PTSのインストールコマンドはbatch-installを使う事。
 
+### インストールエラー検出と検証（重要）
+
+**問題**: Phoronix Test Suiteは依存ファイルのダウンロード失敗時にもexit code 0を返すことがある。
+
+**対策**: 以下の3段階でインストール失敗を確実に検出する:
+
+1. **stdout/stderrをキャプチャ** (`capture_output=True`)
+   ```python
+   result = subprocess.run(
+       ['bash', '-c', install_cmd],
+       capture_output=True,  # ← 重要
+       text=True
+   )
+   ```
+
+2. **エラーメッセージを検出**
+   - return codeだけでなく、stdout/stderrの内容もチェック
+   - 検出パターン: `'Checksum Failed'`, `'Downloading of needed test files failed'`
+
+3. **インストール検証**
+   - `phoronix-test-suite info <testname>` でインストール成功を確認
+   - 失敗時は明確なエラーメッセージとsys.exit(1)
+
+**実装例**:
+```python
+# Execute install command
+result = subprocess.run(
+    ['bash', '-c', install_cmd],
+    capture_output=True,
+    text=True
+)
+
+# Check for installation failure
+# PTS may return 0 even if download failed, so check stdout/stderr for error messages
+install_failed = False
+if result.returncode != 0:
+    install_failed = True
+elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
+    install_failed = True
+elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower()):
+    install_failed = True
+
+if install_failed:
+    print(f"  [ERROR] Installation failed")
+    if result.stdout:
+        print(f"  [ERROR] stdout: {result.stdout[-500:]}")  # Last 500 chars
+    if result.stderr:
+        print(f"  [ERROR] stderr: {result.stderr[-500:]}")
+    sys.exit(1)
+
+# Verify installation by checking if test is actually installed
+verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+verify_result = subprocess.run(
+    ['bash', '-c', verify_cmd],
+    capture_output=True,
+    text=True
+)
+
+if verify_result.returncode != 0 or 'not found' in verify_result.stdout.lower():
+    print(f"  [ERROR] Installation verification failed - test not found")
+    print(f"  [INFO] This may be due to download/checksum failures")
+    print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+    sys.exit(1)
+
+print(f"  [OK] Installation completed and verified")
+```
+
+**よくある失敗例**:
+- x264, x265等のマルチメディアコーデック: チェックサムエラー（アップストリームの更新）
+- ネットワーク不安定時: ダウンロードタイムアウト
+- キャッシュ破損: 古いキャッシュファイルとの不一致
+
 ## set <N>=number of threads
 
 実行形式として、引数が与えられるのでそれを間違えないように。引数の定義は
