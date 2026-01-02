@@ -10,6 +10,9 @@
 "testcategory"=<testcategory>
 "benchmark"=<benchmark>
 
+# TOC
+<ここにTOCを記載してほしい>。
+
 # File details
 
 ## Common rule
@@ -23,13 +26,15 @@
 ベンチマークで利用されるＣＰＵアフィニティの順序はamd64系のHyperThread機能を考慮して、`{0,2,4,6....,1,3,5,7..[vCPU-1]}`である。
 例えば`vCPU=4`, `<N>=3のベンチマーク設定で利用されるCPUアフィニティは`{0,1,2}`となる。`<N>=vCPU`の場合はすべてのCPUアフィニティを利用していることになる。このようなCPUアフィニティの分散は`vCPU=physical CPU`であるプロセッサでは意味がないが、両方で対応できるようにこのような仕様にしている。
 
-## Performance summary file
+## perf_stat output
+ここでは独自拡張したOSの`perf stat`の出力ファイルを説明する。
+
+### Performance summary file
 - `results/<machinename>/<os>/<testcategory>/<benchmark>/<N>-thread_perf_summary.json`　
     <N>スレッド毎にファイルが存在する。
     もしこのファイルが特定の<N>だけ存在しない場合は、そのスレッド数のテストは行っていない、もしくは失敗していることを意味する。
 
-
-## Frequency file
+### Frequency file
 - `results/<machinename>/<os>/<testcategory>/<benchmark>/<N>-thread_freq_*.txt`　
     <N>スレッド毎にファイルが存在する。
     ファイルが存在していてもテストは失敗していることがあるので注意。
@@ -37,10 +42,12 @@
     ベンチマーク終了地点は<N>-threa_freq_end.txt。
     CPUアフィニティ順に[Hz]単位で記録されている。
 
-## Benchmark summary file
+## pts output
+ここではPTSの標準ベンチマーク出力を説明する。
+### Benchmark summary file
 - `results/<machinename>/<os>/<testcategory>/<benchmark>/summary.json`
-    すべての<N>-thread_perf_summary.jsonをまとめたファイルであり、1つだけ存在。
-    存在しない場合はテストが失敗している。
+    すべての<N>-thread_perf_summary.jsonを<N>毎に1つにまとめたファイルであり、1つだけ存在。存在しない場合はテストが失敗している。
+    1つのベンチマークに複数の<test_name>が存在する場合があり、その時は<test_name>毎にベンチマーク結果が記載される。。
 
 # Extracting one big JSON
 
@@ -51,16 +58,22 @@
         os:"<os>"{
             testcategory:"<testcategory>"{
                 benchmark:"<benchmark>"{
-                    testname:"<testname>"{
+                    test_name:"<testname>"{
                         description:"<description>"
-                        test_thread:"<N>"{
-                            start_freq:{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
-                            end_freq:{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
-                            ipc:{"ipc_0":<ipc_0>, "ipc_1":<ipc_1>, "ipc_2":<ipc_2>, ...}
-                            total_cycles:{"total_cycles_0":<total_cycles_0>, "total_cycles_1":<total_cycles_1>, "total_cycles_2":<total_cycles_2>, ...}
-                            total_instructions:{"total_instructions_0":<total_instructions_0>, "total_instructions_1":<total_instructions_1>, "total_instructions_2":<total_instructions_2>, ...}
-                            cpu_utilization_percent:<cpu_utilization_percent>
-                            elapsed_time_sec:<elapsed_time_sec>
+                        threads:"<N>"{
+                            perf_stat:{                            
+                                start_freq:{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
+                                end_freq:{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
+                                ipc:{"ipc_0":<ipc_0>, "ipc_1":<ipc_1>, "ipc_2":<ipc_2>, ...}
+                                total_cycles:{"total_cycles_0":<total_cycles_0>, "total_cycles_1":<total_cycles_1>, "total_cycles_2":<total_cycles_2>, ...}
+                                total_instructions:{"total_instructions_0":<total_instructions_0>, "total_instructions_1":<total_instructions_1>, "total_instructions_2":<total_instructions_2>, ...}
+                                cpu_utilization_percent:<cpu_utilization_percent>
+                                elapsed_time_sec:<elapsed_time_sec>
+                            }
+                            pts:{
+                            "values":"<values>"
+                            "unit":"<unit>"
+                            }    
                         }
                     }
                 }
