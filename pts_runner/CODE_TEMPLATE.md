@@ -10,6 +10,7 @@ class BenchmarkRunner:
         # System info
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
+        self.os_name = self.get_os_name()
         
         # Thread list setup
         if threads_arg is None:
@@ -28,6 +29,48 @@ class BenchmarkRunner:
         """Check and adjust perf_event_paranoid setting."""
         # 実装は既存のpts_runner_build-llvm-1.6.0.pyを参照
         pass
+
+    def get_os_name(self):
+        """
+        Get OS name and version formatted as <Distro>_<Version>.
+        Example: Ubuntu_22_04
+        """
+        try:
+            # Try lsb_release first as it's standard on Ubuntu
+            import subprocess
+            cmd = "lsb_release -d -s"
+            result = subprocess.run(cmd.split(), capture_output=True, text=True)
+            if result.returncode == 0:
+                description = result.stdout.strip() # e.g. "Ubuntu 22.04.4 LTS"
+                # Extract "Ubuntu" and "22.04"
+                parts = description.split()
+                if len(parts) >= 2:
+                    distro = parts[0]
+                    version = parts[1]
+                    # Handle version with dots
+                    version = version.replace('.', '_')
+                    return f"{distro}_{version}"
+        except Exception:
+            pass
+            
+        # Fallback to /etc/os-release
+        try:
+            with open('/etc/os-release', 'r') as f:
+                lines = f.readlines()
+            info = {}
+            for line in lines:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    info[k] = v.strip('"')
+            
+            if 'NAME' in info and 'VERSION_ID' in info:
+                distro = info['NAME'].split()[0] # "Ubuntu"
+                version = info['VERSION_ID'].replace('.', '_')
+                return f"{distro}_{version}"
+        except Exception:
+            pass
+            
+        return "Unknown_OS"
     
     def get_cpu_affinity_list(self, n):
         """Generate CPU affinity list for HyperThreading optimization."""

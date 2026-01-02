@@ -7,6 +7,9 @@ phoronix-test-suite --help
 を参照。
 すべてのpts_runner/pts_runner_<testname>.pyにおいて可能な限り関数名、構造を共通化。個別対応が必要な部分はそれが個別であることがわかるように実装。
 
+## TOC
+Table of contents.
+
 ## Python version
 Python3.10で動作すること。Shebang　で　#!/usr/bin/env python3を指定する。
 
@@ -267,10 +270,13 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 - ⚠️ 外れ値の影響を受けやすい
 
 ## set output directory
-ベンチマーク結果は results/<machinename>/<testcategory>/<testname>/<N>-thread.log
+ベンチマーク結果は results/<machinename>/<os>/<testcategory>/<testname>/<N>-thread.log
+ここでのOSとは<Ubuntu_version>とする。versionに"."が含まれる場合は"_"に置換する。
+例えばUbuntu 22.04上でベンチマークが走る場合は <os>="Ubuntu_22_04"である。
+
 <testcategory>の文字列にスペースがある場合は"_"に置換する。
 ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。
-テスト実施前にresults/<machinename>/<testcategory>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
+テスト実施前にresults/<machinename>/<os>/<testcategory>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
 
 
 ### summary file format
