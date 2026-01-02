@@ -139,12 +139,12 @@
                     "notes": "Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test. GCC-14 compatible (OpenSSL built with no-asm option via modified install.sh)."
                 },
                 "pts/spark-1.0.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "spark-internal (auto-detect, configurable via spark-defaults.conf)",
-                    "sve2_support": true,
-                    "notes": "Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)"
+                    "sve2_support": false,
+                    "notes": "Need to downgrade JDK17. Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)"
                 }
             }
         },

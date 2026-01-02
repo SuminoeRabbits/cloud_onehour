@@ -55,10 +55,13 @@
 
 ## Definition of one big JSON structure
 
-```
+```json
 {
     "machinename":"<machinename>"{
         "total_vcpu":"<vcpu>"
+        "cpu_name":"<cpu_name>"
+        "cpu_isa":"<cpu_isa>"
+        "CSP":"<csp>"
         "os":"<os>"{
             "testcategory":"<testcategory>"{
                 "benchmark":"<benchmark>"{
@@ -88,26 +91,46 @@
 ```
 ## Definition data source
 
+### Look-Up-Table
+
+`<machinename>`に含まれる文字列で決定される数字である。対応表は下記の通り。
+
+|<machinename>が含む文字列|	csp  |vcpu  |cpu_name|cpu_isa|
+| :---                   | :---:| :---:| :---: |:---: |
+|"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A|
+|"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)|
+|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (v4 / AVX-512)|
+|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon (Granite Rapids)|	x86-64 (v4 / AMX)|
+|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A |
+|"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64|
+|"c4d-standard-8"|	GCP|	8|	5th Gen Intel Xeon (Emerald Rapids)|	x86-64 (v4 / AMX)|
+|"c4-standard-8"|	GCP|	8|	5th Gen Intel Xeon (Emerald Rapids)|	x86-64 (v4 / AMX)|
+|"c4a-standard-8"|	GCP|	8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (v4 / AVX-512)|
+|"t2a-standard-8"|	GCP|	8|	Neoverse-N1(Ampere Altra)|	Armv8.2|
+
 #### "machinename":"<machinename>"
 `${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
+
 #### "os":"<os>"
 `<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。`${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名が<os>に相当する。
 
 #### "total_vcpu":"<vcpu>"
-`<machinename>`に含まれる文字列で決定される数字である。対応表は下記の通り。
+`<machinename>`から決定される。(##Look-Up-Table)参照。
 
-|\<machinename\>が含む文字列|CSP | vcpu |cpu name | ISA |
-| :---                   | :---:| :---:| :---: |
-| "rpi5"                 |local | 4 | Cortex-A76 | v8.2A |
-|"t3" and "medium"       |AWS   | 2 | | |
-|"m8a" and "2xlarge"     |AWS   | 8 | | |
-|"m8i" and "2xlarge"     |AWS   | 8 | | |
-|"m8g" and "2xlarge"     |AWS   | 8 | Neoverse-V2 | v9.0A |
+#### "cpu_name":"<cpu_name>"
+`<machinename>`から決定される。(##Look-Up-Table)参照。
 
+#### "cpu_isa":"<cpu_isa>"
+`<machinename>`から決定される。(##Look-Up-Table)参照。
 
-
+#### "CSP":"<csp>"
+`<machinename>`から決定される。(##Look-Up-Table)参照。
 
 #### "testcategory":"<testcategory>"
+`${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリ名が<testcategory>に相当する。
+複数ある場合はアルファベット順に登録する。
+
 #### "benchmark":"<benchmark>"
+
 
 # Search, analysis and report by AI
