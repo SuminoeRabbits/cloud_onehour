@@ -247,6 +247,11 @@ class BenchmarkRunner:
         - Fix: Patch install.sh to inject compiler flags (e.g., -proc:full) into pom.xml
         - Example: java-jmh-1.0.1 (fixes META-INF/BenchmarkList missing error)
 
+        Pattern 4: Patching launcher scripts and data generation (Spark case)
+        - Problem: Hardcoded absolute paths, missing data, runtime compatibility issues (Java 25)
+        - Fix: Patch install.sh to correct paths, inject 'export' env vars into launcher scripts, and run generation scripts
+        - Example: spark-1.0.1 (fixes Py4JJavaError and missing test-data)
+
         See README.md "PTS test profile の install.sh 修正" section for details.
         """
         # Example: Fix downloads.xml checksum (ffmpeg pattern)
