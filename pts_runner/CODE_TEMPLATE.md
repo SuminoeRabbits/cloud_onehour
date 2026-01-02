@@ -242,6 +242,11 @@ class BenchmarkRunner:
         - Detect failure, apply fix, retry installation
         - Example: ffmpeg-7.0.1 (x264 checksum update)
 
+        Pattern 3: Patching generated build files via install.sh (Java/Maven case)
+        - Problem: Newer JDKs (e.g., Java 25) require explicit annotation processing
+        - Fix: Patch install.sh to inject compiler flags (e.g., -proc:full) into pom.xml
+        - Example: java-jmh-1.0.1 (fixes META-INF/BenchmarkList missing error)
+
         See README.md "PTS test profile の install.sh 修正" section for details.
         """
         # Example: Fix downloads.xml checksum (ffmpeg pattern)
