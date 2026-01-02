@@ -4,22 +4,23 @@
     "ssh_user": "ubuntu",
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
-    "commands": [
-      "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
-      "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
-      "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --all > /tmp/benchmark_output.log 2>&1"
+    "workloads": [
+    "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
+    "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
+    "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
+    "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-1st --all > /tmp/benchmark_1st.log 2>&1",
+    "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-2nd --all > /tmp/benchmark_2nd.log 2>&1"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "command_timeout": 10800,
+    "workload_timeout": 10800,
     "ssh_strict_host_key_checking": false,
     "debug_stdout": true
   },
   "aws": {
-    "enable": true,
+    "enable": false,
     "region": "ap-northeast-1",
     "instances": [
       {
@@ -61,9 +62,9 @@
     ]
   },
   "gcp": {
-    "enable": false,
+    "enable": true,
     "project_id": "AUTO_DETECT",
-    "zone": "asia-northeast1-a",
+    "zone": "asia-northeast1-b",
     "instances": [
       {
         "name": "gcp-benchmark-instance",
@@ -80,7 +81,7 @@
         "arch": "amd64",
         "hostname": "gcp-c4d-standard-8-amd64",
         "vcpus": 8,
-        "enable": false,
+        "enable": true,
         "cost_hour[730h-mo]": 0.3790
       },
       {

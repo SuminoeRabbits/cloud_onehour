@@ -423,70 +423,207 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
     ssh_user = config['common']['ssh_user']
-    command_timeout = config['common'].get('command_timeout', 10800)
+    # Each workload timeout (backward compatible with command_timeout)
+    workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
 
-    # Support both old format (setup_command1, etc.) and new format (commands array)
-    commands = []
-    if 'commands' in config['common']:
-        # New format: array of commands
-        commands = config['common']['commands']
+    # Support both new format (workloads array), old format (commands array), and legacy format
+    workloads = []
+    if 'workloads' in config['common']:
+        # New format: array of workloads
+        workloads = config['common']['workloads']
+    elif 'commands' in config['common']:
+        # Old format: array of commands (backward compatibility)
+        workloads = config['common']['commands']
     else:
-        # Old format: fallback for backward compatibility
+        # Legacy format: fallback for backward compatibility
         for i in range(1, 10):  # Support up to 9 setup commands
             cmd_key = f"setup_command{i}"
             if cmd_key in config['common']:
                 cmd = config['common'][cmd_key]
                 if cmd and cmd.strip():
-                    commands.append(cmd)
+                    workloads.append(cmd)
         for i in range(1, 10):  # Support up to 9 benchmark commands
             cmd_key = f"benchmark_command{i}"
             if cmd_key in config['common']:
                 cmd = config['common'][cmd_key]
                 if cmd and cmd.strip():
-                    commands.append(cmd)
+                    workloads.append(cmd)
 
-    if not commands:
+    if not workloads:
         if DEBUG_MODE == True:
-            log("No commands to execute", "WARNING")
+            log("No workloads to execute", "WARNING")
         return False
 
-    total_commands = len(commands)
-    progress(instance_name, f"Command execution started ({total_commands} commands)")
+    total_workloads = len(workloads)
+    progress(instance_name, f"Workload execution started ({total_workloads} workloads)")
 
     if DEBUG_MODE == True:
-        log(f"Starting command execution for {ip} ({total_commands} commands)")
+        log(f"Starting workload execution for {ip} ({total_workloads} workloads)")
     elif DEBUG_MODE == False:
-        print(f"  [Commands] Starting execution of {total_commands} commands...")
+        print(f"  [Workloads] Starting execution of {total_workloads} workloads...")
 
-    for i, cmd in enumerate(commands, start=1):
-        # Format command with vcpu substitution
-        cmd = cmd.format(vcpus=inst['vcpus'])
+    for i, workload in enumerate(workloads, start=1):
+        # Format workload with vcpu substitution
+        cmd = workload.format(vcpus=inst['vcpus'])
 
         if not cmd or cmd.strip() == "":
             continue
 
-        progress(instance_name, f"Command {i}/{total_commands}")
+        progress(instance_name, f"Workload {i}/{total_workloads}")
 
         if DEBUG_MODE == True:
-            log(f"Command {i}/{total_commands}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-            log(f"Timeout: {command_timeout}s ({command_timeout//60} minutes)")
+            log(f"Workload {i}/{total_workloads}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            log(f"Timeout: {workload_timeout}s ({workload_timeout//60} minutes)")
         elif DEBUG_MODE == False:
-            print(f"  [Command {i}/{total_commands}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
-            print(f"  [Command {i}/{total_commands}] Timeout: {command_timeout}s ({command_timeout//60} minutes)")
+            print(f"  [Workload {i}/{total_workloads}] Executing: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            print(f"  [Workload {i}/{total_workloads}] Timeout: {workload_timeout}s ({workload_timeout//60} minutes)")
 
-        result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=command_timeout)
+        # Detect long-running benchmark commands and run them via nohup
+        long_running_indicators = ['pts_regression.py', 'benchmark', 'phoronix-test-suite']
+        is_long_running = any(indicator in cmd for indicator in long_running_indicators)
 
-        if result is None:
+        if is_long_running:
+            # Run via nohup to survive SSH disconnections
             if DEBUG_MODE == True:
-                log(f"Command {i}/{total_commands} failed or timed out", "ERROR")
+                log("Detected long-running command, using nohup for robustness")
             elif DEBUG_MODE == False:
-                print(f"  [Warning] Command {i}/{total_commands} failed or timed out")
-            return False
+                print(f"  [Workload {i}/{total_workloads}] Using nohup for long-running task")
 
-        if DEBUG_MODE == True:
-            log(f"Command {i}/{total_commands} completed")
-        elif DEBUG_MODE == False:
-            print(f"  [Command {i}/{total_commands}] Completed")
+            # Create unique marker file for this command
+            marker_file = f"/tmp/cloud_exec_cmd_{i}_done.marker"
+            log_file = f"/tmp/cloud_exec_cmd_{i}.log"
+
+            # Wrap command with nohup and marker file creation
+            # Use double quotes for outer command to avoid nested single quote issues
+            # Escape double quotes and dollar signs in the command
+            escaped_cmd = cmd.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$')
+            wrapped_cmd = f'nohup sh -c "{escaped_cmd} && echo SUCCESS > {marker_file} || echo FAILED > {marker_file}" > {log_file} 2>&1 &'
+
+            # Start the command in background
+            run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=30)
+
+            if DEBUG_MODE == True:
+                log("Command started in background, waiting for completion...")
+            elif DEBUG_MODE == False:
+                print(f"  [Workload {i}/{total_workloads}] Started in background, monitoring...")
+
+            # Poll for completion with timeout
+            start_time = time.time()
+            check_count = 0
+            last_log_size = 0
+
+            while time.time() - start_time < workload_timeout:
+                # Exponential backoff: 30s -> 45s -> 67s -> 101s -> 151s -> 227s -> 300s (max 5 min)
+                poll_interval = min(30 * (1.5 ** check_count), 300)
+                time.sleep(poll_interval)
+                check_count += 1
+
+                # Check if marker file exists
+                marker_check = run_cmd(
+                    f"ssh {ssh_opt} {ssh_user}@{ip} 'cat {marker_file} 2>/dev/null || echo RUNNING'",
+                    capture=True, timeout=10, ignore=True
+                )
+
+                # Show progress by checking log file size
+                log_size_check = run_cmd(
+                    f"ssh {ssh_opt} {ssh_user}@{ip} 'wc -c < {log_file} 2>/dev/null || echo 0'",
+                    capture=True, timeout=10, ignore=True
+                )
+
+                try:
+                    current_log_size = int(log_size_check or "0")
+                    if current_log_size > last_log_size:
+                        if DEBUG_MODE == True:
+                            log(f"Progress: Log file size {current_log_size} bytes (+{current_log_size - last_log_size})")
+                        last_log_size = current_log_size
+                except:
+                    pass
+
+                if marker_check == "SUCCESS":
+                    if DEBUG_MODE == True:
+                        log(f"Workload {i}/{total_workloads} completed successfully")
+                    else:
+                        print(f"  [Workload {i}/{total_workloads}] ✓ Completed successfully (took {elapsed}s)")
+                        if i < total_workloads:
+                            print(f"  [Progress] {i}/{total_workloads} workloads completed, {total_workloads - i} remaining")
+                    break
+                elif marker_check == "FAILED":
+                    if DEBUG_MODE == True:
+                        log(f"Workload {i}/{total_workloads} failed", "ERROR")
+                    elif DEBUG_MODE == False:
+                        print(f"  [Error] Workload {i}/{total_workloads} failed")
+
+                    # Fetch log file for debugging
+                    log_output = run_cmd(
+                        f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {log_file} 2>/dev/null'",
+                        capture=True, timeout=10, ignore=True
+                    )
+                    if log_output:
+                        print(f"  [Error Log] Last 50 lines:\n{log_output}")
+
+                    return False
+                elif marker_check and marker_check != "RUNNING":
+                    if DEBUG_MODE == True:
+                        log(f"Unexpected marker status: {marker_check}", "WARN")
+
+                # Still running, continue polling
+                elapsed = int(time.time() - start_time)
+
+                # Get CPU usage from remote instance
+                cpu_usage_cmd = (
+                    f"ssh {ssh_opt} {ssh_user}@{ip} "
+                    f"'mpstat -P ALL 1 1 | awk \"/^[0-9]/ {{if (\\$2 ~ /^[0-9]+$/) print \\$2,100-\\$NF}}\" | sort -n'"
+                )
+                cpu_usage_output = run_cmd(cpu_usage_cmd, capture=True, timeout=10, ignore=True)
+
+                vcpu_ids = []
+                vcpu_usage = []
+                if cpu_usage_output:
+                    for line in cpu_usage_output.strip().split('\n'):
+                        parts = line.split()
+                        if len(parts) == 2:
+                            try:
+                                vcpu_ids.append(int(parts[0]))
+                                vcpu_usage.append(f"{float(parts[1]):.1f}%")
+                            except:
+                                pass
+
+                if DEBUG_MODE == True:
+                    log(f"Still running... ({elapsed}s / {workload_timeout}s)")
+                    if vcpu_ids:
+                        log(f"vCPU usage: {dict(zip(vcpu_ids, vcpu_usage))}")
+                else:
+                    # Show progress update every check (with exponential backoff timing)
+                    progress_msg = f"  [Workload {i}/{total_workloads}] Still running... ({elapsed}s / {workload_timeout}s, log size: {current_log_size} bytes)"
+                    if vcpu_ids:
+                        progress_msg += f"\n    vCPU ID: {vcpu_ids}\n    vCPU usage: {vcpu_usage}"
+                    print(progress_msg)
+
+            else:
+                # Timeout reached
+                if DEBUG_MODE == True:
+                    log(f"Workload {i}/{total_workloads} timed out after {workload_timeout}s", "ERROR")
+                elif DEBUG_MODE == False:
+                    print(f"  [Error] Workload {i}/{total_workloads} timed out")
+                return False
+
+        else:
+            # Regular command execution (short-running)
+            result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=workload_timeout)
+
+            if result is None:
+                if DEBUG_MODE == True:
+                    log(f"Workload {i}/{total_workloads} failed or timed out", "ERROR")
+                elif DEBUG_MODE == False:
+                    print(f"  [Warning] Workload {i}/{total_workloads} failed or timed out")
+                return False
+
+            if DEBUG_MODE == True:
+                log(f"Workload {i}/{total_workloads} completed")
+            else:
+                print(f"  [Workload {i}/{total_workloads}] ✓ Completed")
+                if i < total_workloads:
+                    print(f"  [Progress] {i}/{total_workloads} workloads completed, {total_workloads - i} remaining")
 
         # Special handling: Verify SSH build after SSH-related scripts execution
         # Detects both direct execution and execution via wrapper scripts
@@ -521,10 +658,10 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                 if DEBUG_MODE == True:
                     log(f"SSH build verification check failed: {e}, continuing...", "WARNING")
 
-    progress(instance_name, "All commands completed")
+    progress(instance_name, "All workloads completed")
 
     if DEBUG_MODE == True:
-        log("All commands completed successfully")
+        log("All workloads completed successfully")
 
     return True
 
