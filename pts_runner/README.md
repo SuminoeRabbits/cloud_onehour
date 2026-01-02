@@ -17,7 +17,8 @@ Python3.10で動作すること。Shebang　で　#!/usr/bin/env python3を指�
 <testname>は../test_suite.json内にリストがある。"items": 以下の"pts/<testname>"という形式。../test_suite.jsonに登録されていない<testname>は不正。
 
 ## setup
-PTSのCacheをすべてクリアする。
+PTSのインストール済みテスト(installed tests)をクリアする。
+テストプロファイル(test profiles)は保持される。テストプロファイルにはチェックサム修正などの手動修正が含まれる可能性があるため、削除しない。
 なおPTSはInstallされていることが前提(../scripts/setup_pts.sh)。
 
 ## clean up
@@ -102,6 +103,103 @@ print(f"  [OK] Installation completed and verified")
 - x264, x265等のマルチメディアコーデック: チェックサムエラー（アップストリームの更新）
 - ネットワーク不安定時: ダウンロードタイムアウト
 - キャッシュ破損: 古いキャッシュファイルとの不一致
+
+### PTS test profile の install.sh 修正（必要な場合のみ）
+
+**注意**: この修正は通常不要です。ほとんどのテストは install.sh の修正なしで動作します。
+
+**適用が必要なケース**:
+- GCC-14 コンパイル互換性問題（例: OpenSSL 1.1.1i のインラインアセンブリエラー）
+- チェックサム自動修正（例: FFmpeg の x264 依存関係）
+- ビルドオプションの調整が必要な特殊ケース
+
+**修正対象のテスト**:
+- `pts/apache-3.0.0`: wrk の OpenSSL ビルドに `no-asm` オプション追加
+- `pts/nginx-3.0.1`: wrk の OpenSSL ビルドに `no-asm` オプション追加
+- `pts/ffmpeg-7.0.1`: Python スクリプト内で `fix_x264_checksum()` メソッドを実装（install.sh は修正不要）
+
+**実装パターン**:
+
+#### パターン1: wrk の OpenSSL 互換性修正（apache, nginx）
+
+**問題**: wrk が OpenSSL 1.1.1i をビルドする際、GCC-14 でインラインアセンブリエラーが発生
+
+**解決**: install.sh で wrk の Makefile を修正し、OpenSSL に `no-asm` オプションを追加
+
+```bash
+# install.sh の wrk ビルドセクションに追加
+rm -rf wrk-4.2.0
+tar -xf wrk-4.2.0.tar.gz
+cd wrk-4.2.0
+# GCC-14 Compatibility Fix: Add 'no-asm' to OpenSSL build options
+# This disables inline assembly in OpenSSL 1.1.1i which has compatibility issues with GCC-14
+sed -i 's/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/' Makefile
+make -j $NUM_CPU_CORES
+echo $? > ~/install-exit-status
+cd ~
+```
+
+**注意点**:
+- `sed -i` でインプレース編集を使用
+- `no-asm` を既存の `OPENSSL_OPTS` に追加
+- コメントで修正理由を明記
+
+#### パターン2: Python スクリプト内でのチェックサム修正（ffmpeg）
+
+**問題**: x264 のアップストリーム変更により、downloads.xml のチェックサムが不一致
+
+**解決**: pts_runner スクリプト内に専用メソッドを実装し、自動修正と再試行を行う
+
+```python
+def fix_x264_checksum(self):
+    """
+    Fix x264 checksum in downloads.xml due to upstream changes.
+    """
+    downloads_xml = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'downloads.xml'
+
+    if not downloads_xml.exists():
+        print(f"  [WARN] downloads.xml not found, skipping checksum fix")
+        return
+
+    try:
+        with open(downloads_xml, 'r') as f:
+            content = f.read()
+
+        # Replace checksums with correct values
+        old_sha256 = '48b9160177774f3efd29a60d722d9eddd6c023c0904a9a4f83377aa6e6845edb'
+        new_sha256 = 'd859f2b4b0b70d6f10a33e9b5e0a6bf41d97e4414644c4f85f02b7665c0d1292'
+
+        if old_sha256 in content:
+            content = content.replace(old_sha256, new_sha256)
+            # ... (MD5, FileSize も同様に置換)
+
+            with open(downloads_xml, 'w') as f:
+                f.write(content)
+            print(f"  [OK] Checksums updated")
+        else:
+            print(f"  [INFO] Checksums already correct")
+
+    except Exception as e:
+        print(f"  [WARN] Failed to fix checksums: {e}")
+
+def install_benchmark(self):
+    # First attempt
+    result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
+
+    # If checksum failed, fix and retry
+    if install_failed and 'x264-7ed753b' in result.stdout:
+        print(f"  [WARN] Checksum failure detected, applying fix...")
+        self.fix_x264_checksum()
+
+        print(f"  [INFO] Retrying installation...")
+        result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
+```
+
+**重要な原則**:
+- install.sh 修正は最終手段。可能な限り Python スクリプト側で対応
+- 修正理由を必ずコメントで文書化
+- test_suite.json の notes フィールドにも記載
+- clean_pts_cache() は test profiles を削除しないため、install.sh の修正は保持される
 
 ## set <N>=number of threads
 

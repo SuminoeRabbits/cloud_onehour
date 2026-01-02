@@ -84,6 +84,33 @@ class BenchmarkRunner:
         # 実装は既存のpts_runner_build-llvm-1.6.0.pyを参照
         pass
 
+    def clean_pts_cache(self):
+        """
+        Clean PTS installed tests for fresh installation.
+
+        NOTE: This method only removes installed tests, NOT test profiles.
+        Test profiles may contain manual fixes (e.g., checksum corrections)
+        and should be preserved.
+
+        Directory structure:
+        - ~/.phoronix-test-suite/installed-tests/pts/<testname>/ → DELETED
+        - ~/.phoronix-test-suite/test-profiles/pts/<testname>/ → PRESERVED
+        """
+        print(">>> Cleaning PTS cache...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+
+        # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
+        # Only clean installed tests to force fresh compilation
+
+        # Clean installed tests
+        installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
+        if installed_dir.exists():
+            print(f"  [CLEAN] Removing installed test: {installed_dir}")
+            shutil.rmtree(installed_dir)
+
+        print("  [OK] PTS cache cleaned")
+
     def install_benchmark(self):
         """
         Install benchmark with error detection and verification.
@@ -147,6 +174,42 @@ class BenchmarkRunner:
             sys.exit(1)
 
         print(f"  [OK] Installation completed and verified")
+
+    def fix_benchmark_specific_issues(self):
+        """
+        Fix benchmark-specific build/installation issues (optional).
+
+        IMPORTANT: This method is OPTIONAL and only needed for special cases.
+        Most benchmarks do NOT require this.
+
+        Use cases:
+        1. GCC-14 compatibility fixes (e.g., OpenSSL inline assembly errors)
+        2. Checksum auto-correction (e.g., upstream dependency changes)
+        3. Build option adjustments
+
+        Implementation patterns:
+
+        Pattern 1: Modify PTS test profile's install.sh (wrk/OpenSSL case)
+        - File location: ~/.phoronix-test-suite/test-profiles/pts/<testname>/install.sh
+        - Modification: Use sed to inject build options into Makefile
+        - Example: apache-3.0.0, nginx-3.0.1 (wrk's OpenSSL no-asm fix)
+
+        Pattern 2: Python-side checksum fix with retry (ffmpeg case)
+        - Implement fix method in pts_runner script
+        - Detect failure, apply fix, retry installation
+        - Example: ffmpeg-7.0.1 (x264 checksum update)
+
+        See README.md "PTS test profile の install.sh 修正" section for details.
+        """
+        # Example: Fix downloads.xml checksum (ffmpeg pattern)
+        # downloads_xml = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'downloads.xml'
+        # ...apply fixes...
+
+        # Example: Modify install.sh before installation (wrk pattern)
+        # install_sh = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+        # ...modify file...
+
+        pass  # Most benchmarks don't need this
 
 def main():
     parser = argparse.ArgumentParser(

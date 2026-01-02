@@ -118,16 +118,13 @@ class CompressZstdRunner:
             return 2
 
     def clean_pts_cache(self):
-        """Clean all PTS cache for fresh installation."""
+        """Clean PTS installed tests for fresh installation."""
         print(">>> Cleaning PTS cache...")
 
         pts_home = Path.home() / '.phoronix-test-suite'
 
-        # Clean test profiles
-        test_profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
-        if test_profile_dir.exists():
-            print(f"  [CLEAN] Removing test profile: {test_profile_dir}")
-            shutil.rmtree(test_profile_dir)
+        # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
+        # Only clean installed tests to force fresh compilation
 
         # Clean installed tests
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark

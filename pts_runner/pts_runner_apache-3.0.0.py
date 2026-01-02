@@ -121,16 +121,13 @@ class ApacheRunner:
             return 2
 
     def clean_pts_cache(self):
-        """Clean all PTS cache for fresh installation."""
+        """Clean PTS installed tests for fresh installation."""
         print(">>> Cleaning PTS cache...")
 
         pts_home = Path.home() / '.phoronix-test-suite'
 
-        # Clean test profiles
-        test_profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
-        if test_profile_dir.exists():
-            print(f"  [CLEAN] Removing test profile: {test_profile_dir}")
-            shutil.rmtree(test_profile_dir)
+        # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
+        # Only clean installed tests to force fresh compilation
 
         # Clean installed tests
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
@@ -169,13 +166,18 @@ class ApacheRunner:
 
     def install_benchmark(self):
         """
-        Install apache-3.0.0 with GCC-14 native compilation.
+        Install apache-3.0.0 with GCC-14 and OpenSSL compatibility workaround.
 
         Note: Since THChange_at_runtime=false, this is a single-threaded benchmark.
         No runtime thread configuration is needed; Apache always runs with 1 thread.
 
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         Apache doesn't use NUM_CPU_CORES for this workload.
+
+        GCC-14 Compatibility Fix:
+        - Uses -DOPENSSL_NO_ASM to disable inline assembly in OpenSSL 1.1.1i
+        - Avoids "expected ')' before ':' token" errors in crypto/bn/asm/x86_64-gcc.c
+        - Slightly slower than assembly version, but enables GCC-14 compilation
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -193,8 +195,13 @@ class ApacheRunner:
         # Note: NUM_CPU_CORES is NOT set because this is single-threaded (THChange_at_runtime=false)
         # Use batch-install to suppress prompts
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
+        #
+        # GCC-14 Compatibility Workaround:
+        # - Modified install.sh to add 'no-asm' to OpenSSL build options in wrk Makefile
+        # - This disables inline assembly in OpenSSL 1.1.1i which has compatibility issues with GCC-14
+        # - Performance impact is minimal for this single-threaded Apache benchmark
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
