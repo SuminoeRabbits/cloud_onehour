@@ -228,6 +228,15 @@ class SparkRunner:
             text=True
         )
 
+        # Apply specific fixes and retry installation if needed
+        if self.fix_benchmark_specific_issues():
+            print(f"  [INFO] Re-running installation with patched install.sh...")
+            result = subprocess.run(
+                ['bash', '-c', install_cmd],
+                capture_output=True,
+                text=True
+            )
+
         # Check for installation failure
         # PTS may return 0 even if download failed, so check stdout/stderr for error messages
         install_failed = False
@@ -261,6 +270,183 @@ class SparkRunner:
             sys.exit(1)
 
         print(f"  [OK] Installation completed and verified")
+
+
+        
+
+    def fix_benchmark_specific_issues(self):
+        """
+        Fix Spark 3.3.0 issues.
+        
+        JDK 17 CLEANUP:
+        - Removed all JDK 21/25 compatibility flags (SecurityManager, Add-Opens).
+        - Removed all env var injections (SPARK_JAVA_OPTS, JDK_JAVA_OPTIONS).
+        - Retained critical path fixes ($HOME, cd).
+        - Retained data generation step (without extra flags).
+        - ACTIVELY SANITIZES install.sh to remove legacy flags.
+        """
+        pts_dir = Path.home() / ".phoronix-test-suite"
+        install_sh = pts_dir / "installed-tests" / "pts" / f"spark-1.0.1" / "install.sh"
+        if not install_sh.exists():
+            return False
+            
+        try:
+            with open(install_sh, 'r') as f:
+                content = f.read()
+            
+            modified = False
+            
+            # --- Path Fixes & Data Generation (Critical for install.sh) ---
+            
+            # 1. Fix data paths ($HOME -> ../..)
+            # The install.sh uses $HOME/pyspark-benchmark which fails in PTS environment.
+            if '\\$HOME/pyspark-benchmark' in content:
+                print(f"  [FIX] Patching install.sh paths (\\$HOME -> ../..)...")
+                content = content.replace('\\$HOME/pyspark-benchmark', '../../pyspark-benchmark')
+                content = content.replace('\\$HOME/test-data', '../../test-data')
+                modified = True
+            elif '$HOME/pyspark-benchmark' in content:
+                print(f"  [FIX] Patching install.sh paths ($HOME -> ../..)...")
+                content = content.replace('$HOME/pyspark-benchmark', '../../pyspark-benchmark')
+                content = content.replace('$HOME/test-data', '../../test-data')
+                modified = True
+            
+            # 2. Fix cd command (remove ~/)
+            target_cd = "cd ~/spark-3.3.0-bin-hadoop3/bin"
+            rep_cd = "cd spark-3.3.0-bin-hadoop3/bin"
+            if target_cd in content:
+                 content = content.replace(target_cd, rep_cd)
+                 modified = True
+            
+            # 3. Fix spark-defaults path (Clean path fix only)
+            target_conf = "> ~/spark-3.3.0-bin-hadoop3/conf/spark-defaults.conf"
+            rep_conf = "> spark-3.3.0-bin-hadoop3/conf/spark-defaults.conf"
+            if target_conf in content:
+                  content = content.replace(target_conf, rep_conf)
+                  modified = True
+
+            # 4. Generate test data if missing
+            # CLEAN VERSION: No --driver-java-options
+            gen_cmd_clean = "./spark-3.3.0-bin-hadoop3/bin/spark-submit --driver-memory 4g pyspark-benchmark/generate-data.py test-data"
+
+            if 'generate-data.py' not in content:
+                 print(f"  [FIX] Injecting data generation step into install.sh...")
+                 content += f"\n# Generate test data (added by pts_runner clean)\n{gen_cmd_clean}\n"
+                 modified = True
+            
+            # 5. SANITIZATION: Remove Toxic Flags (Leftover from previous runs or injections)
+            import re
+            
+            # A. Remove export SPARK_JAVA_OPTS / JDK_JAVA_OPTIONS
+            if "export SPARK_JAVA_OPTS=" in content or "export JDK_JAVA_OPTIONS=" in content:
+                  print(f"  [FIX] Sanitizing install.sh: Removing toxic env exports...")
+                  content = re.sub(r"export SPARK_JAVA_OPTS=.*\n", "", content)
+                  content = re.sub(r"export JDK_JAVA_OPTIONS=.*\n", "", content)
+                  # Cleanup bare exports without newlines just in case
+                  content = re.sub(r"export SPARK_JAVA_OPTS='.*'", "", content) 
+                  modified = True
+            
+            # B. Remove --driver-java-options from 'spark' launcher script
+            if "./spark-submit --driver-java-options" in content:
+                  print(f"  [FIX] Sanitizing install.sh: Removing --driver-java-options from launcher...")
+                  # Replace with clean version
+                  # Pattern: ./spark-submit --driver-java-options '...' --name
+                  # We simply remove the flag and its argument.
+                  content = re.sub(r"--driver-java-options \'.*?\' ", "", content)
+                  content = re.sub(r"--driver-java-options \".*?\" ", "", content)
+                  modified = True
+
+            # C. Clean up generate-data.py line if it has flags
+            # Find any line with generate-data.py AND --driver-java-options
+            lines = content.split('\n')
+            new_lines = []
+            for line in lines:
+                if "generate-data.py" in line and "--driver-java-options" in line:
+                    print(f"  [FIX] Sanitizing install.sh: Reverting data gen to clean command...")
+                    new_lines.append(gen_cmd_clean)
+                    modified = True
+                else:
+                    new_lines.append(line)
+            content = '\n'.join(new_lines)
+
+
+            if modified:
+                with open(install_sh, 'w') as f:
+                    f.write(content)
+                return True
+                
+        except Exception as e:
+            print(f"  [WARN] Failed to patch install.sh: {e}")
+        
+        return False
+
+        
+    def generate_summary(self):
+        """Generate summary.log and summary.json from all thread results."""
+        print(f"\n{'='*80}")
+        print(f">>> Generating summary")
+        print(f"{'='*80}")
+
+        summary_log = self.results_dir / "summary.log"
+        summary_json_file = self.results_dir / "summary.json"
+
+        # Collect results from all JSON files
+        all_results = []
+        for num_threads in self.thread_list:
+            json_file = self.results_dir / f"{num_threads}-thread.json"
+            if json_file.exists():
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    # Extract benchmark result
+                    for result_id, result in data.get('results', {}).items():
+                        for system_id, system_result in result.get('results', {}).items():
+                            all_results.append({
+                                'threads': num_threads,
+                                'value': system_result.get('value'),
+                                'raw_values': system_result.get('raw_values', []),
+                                'test_name': result.get('title'),
+                                'description': result.get('description'),
+                                'unit': result.get('scale')
+                            })
+
+        if not all_results:
+            print("[WARN] No results found for summary generation")
+            return
+
+        # Generate summary.log (human-readable)
+        with open(summary_log, 'w') as f:
+            f.write("="*80 + "\n")
+            f.write(f"Spark Benchmark Summary\n")
+            f.write(f"Machine: {self.machine_name}\n")
+            f.write(f"Test Category: {self.test_category}\n")
+            f.write("="*80 + "\n\n")
+
+            for result in all_results:
+                f.write(f"Threads: {result['threads']}\n")
+                f.write(f"  Test: {result['test_name']}\n")
+                f.write(f"  Description: {result['description']}\n")
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: N/A (Test Failed)\n")
+                
+                raw_values = result.get('raw_values')
+                if raw_values:
+                    f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in raw_values])}\n")
+                else:
+                    f.write(f"  Raw values: N/A\n")
+                f.write("\n")
+
+            f.write("="*80 + "\n")
+            f.write("Summary Table\n")
+            f.write("="*80 + "\n")
+            f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
+            f.write("-"*80 + "\n")
+            for result in all_results:
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "N/A"
+                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\n")
+
+        print(f"[OK] Summary log saved: {summary_log}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
@@ -411,8 +597,22 @@ class SparkRunner:
         perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
         # Build PTS command
+        # Environment variables to suppress all prompts
+        # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
+        # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
+        # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
+        # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
+        # Java 25 compatibility flags for Spark 3.3
+        # SPARK_JAVA_OPTS is legacy. JDK_JAVA_OPTIONS is robust for Java 9+.
+        # We must provide these to the runtime environment so spark-submit picks them up.
+        java_opts = "--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED --add-opens=java.base/javax.security.auth=ALL-UNNAMED"
+        
+        # We set BOTH SPARK_JAVA_OPTS (legacy) and JDK_JAVA_OPTIONS (robust)
+        spark_opts = f'SPARK_JAVA_OPTS="{java_opts}" JDK_JAVA_OPTIONS="{java_opts}" '
+
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=spark-{num_threads}threads TEST_RESULTS_IDENTIFIER=spark-{num_threads}threads'
+        
+        batch_env = f'{quick_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=spark-{num_threads}threads TEST_RESULTS_IDENTIFIER=spark-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
@@ -539,65 +739,7 @@ class SparkRunner:
 
         print(f"\n[OK] Export completed")
 
-    def generate_summary(self):
-        """Generate summary.log and summary.json from all thread results."""
-        print(f"\n{'='*80}")
-        print(f">>> Generating summary")
-        print(f"{'='*80}")
 
-        summary_log = self.results_dir / "summary.log"
-        summary_json_file = self.results_dir / "summary.json"
-
-        all_results = []
-        for num_threads in self.thread_list:
-            json_file = self.results_dir / f"{num_threads}-thread.json"
-            if json_file.exists():
-                with open(json_file, 'r') as f:
-                    data = json.load(f)
-                    for result_id, result in data.get('results', {}).items():
-                        for system_id, system_result in result.get('results', {}).items():
-                            all_results.append({
-                                'threads': num_threads,
-                                'value': system_result.get('value'),
-                                'raw_values': system_result.get('raw_values', []),
-                                'test_name': result.get('title'),
-                                'description': result.get('description'),
-                                'unit': result.get('scale')
-                            })
-
-        if not all_results:
-            print("[WARN] No results found for summary generation")
-            return
-
-        # Generate summary.log
-        with open(summary_log, 'w') as f:
-            f.write("="*80 + "\n")
-            f.write(f"Spark 1.0.1 Benchmark Summary\n")
-            f.write(f"Machine: {self.machine_name}\n")
-            f.write(f"Test Category: {self.test_category}\n")
-            f.write("="*80 + "\n\n")
-
-            for result in all_results:
-                f.write(f"Threads: {result['threads']}\n")
-                f.write(f"  Test: {result['test_name']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
-                f.write("\n")
-
-        print(f"[OK] Summary log saved: {summary_log}")
-
-        # Generate summary.json
-        summary_data = {
-            "benchmark": self.benchmark,
-            "test_category": self.test_category,
-            "machine": self.machine_name,
-            "vcpu_count": self.vcpu_count,
-            "results": all_results
-        }
-
-        with open(summary_json_file, 'w') as f:
-            json.dump(summary_data, f, indent=2)
-
-        print(f"[OK] Summary JSON saved: {summary_json_file}")
 
     def run(self):
         """Main execution flow."""
