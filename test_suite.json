@@ -136,7 +136,7 @@
                     "THChange_at_runtime": false,
                     "TH_scaling": "single-threaded",
                     "sve2_support": false,
-                    "notes": "Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test. No need to support SIMD."
+                    "notes": "Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test. GCC-14 compatible (OpenSSL built with no-asm option via modified install.sh)."
                 },
                 "pts/spark-1.0.1": {
                     "enabled": false,
