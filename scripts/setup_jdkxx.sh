@@ -4,6 +4,8 @@
 set -e
 
 # Default to 21 if not supplied
+# 将来的にデフォルトのJDKバージョンを変更したい場合は、以下の "21" を変更してください。
+# To change the future default JDK version, modify "21" below.
 TARGET_VERSION=${1:-21}
 
 echo "--- Java Version Check Process (Target: OpenJDK $TARGET_VERSION) ---"
