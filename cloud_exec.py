@@ -140,6 +140,52 @@ def run_cmd(cmd, capture=True, ignore=False, timeout=None):
             raise
         return None
 
+def build_storage_config(inst, cloud_type):
+    """Build storage configuration arguments for different cloud providers.
+
+    Args:
+        inst: Instance configuration dict
+        cloud_type: 'aws', 'gcp', or 'oci'
+
+    Returns:
+        str: Cloud-specific storage configuration arguments
+
+    This function centralizes storage configuration logic to make it easier
+    to maintain consistency across cloud providers and add new ones.
+    """
+    if not inst.get('extra_50g_storage', False):
+        return ""
+
+    if cloud_type == 'aws':
+        # AWS: Use block-device-mappings with DeleteOnTermination=true
+        config = (
+            '--block-device-mappings '
+            '\'[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,'
+            '"VolumeType":"gp3","DeleteOnTermination":true}}]\' '
+        )
+        if DEBUG_MODE == True:
+            log("Configuring 50GB root volume with auto-delete on termination")
+        return config
+
+    elif cloud_type == 'gcp':
+        # GCP: Use boot-disk-size (auto-delete is YES by default)
+        if DEBUG_MODE == True:
+            log("Configuring 50GB boot disk (auto-delete enabled by default)")
+        return "--boot-disk-size=50GB "
+
+    elif cloud_type == 'oci':
+        # OCI: Use boot-volume-size-in-gbs with auto-delete on termination
+        # --is-preserve-boot-volume false ensures boot volume is deleted with instance
+        if DEBUG_MODE == True:
+            log("Configuring 50GB boot volume with auto-delete on termination")
+        return "--boot-volume-size-in-gbs 50 --is-preserve-boot-volume false "
+
+    else:
+        if DEBUG_MODE == True:
+            log(f"Unknown cloud type: {cloud_type}", "WARN")
+        return ""
+
+
 def get_gcp_project():
     """Detect GCP project ID from gcloud config."""
     if DEBUG_MODE == True:
@@ -256,10 +302,14 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
         log(f"Using AMI: {ami}")
         log("Starting instance...")
 
+    # Build storage configuration using centralized helper
+    storage_config = build_storage_config(inst, 'aws')
+
     instance_id = run_cmd(
         f"aws ec2 run-instances --region {region} --image-id {ami} "
         f"--instance-type {inst['type']} --key-name {key_name} "
-        f"--security-group-ids {sg_id} --query 'Instances[0].InstanceId' --output text"
+        f"--security-group-ids {sg_id} {storage_config}"
+        f"--query 'Instances[0].InstanceId' --output text"
     )
 
     if DEBUG_MODE == True:
@@ -298,9 +348,13 @@ def launch_gcp_instance(inst, config, project, zone):
         log(f"Using image family: {image_family}")
         log("Creating instance...")
 
+    # Build storage configuration using centralized helper
+    storage_config = build_storage_config(inst, 'gcp')
+
     ip = run_cmd(
         f"gcloud compute instances create {name} --project={project} "
         f"--zone={zone} --machine-type={inst['type']} "
+        f"{storage_config}"
         f"--image-family={image_family} --image-project=ubuntu-os-cloud "
         f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'"
     )
@@ -320,8 +374,21 @@ def launch_gcp_instance(inst, config, project, zone):
 def launch_oci_instance(inst, config, compartment_id, region):
     """Launch OCI instance and return (instance_id, ip).
 
+    Args:
+        inst: Instance configuration dict
+        config: Full configuration dict
+        compartment_id: OCI compartment ID
+        region: OCI region
+
+    Returns:
+        tuple: (instance_id, ip) or (None, None) if not implemented/failed
+
     TODO: Implement OCI instance launch using OCI CLI
-    Reference: oci compute instance launch --compartment-id <id> --shape <type> ...
+    Reference commands:
+        - Launch: oci compute instance launch --compartment-id <id> --shape <type> ...
+        - Get IP: oci compute instance get --instance-id <id> --query 'data."primary-public-ip"'
+        - Storage: --boot-volume-size-in-gbs 50 (for extra_50g_storage)
+        - Delete: oci compute instance terminate --instance-id <id> --force
     """
     name = inst['name']
 
@@ -331,9 +398,37 @@ def launch_oci_instance(inst, config, compartment_id, region):
     else:
         print(f"[Warning] OCI instance launch not yet implemented for {name}")
 
-    # TODO: Implement OCI instance creation logic
-    # instance_id = run_cmd(f"oci compute instance launch ...")
-    # ip = run_cmd(f"oci compute instance get --instance-id {instance_id} ...")
+    # TODO: When implementing, follow this structure:
+    #
+    # 1. Find image OCID for Ubuntu
+    # os_version = config['common']['os_version']
+    # image_ocid = get_oci_ubuntu_image(region, os_version, inst['arch'])
+    #
+    # 2. Configure boot volume size using centralized helper
+    # storage_config = build_storage_config(inst, 'oci')
+    #
+    # 3. Launch instance
+    # instance_id = run_cmd(
+    #     f"oci compute instance launch "
+    #     f"--compartment-id {compartment_id} "
+    #     f"--availability-domain <AD> "
+    #     f"--shape {inst['type']} "
+    #     f"--image-id {image_ocid} "
+    #     f"{storage_config}"
+    #     f"--display-name {name} "
+    #     f"--query 'data.id' --raw-output"
+    # )
+    #
+    # 4. Wait for instance to be running
+    # run_cmd(f"oci compute instance action --instance-id {instance_id} --action start --wait-for-state RUNNING")
+    #
+    # 5. Get public IP
+    # ip = run_cmd(
+    #     f"oci compute instance get --instance-id {instance_id} "
+    #     f"--query 'data.\"primary-public-ip\"' --raw-output"
+    # )
+    #
+    # return instance_id, ip
 
     return None, None
 

@@ -149,10 +149,10 @@
             }
         },
         "Multimedia": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/ffmpeg-7.0.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",

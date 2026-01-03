@@ -8,8 +8,8 @@
     "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
     "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
     "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
-    "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-1st --all > /tmp/benchmark_1st.log 2>&1",
-    "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-2nd --all > /tmp/benchmark_2nd.log 2>&1"
+    "cd ~/cloud_onehour/pts_runner && ./pts_runner_build-linux-kernel-1.17.1.py 288 --quick ",
+    "cd ~/cloud_onehour/pts_runner && ./pts_runner_build-llvm-1.6.0.py 288 --quick"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
@@ -24,40 +24,48 @@
     "region": "ap-northeast-1",
     "instances": [
       {
-        "name": "aws-benchmark-instance",
+        "enable": false,
         "type": "t3.medium",
         "arch": "amd64",
         "hostname": "aws-t3-medium-amd64",
         "vcpus": 2,
-        "enable": false,
-        "cost_hour[730h-mo]": 0.0183
+        "name": "aws-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.0183,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       },
       {
-        "name": "aws-benchmark-instance",
+        "enable": true,
         "type": "m8a.2xlarge",
         "arch": "amd64",
         "hostname": "aws-m8a-2xlarge-amd64",
         "vcpus": 8,
-        "enable": true,
-        "cost_hour[730h-mo]": 0.2967
+        "name": "aws-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.2967,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       },
       {
-        "name": "aws-benchmark-instance",
+        "enable": false,
         "type": "m8i.2xlarge",
         "arch": "amd64",
         "hostname": "aws-m8i-2xlarge-amd64",
         "vcpus": 8,
-        "enable": false,
-        "cost_hour[730h-mo]": 0.2397
+        "name": "aws-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.2397,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       },
       {
-        "name": "aws-benchmark-instance",
+        "enable": false,
         "type": "m8g.2xlarge",
         "arch": "arm64",
         "hostname": "aws-m8g-2xlarge-arm64",
         "vcpus": 8,
-        "enable": false,
-        "cost_hour[730h-mo]": 0.2077
+        "name": "aws-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.2077,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       }
     ]
   },
@@ -67,49 +75,59 @@
     "zone": "asia-northeast1-b",
     "instances": [
       {
-        "name": "gcp-benchmark-instance",
+        "enable": false,
         "type": "e2-standard-2",
         "arch": "amd64",
         "hostname": "gcp-e2-standard-2-amd64",
         "vcpus": 2,
-        "enable": false,
-        "cost_hour[730h-mo]": 0.0683
+        "name": "gcp-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.0683,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       },
       {
-        "name": "gcp-benchmark-instance",
+        "enable": true,
         "type": "c4d-standard-8",
         "arch": "amd64",
         "hostname": "gcp-c4d-standard-8-amd64",
         "vcpus": 8,
-        "enable": true,
-        "cost_hour[730h-mo]": 0.3790
+        "name": "gcp-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.3790,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       },
       {
-        "name": "gcp-benchmark-instance",
+        "enable": false,
         "type": "c4-standard-8",
         "arch": "amd64",
         "hostname": "gcp-c4-standard-8-amd64",
         "vcpus": 8,
-        "enable": false,
-        "cost_hour[730h-mo]": 0.3964
+        "name": "gcp-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.3964,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       },
       {
-        "name": "gcp-benchmark-instance",
+        "enable": false,
         "type": "c4a-standard-8",
         "arch": "arm64",
         "hostname": "gcp-c4a-standard-8-arm64",
         "vcpus": 8,
-        "enable": false,
-        "cost_hour[730h-mo]": 0.3602
-      },
-    {
         "name": "gcp-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.3602,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
+      },
+      {
+        "enable": false,
         "type": "t2a-standard-8",
         "arch": "arm64",
         "hostname": "gcp-t2a-standard-8-arm64",
         "vcpus": 8,
-        "enable": false,
-        "cost_hour": 0.3093
+        "name": "gcp-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.3093,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       }
     ]
   },
@@ -119,12 +137,15 @@
     "region": "ap-tokyo-1",
     "instances": [
       {
-        "name": "oci-benchmark-instance",
+        "enable": false,
         "type": "VM.Standard.E4.Flex",
         "arch": "amd64",
         "hostname": "oci-vm-standard-e4-flex-amd64",
         "vcpus": 2,
-        "enable": false
+        "name": "oci-benchmark-instance",
+        "cpu_cost_hour[730h-mo]": 0.3093,
+        "extra_50g_storage": false,
+        "extra_50g_storage_cost_hour": 0.0055
       }
     ]
   }
