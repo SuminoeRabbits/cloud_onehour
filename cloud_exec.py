@@ -9,9 +9,171 @@ import re
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from abc import ABC, abstractmethod
+
+# =========================================================================================
+# CLOUD EXECUTOR MODULES
+# =========================================================================================
+#
+# This script is modularized into the following components to support parallel execution:
+#
+# 1. Dashboard Module (Dashboard class):
+#    - Manages the real-time console display.
+#    - Renders a table of all active instances, their status, current step, and progress.
+#    - Handles thread-safe updates from parallel workers.
+#
+# 2. Logger Module (InstanceLogger class):
+#    - Manages individual log files for each instance (logs/<run_id>/<csp>_<instance>.log).
+#    - Redirects detailed command output to these files instead of the console.
+#    - Sends high-level status updates to the Dashboard.
+#
+# 3. Cloud Executor Module (main logic):
+#    - Orchestrates the parallel execution using ThreadPoolExecutor.
+#    - Uses InstanceLogger to log operations and update the Dashboard.
+#
+# =========================================================================================
+
+class Dashboard:
+    """Manages real-time console dashboard for parallel execution."""
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        self.lock = threading.Lock()
+        self.instances = {}  # {instance_name: {'status': str, 'step': str, 'last_update': datetime}}
+        self.start_time = datetime.now()
+        self.log_dir = None
+        self._running = False
+        self._thread = None
+        
+        # ANSI colors
+        self.HEADER = '\033[95m'
+        self.BLUE = '\033[94m'
+        self.CYAN = '\033[96m'
+        self.GREEN = '\033[92m'
+        self.WARNING = '\033[93m'
+        self.FAIL = '\033[91m'
+        self.ENDC = '\033[0m'
+        self.BOLD = '\033[1m'
+
+    def register(self, instance_name, cloud_type, machine_type):
+        with self.lock:
+            self.instances[instance_name] = {
+                'cloud': cloud_type,
+                'type': machine_type,
+                'status': 'PENDING',
+                'step': 'Initializing...',
+                'last_update': datetime.now(),
+                'color': self.BLUE
+            }
+
+    def update(self, instance_name, status=None, step=None, color=None):
+        if not self.enabled: return
+        with self.lock:
+            if instance_name in self.instances:
+                if status: self.instances[instance_name]['status'] = status
+                if step: self.instances[instance_name]['step'] = step
+                if color: self.instances[instance_name]['color'] = color
+                self.instances[instance_name]['last_update'] = datetime.now()
+
+    def set_log_dir(self, log_dir):
+        self.log_dir = log_dir
+
+    def start(self):
+        if not self.enabled: return
+        self._running = True
+        self._thread = threading.Thread(target=self._render_loop)
+        self._thread.daemon = True
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
+        self._render_once() # Final render
+
+    def _render_loop(self):
+        while self._running:
+            self._render_once()
+            time.sleep(0.5)
+
+    def _render_once(self):
+        # Clear screen and move to top (using generic ANSI codes)
+        # Typically \033[2J clears screen, \033[H moves to home
+        # For a scrolling dashboard, we might want to just re-print the table
+        # But fully clearing can be flickering. 
+        # Strategy: Use a fixed number of lines or print a header and status table.
+        # Since we can't easily do curses here without complexity, we'll clear screen.
+        print("\033[2J\033[H", end="")
+        
+        run_duration = datetime.now() - self.start_time
+        print(f"{self.BOLD}CLOUD BENCHMARKING EXECUTOR (Parallel Mode){self.ENDC}")
+        print(f"Run Duration: {str(run_duration).split('.')[0]}")
+        if self.log_dir:
+            print(f"Detailed Logs: {self.log_dir}")
+        print("=" * 100)
+        print(f"{'INSTANCE':<30} | {'STATUS':<15} | {'CURRENT STEP':<50}")
+        print("-" * 100)
+
+        with self.lock:
+            # Sort by cloud provider for grouping
+            sorted_insts = sorted(self.instances.items())
+            
+            for name, data in sorted_insts:
+                status_str = f"{data['color']}{data['status']}{self.ENDC}"
+                step_str = data['step'][:48] + ".." if len(data['step']) > 48 else data['step']
+                print(f"{name:<30} | {status_str:<24} | {step_str:<50}")
+        
+        print("=" * 100)
+        sys.stdout.flush()
+
+class InstanceLogger:
+    """Handles logging to file and updating dashboard for a specific instance."""
+    def __init__(self, instance_name, global_dashboard, log_dir):
+        self.name = instance_name
+        self.dashboard = global_dashboard
+        self.log_file = log_dir / f"{instance_name.replace(':', '_')}.log"
+        
+        # Initialize log file
+        with open(self.log_file, 'w') as f:
+            f.write(f"=== Log started for {instance_name} ===\n")
+            f.write(f"Timestamp: {datetime.now()}\n\n")
+
+    def info(self, message):
+        """Log info message to file."""
+        self._write(f"[INFO] {message}")
+
+    def error(self, message):
+        """Log error message to file and update dashboard."""
+        self._write(f"[ERROR] {message}")
+        self.dashboard.update(self.name, status="ERROR", color=self.dashboard.FAIL)
+
+    def warn(self, message):
+        """Log warning message to file."""
+        self._write(f"[WARN] {message}")
+
+    def cmd(self, command):
+        """Log command execution."""
+        self._write(f"[CMD] {command}")
+
+    def progress(self, step, status="RUNNING"):
+        """Update dashboard and log progress."""
+        self._write(f"[PROGRESS] {step}")
+        color = self.dashboard.GREEN if status == "COMPLETED" else self.dashboard.BLUE
+        if status == "ERROR": color = self.dashboard.FAIL
+        self.dashboard.update(self.name, status=status, step=step, color=color)
+
+    def _write(self, line):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        try:
+            with open(self.log_file, 'a') as f:
+                f.write(f"[{timestamp}] {line}\n")
+        except Exception:
+            pass # Don't crash on logging fail
+
+# Global Dashboard Instance
+DASHBOARD = Dashboard(enabled=True)
 
 # Global debug mode - set by load_config
-DEBUG_MODE = False  # false, true, or other (progress-only)
+DEBUG_MODE = False  # NO LONGER USED in new Dashboard mode, kept for compatibility
 
 # Global tracking of active instances for cleanup on signal
 active_instances_lock = threading.Lock()
@@ -91,26 +253,26 @@ def unregister_instance(instance_id):
             log(f"Unregistered instance: {instance_id}")
 
 def log(msg, level="INFO"):
-    """Print timestamped log message if debug mode is enabled."""
+    """Deprecated: Log timestamped message if debug mode is enabled."""
     if DEBUG_MODE == True:
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [{level}] {msg}", flush=True)
-    elif DEBUG_MODE not in [False, True]:
-        # Progress-only mode - don't print this, handle separately
-        pass
 
-def progress(instance_name, step):
-    """Print progress indicator for progress-only mode."""
-    if DEBUG_MODE not in [False, True]:
+def progress(instance_name, step, logger=None):
+    """Update progress on dashboard and log to file if logger is available."""
+    if logger:
+        logger.progress(step)
+    else:
+        # Fallback for non-threaded execution
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [{instance_name}] {step}", flush=True)
-    elif DEBUG_MODE == True:
-        log(f"{instance_name}: {step}", "PROGRESS")
 
-def run_cmd(cmd, capture=True, ignore=False, timeout=None):
-    """Execute shell command and return output or status."""
+def run_cmd(cmd, capture=True, ignore=False, timeout=None, logger=None):
+    """Execute shell command and return output or status. Supports logger redirection."""
     try:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.cmd(f"Executing: {cmd[:150]}{'...' if len(cmd) > 150 else ''}")
+        elif DEBUG_MODE == True:
             log(f"Executing: {cmd[:100]}{'...' if len(cmd) > 100 else ''}", "CMD")
 
         start_time = time.time()
@@ -119,23 +281,34 @@ def run_cmd(cmd, capture=True, ignore=False, timeout=None):
         )
         elapsed = time.time() - start_time
 
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Command completed in {elapsed:.2f}s")
+        elif DEBUG_MODE == True:
             log(f"Command completed in {elapsed:.2f}s", "CMD")
 
         return res.stdout.strip() if capture else True
     except subprocess.TimeoutExpired:
-        if DEBUG_MODE == True:
-            log(f"Command timed out after {timeout} seconds", "ERROR")
-        elif DEBUG_MODE == False:
-            print(f"[Error] Command timed out after {timeout} seconds")
+        msg = f"Command timed out after {timeout} seconds"
+        if logger:
+            logger.error(msg)
+        elif DEBUG_MODE == True:
+            log(msg, "ERROR")
+        elif DEBUG_MODE == False and not logger:
+            print(f"[Error] {msg}")
+            
         if not ignore:
             raise
         return None
     except subprocess.CalledProcessError as e:
-        if DEBUG_MODE == True:
-            log(f"Command failed: {e.stderr if e.stderr else 'No error message'}", "ERROR")
-        elif DEBUG_MODE == False:
-            print(f"[Error] {e.stderr if e.stderr else 'Command failed'}")
+        err_msg = e.stderr if e.stderr else 'No error message'
+        msg = f"Command failed: {err_msg}"
+        if logger:
+            logger.error(msg)
+        elif DEBUG_MODE == True:
+            log(msg, "ERROR")
+        elif DEBUG_MODE == False and not logger:
+            print(f"[Error] {err_msg}")
+            
         if not ignore:
             raise
         return None
@@ -153,32 +326,32 @@ def build_storage_config(inst, cloud_type):
     This function centralizes storage configuration logic to make it easier
     to maintain consistency across cloud providers and add new ones.
     """
-    if not inst.get('extra_50g_storage', False):
+    if not inst.get('extra_150g_storage', False):
         return ""
 
     if cloud_type == 'aws':
         # AWS: Use block-device-mappings with DeleteOnTermination=true
         config = (
             '--block-device-mappings '
-            '\'[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,'
+            '\'[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":150,'
             '"VolumeType":"gp3","DeleteOnTermination":true}}]\' '
         )
         if DEBUG_MODE == True:
-            log("Configuring 50GB root volume with auto-delete on termination")
+            log("Configuring 150GB root volume with auto-delete on termination")
         return config
 
     elif cloud_type == 'gcp':
         # GCP: Use boot-disk-size (auto-delete is YES by default)
         if DEBUG_MODE == True:
-            log("Configuring 50GB boot disk (auto-delete enabled by default)")
-        return "--boot-disk-size=50GB "
+            log("Configuring 150GB boot disk (auto-delete enabled by default)")
+        return "--boot-disk-size=150GB "
 
     elif cloud_type == 'oci':
         # OCI: Use boot-volume-size-in-gbs with auto-delete on termination
         # --is-preserve-boot-volume false ensures boot volume is deleted with instance
         if DEBUG_MODE == True:
-            log("Configuring 50GB boot volume with auto-delete on termination")
-        return "--boot-volume-size-in-gbs 50 --is-preserve-boot-volume false "
+            log("Configuring 150GB boot volume with auto-delete on termination")
+        return "--boot-volume-size-in-gbs 150 --is-preserve-boot-volume false "
 
     else:
         if DEBUG_MODE == True:
@@ -387,7 +560,7 @@ def launch_oci_instance(inst, config, compartment_id, region):
     Reference commands:
         - Launch: oci compute instance launch --compartment-id <id> --shape <type> ...
         - Get IP: oci compute instance get --instance-id <id> --query 'data."primary-public-ip"'
-        - Storage: --boot-volume-size-in-gbs 50 (for extra_50g_storage)
+        - Storage: --boot-volume-size-in-gbs 150 (for extra_150g_storage)
         - Delete: oci compute instance terminate --instance-id <id> --force
     """
     name = inst['name']
@@ -835,17 +1008,20 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
         print(f"Collected: {local_f}")
 
 
-def process_instance(cloud, inst, config, key_path):
+def process_instance(cloud, inst, config, key_path, log_dir):
     """Process a single cloud instance: launch, benchmark, collect, terminate."""
     name = inst['name']
     instance_name = f"{cloud.upper()}:{name}"
+    
+    # Register with dashboard
+    DASHBOARD.register(instance_name, cloud.upper(), inst['type'])
+    
+    # Initialize logger
+    logger = InstanceLogger(instance_name, DASHBOARD, log_dir)
+    
+    progress(instance_name, "Starting", logger)
 
-    progress(instance_name, "Starting")
-
-    if DEBUG_MODE == True:
-        log(f"Starting {cloud.upper()} instance: {name} ({inst['type']})", "INFO")
-    else:
-        print(f"\n>>> Starting {cloud.upper()}: {name} ({inst['type']})")
+    logger.info(f"Starting {cloud.upper()} instance: {name} ({inst['type']})")
 
     instance_id = None
     ip = None
@@ -858,60 +1034,47 @@ def process_instance(cloud, inst, config, key_path):
         if cloud == 'aws':
             region = config['aws']['region']
 
-            if DEBUG_MODE == True:
-                log(f"AWS Region: {region}")
-                log("Getting AWS key pair name...")
+            logger.info(f"AWS Region: {region}")
+            logger.info("Getting AWS key pair name...")
 
-            key_name = run_cmd("aws ec2 describe-key-pairs --query 'KeyPairs[0].KeyName' --output text")
+            key_name = run_cmd("aws ec2 describe-key-pairs --query 'KeyPairs[0].KeyName' --output text", logger=logger)
 
-            if DEBUG_MODE == True:
-                log(f"Key pair: {key_name}")
+            logger.info(f"Key pair: {key_name}")
 
-            sg_id = setup_aws_sg(region, config['common']['security_group_name'])
-            instance_id, ip = launch_aws_instance(inst, config, region, key_name, sg_id)
+            sg_id = setup_aws_sg(region, config['common']['security_group_name'], logger=logger)
+            instance_id, ip = launch_aws_instance(inst, config, region, key_name, sg_id, logger=logger)
         elif cloud == 'gcp':
             project = config['gcp']['project_id']
             if project == "AUTO_DETECT":
-                project = get_gcp_project()
+                project = get_gcp_project(logger=logger)
             zone = config['gcp']['zone']
 
-            if DEBUG_MODE == True:
-                log(f"GCP Project: {project}, Zone: {zone}")
+            logger.info(f"GCP Project: {project}, Zone: {zone}")
 
-            instance_id, ip = launch_gcp_instance(inst, config, project, zone)
+            instance_id, ip = launch_gcp_instance(inst, config, project, zone, logger=logger)
         elif cloud == 'oci':
             compartment_id = config['oci']['compartment_id']
             region = config['oci']['region']
 
-            if DEBUG_MODE == True:
-                log(f"OCI Compartment: {compartment_id}, Region: {region}")
+            logger.info(f"OCI Compartment: {compartment_id}, Region: {region}")
 
-            instance_id, ip = launch_oci_instance(inst, config, compartment_id, region)
+            instance_id, ip = launch_oci_instance(inst, config, compartment_id, region, logger=logger)
         else:
             msg = f"Unknown cloud provider: {cloud}"
-            if DEBUG_MODE == True:
-                log(msg, "ERROR")
-            else:
-                print(f"[Error] {msg}")
+            logger.error(msg)
             return
 
         if not ip or ip == "None":
             msg = f"Failed to get IP for {name}"
-            if DEBUG_MODE == True:
-                log(msg, "ERROR")
-            else:
-                print(f"[Error] {msg}. Skipping benchmark.")
+            logger.error(msg)
             return
 
         # Register instance for cleanup on signal/exception
         register_instance(cloud, instance_id, name, region=region, project=project, zone=zone, compartment_id=compartment_id)
 
-        progress(instance_name, f"Instance launched (IP: {ip})")
+        progress(instance_name, f"Instance launched (IP: {ip})", logger)
 
-        if DEBUG_MODE == True:
-            log(f"Waiting 60s for SSH to become available...")
-        elif DEBUG_MODE == False:
-            print(f"IP: {ip}. Waiting 60s for SSH...")
+        logger.info(f"Waiting 60s for SSH to become available (IP: {ip})...")
 
         time.sleep(60)
 
@@ -925,17 +1088,10 @@ def process_instance(cloud, inst, config, key_path):
             import re
             if not re.match(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$', hostname):
                 msg = f"Invalid hostname format: {hostname}. Must contain only lowercase letters, numbers, and hyphens."
-                if DEBUG_MODE == True:
-                    log(msg, "ERROR")
-                else:
-                    print(f"[Error] {msg}")
+                logger.error(msg)
             else:
-                progress(instance_name, f"Setting hostname to: {hostname}")
-
-                if DEBUG_MODE == True:
-                    log(f"Setting hostname to: {hostname}")
-                elif DEBUG_MODE == False:
-                    print(f"  [Hostname] Setting to: {hostname}")
+                progress(instance_name, f"Setting hostname to: {hostname}", logger)
+                logger.info(f"Setting hostname to: {hostname}")
 
                 ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
                 ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={'yes' if ssh_strict else 'no'} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
@@ -945,80 +1101,54 @@ def process_instance(cloud, inst, config, key_path):
                 hostname_cmd = f"sudo hostnamectl set-hostname {hostname} && sudo sed -i '/127.0.1.1/d' /etc/hosts && echo '127.0.1.1 {hostname}' | sudo tee -a /etc/hosts > /dev/null"
 
                 try:
-                    result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{hostname_cmd}'", capture=False, timeout=30)
+                    result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{hostname_cmd}'", capture=False, timeout=30, logger=logger)
 
                     if result is not None:
-                        progress(instance_name, f"Hostname set successfully")
-
-                        if DEBUG_MODE == True:
-                            log(f"Hostname set to: {hostname}")
-                        elif DEBUG_MODE == False:
-                            print(f"  [Hostname] Successfully set to: {hostname}")
+                        progress(instance_name, f"Hostname set successfully", logger)
+                        logger.info(f"Hostname set to: {hostname}")
                     else:
-                        msg = f"Failed to set hostname to: {hostname}"
-                        if DEBUG_MODE == True:
-                            log(msg, "WARN")
-                        else:
-                            print(f"  [Warning] {msg}")
+                        logger.warn(f"Failed to set hostname to: {hostname}")
                 except Exception as e:
-                    msg = f"Error setting hostname: {e}"
-                    if DEBUG_MODE == True:
-                        log(msg, "ERROR")
-                    else:
-                        print(f"  [Error] {msg}")
+                    logger.error(f"Error setting hostname: {e}")
 
         # Run all commands sequentially
-        commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name)
+        commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name, logger=logger)
         if not commands_success:
             msg = f"Command execution failed for {name}"
-            if DEBUG_MODE == True:
-                log(msg, "ERROR")
-            else:
-                print(f"[Error] {msg}. Skipping result collection.")
+            logger.error(msg)
             return
 
         # Collect results
-        collect_results(ip, config, cloud, name, inst, key_path, ssh_strict, instance_name)
+        collect_results(ip, config, cloud, name, inst, key_path, ssh_strict, instance_name, logger=logger)
 
-        progress(instance_name, "Completed successfully")
-
-        if DEBUG_MODE == True:
-            log(f"Instance {name} completed successfully", "SUCCESS")
+        progress(instance_name, "Completed successfully", logger=logger)
+        logger.info(f"Instance {name} completed successfully")
+        DASHBOARD.update(instance_name, status="COMPLETED")
 
     except Exception as e:
         msg = f"{cloud} instance {name}: {e}"
-        if DEBUG_MODE == True:
-            log(msg, "ERROR")
-            import traceback
-            traceback.print_exc()
-        else:
-            print(f"[Error] {msg}")
+        logger.error(msg)
+        import traceback
+        logger.error(traceback.format_exc())
     finally:
         if instance_id:
-            # Unregister from active instances tracking
-            unregister_instance(instance_id)
-
-            progress(instance_name, "Terminating")
-
-            if DEBUG_MODE == True:
-                log(f"Terminating instance {name}...")
-            elif DEBUG_MODE == False:
-                print(f"Terminating {name}...")
+            progress(instance_name, "Terminating", logger)
+            logger.info(f"Terminating instance {name}...")
 
             if cloud == 'aws' and region:
-                run_cmd(f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}")
+                run_cmd(f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}", logger=logger)
             elif cloud == 'gcp' and project and zone:
-                run_cmd(f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet")
+                run_cmd(f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet", logger=logger)
             elif cloud == 'oci' and compartment_id:
                 # TODO: Implement OCI instance termination
-                if DEBUG_MODE == True:
-                    log("OCI instance termination not yet implemented", "WARN")
-                else:
-                    print(f"[Warning] OCI instance termination not yet implemented for {name}")
-                # run_cmd(f"oci compute instance terminate --instance-id {instance_id} --force")
+                logger.warn("OCI instance termination not yet implemented")
+                # run_cmd(f"oci compute instance terminate --instance-id {instance_id} --force", logger=logger)
 
-            if DEBUG_MODE == True:
-                log(f"Instance {name} terminated")
+            logger.info(f"Instance {name} terminated")
+            DASHBOARD.update(instance_name, status="TERMINATED")
+
+            # Unregister from active instances tracking
+            unregister_instance(instance_id)
 
 def process_csp_instances(cloud, instances, config, key_path):
     """Process all instances for a single CSP sequentially."""
@@ -1032,12 +1162,15 @@ def process_csp_instances(cloud, instances, config, key_path):
             process_instance(cloud, inst, config, key_path)
             enabled_count += 1
 
-    if enabled_count == 0:
-        msg = f"{csp_name} enabled but no instances are enabled"
-        if DEBUG_MODE == True:
-            log(msg, "WARN")
-        else:
-            print(f"[Info] {msg} in the configuration.")
+def process_csp_instances(cloud, instances, config, key_path, log_dir):
+    """Process all instances for a single CSP sequentially."""
+    csp_name = cloud.upper()
+    
+    enabled_count = 0
+    for inst in instances:
+        if inst.get('enable'):
+            process_instance(cloud, inst, config, key_path, log_dir)
+            enabled_count += 1
 
     return enabled_count
 
@@ -1107,74 +1240,42 @@ def main():
         if DEBUG_MODE == True:
             log(f"Results directory: {host_rep_dir}")
 
+        if DEBUG_MODE == True:
+            log(f"Results directory: {host_rep_dir}")
+
         # Validate SSH key
-        key_path_template = config['common'].get(
-            'ssh_key_path', '${HOME}/.ssh/cloud_onehour_project.pem'
-        )
+        key_path_template = config['common']['ssh_key_path']
         key_path = validate_key_path(key_path_template)
         if not key_path:
             return
 
+        # Prepare log directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        log_dir = Path(host_rep_dir) / "logs" / timestamp
+        log_dir.mkdir(parents=True, exist_ok=True)
+        DASHBOARD.set_log_dir(log_dir)
+
+        # Start Dashboard
+        DASHBOARD.start()
+
         # Prepare CSP tasks for parallel execution
         csp_tasks = []
 
-        if config['aws']['enable']:
-            if config['aws']['instances']:
-                csp_tasks.append(('aws', config['aws']['instances']))
-            else:
-                msg = "AWS is enabled but has no instances configured"
-                if DEBUG_MODE == True:
-                    log(msg, "WARN")
-                else:
-                    print(f"[Info] {msg}")
-        else:
-            msg = "AWS is disabled"
-            if DEBUG_MODE == True:
-                log(msg, "INFO")
-            else:
-                print(f"[Info] {msg} in the configuration (aws.enable = false).")
+        if config['aws']['enable'] and config['aws']['instances']:
+            csp_tasks.append(('aws', config['aws']['instances']))
+        
+        if config['gcp']['enable'] and config['gcp']['instances']:
+            csp_tasks.append(('gcp', config['gcp']['instances']))
 
-        if config['gcp']['enable']:
-            if config['gcp']['instances']:
-                csp_tasks.append(('gcp', config['gcp']['instances']))
-            else:
-                msg = "GCP is enabled but has no instances configured"
-                if DEBUG_MODE == True:
-                    log(msg, "WARN")
-                else:
-                    print(f"[Info] {msg}")
-        else:
-            msg = "GCP is disabled"
-            if DEBUG_MODE == True:
-                log(msg, "INFO")
-            else:
-                print(f"[Info] {msg} in the configuration (gcp.enable = false).")
-
-        if config.get('oci', {}).get('enable'):
-            if config['oci']['instances']:
-                csp_tasks.append(('oci', config['oci']['instances']))
-            else:
-                msg = "OCI is enabled but has no instances configured"
-                if DEBUG_MODE == True:
-                    log(msg, "WARN")
-                else:
-                    print(f"[Info] {msg}")
-        else:
-            msg = "OCI is disabled"
-            if DEBUG_MODE == True:
-                log(msg, "INFO")
-            else:
-                print(f"[Info] {msg} in the configuration (oci.enable = false).")
+        if config.get('oci', {}).get('enable') and config['oci']['instances']:
+            csp_tasks.append(('oci', config['oci']['instances']))
 
         # Execute CSPs in parallel (max 3 workers: AWS, GCP, and OCI)
         if csp_tasks:
-            if DEBUG_MODE == True:
-                log(f"Starting parallel execution of {len(csp_tasks)} CSP(s)")
-
             with ThreadPoolExecutor(max_workers=min(3, len(csp_tasks))) as executor:
                 # Submit all CSP tasks
                 future_to_csp = {
-                    executor.submit(process_csp_instances, cloud, instances, config, key_path): cloud
+                    executor.submit(process_csp_instances, cloud, instances, config, key_path, log_dir): cloud
                     for cloud, instances in csp_tasks
                 }
 
@@ -1182,29 +1283,20 @@ def main():
                 for future in as_completed(future_to_csp):
                     cloud = future_to_csp[future]
                     try:
-                        result = future.result()
-                        if DEBUG_MODE == True:
-                            log(f"{cloud.upper()} completed with {result} instance(s) processed")
+                        future.result()
                     except Exception as exc:
-                        msg = f"{cloud.upper()} generated an exception: {exc}"
-                        if DEBUG_MODE == True:
-                            log(msg, "ERROR")
-                        else:
-                            print(f"[Error] {msg}")
-
-        if DEBUG_MODE == True:
-            log("=" * 60)
-            log("ALL INSTANCES COMPLETED")
-            log("=" * 60)
+                        # Log error to a general error log since instance context might be lost
+                        with open(log_dir / "general_errors.log", "a") as f:
+                            f.write(f"[{datetime.now()}] {cloud.upper()} thread failed: {exc}\n")
+                        
+        # Stop Dashboard
+        DASHBOARD.stop()
 
     except Exception as e:
-        msg = f"Fatal error in main: {e}"
-        if DEBUG_MODE == True:
-            log(msg, "ERROR")
-            import traceback
-            traceback.print_exc()
-        else:
-            print(f"[Error] {msg}")
+        DASHBOARD.stop() # Ensure dashboard stops on error
+        print(f"\n[Fatal Error] {e}")
+        import traceback
+        traceback.print_exc()
         # Cleanup any active instances before exiting
         cleanup_active_instances()
         raise
