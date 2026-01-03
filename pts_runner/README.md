@@ -276,6 +276,9 @@ NUM_CPU_CORES=1,2,3,,,,vCPUと<N>を＋１で数を増やしながらベンチ�
 
 <testcategory>の文字列にスペースがある場合は"_"に置換する。
 ベンチマーク結果はRaw dataと、すべての<N>のデータをわかりやすく読みやすく集計したsummary.log, summary.logを別のAI解析に利用するために統一されたJSON formatで記述したsummary.jsonから構成される。
+
+Phoronix Test Suite (PTS) の実行失敗やログ解析の不備により、ベンチマーク結果の数値（value）が None となった際、f-string の書式指定（:.2f）でスクリプトがクラッシュするのを防ぐ。
+
 テスト実施前にresults/<machinename>/<os>/<testcategory>/<testname>が存在する場合は、このディレクトリ内のファイルをすべて消去してからテストを実施する。
 
 

@@ -2,6 +2,31 @@
 
 新しいpts_runner_*.pyを作成する際は、以下のテンプレートを参考にしてください。
 
+### スクリプトヘッダ (Docstring)
+
+スクリプトの冒頭には、対象ベンチマークの詳細情報を `phoronix-test-suite info pts/<benchmark>` コマンドから取得して記載してください。
+これにより、依存関係やテスト特性（マルチスレッド対応など）が明確になります。
+
+```python
+#!/usr/bin/env python3
+"""
+PTS Runner for <benchmark-name>
+
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * ...
+- Estimated Install Time: ...
+- Environment Size: ...
+- Test Type: ...
+- Supported Platforms: ...
+
+Test Characteristics:
+- Multi-threaded: Yes/No
+- THFix_in_compile: true/false
+- THChange_at_runtime: true/false
+"""
+```
+
 ### 必須メソッド
 
 ```python
@@ -105,7 +130,7 @@ class BenchmarkRunner:
         pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
         
         # 4. Record CPU frequency BEFORE benchmark
-        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \\'{{printf "%.0f\\\\n", $4 * 1000}}\\' > {file}'
+        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
         command = cmd_template.format(file=freq_start_file)
         subprocess.run(['bash', '-c', command], capture_output=True, text=True)
         
@@ -113,7 +138,7 @@ class BenchmarkRunner:
         subprocess.run(['bash', '-c', pts_cmd])
         
         # 6. Record CPU frequency AFTER benchmark
-        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \\'{{printf "%.0f\\\\n", $4 * 1000}}\\' > {file}'
+        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
         command = cmd_template.format(file=freq_end_file)
         subprocess.run(['bash', '-c', command], capture_output=True, text=True)
         
@@ -263,6 +288,187 @@ class BenchmarkRunner:
         # ...modify file...
 
         pass  # Most benchmarks don't need this
+    
+    def generate_summary(self):
+        """Generate summary.log and summary.json from all thread results."""
+        print(f"\n{'='*80}")
+        print(f">>> Generating summary")
+        print(f"{'='*80}")
+
+        summary_log = self.results_dir / "summary.log"
+        summary_json_file = self.results_dir / "summary.json"
+
+        # Collect results from all JSON files
+        all_results = []
+        for num_threads in self.thread_list:
+            json_file = self.results_dir / f"{num_threads}-thread.json"
+            if json_file.exists():
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    # Extract benchmark result
+                    for result_id, result in data.get('results', {}).items():
+                        for system_id, system_result in result.get('results', {}).items():
+                            all_results.append({
+                                'threads': num_threads,
+                                'value': system_result.get('value'),
+                                'raw_values': system_result.get('raw_values', []),
+                                'test_name': result.get('title'),
+                                'description': result.get('description'),
+                                'unit': result.get('scale')
+                            })
+
+        if not all_results:
+            print("[WARN] No results found for summary generation")
+            return
+
+        # Generate summary.log (human-readable)
+        with open(summary_log, 'w') as f:
+            f.write("="*80 + "\n")
+            f.write(f"Benchmark Summary: {self.benchmark}\n")
+            f.write(f"Machine: {self.machine_name}\n")
+            f.write(f"Test Category: {self.test_category}\n")
+            f.write("="*80 + "\n\n")
+
+            for result in all_results:
+                f.write(f"Threads: {result['threads']}\n")
+                f.write(f"  Test: {result['test_name']}\n")
+                f.write(f"  Description: {result['description']}\n")
+                
+                # Check for None to avoid f-string crash
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: None (Test Failed)\n")
+                    
+                # Handle raw values safely
+                raw_vals = result.get('raw_values')
+                if raw_vals:
+                    val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
+                    f.write(f"  Raw values: {val_str}\n")
+                else:
+                    f.write(f"  Raw values: N/A\n")
+                    
+                f.write("\n")
+
+            f.write("="*80 + "\n")
+            f.write("Summary Table\n")
+            f.write("="*80 + "\n")
+            f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
+            f.write("-"*80 + "\n")
+            for result in all_results:
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"
+                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\n")
+
+        print(f"[OK] Summary log saved: {summary_log}")
+
+        # Generate summary.json (AI-friendly format)
+        summary_data = {
+            "benchmark": self.benchmark,
+            "test_category": self.test_category,
+            "machine": self.machine_name,
+            "vcpu_count": self.vcpu_count,
+            "results": all_results
+        }
+
+        with open(summary_json_file, 'w') as f:
+            json.dump(summary_data, f, indent=2)
+
+        print(f"[OK] Summary JSON saved: {summary_json_file}")
+
+    def run(self):
+        """Main execution flow."""
+        print(f"\\n{'#'*80}")
+        print(f"# PTS Runner: {self.benchmark_full}")
+        print(f"# Machine: {self.machine_name}")
+        print(f"# OS: {self.os_name}")
+        print(f"# vCPU Count: {self.vcpu_count}")
+        print(f"# Thread List: {self.thread_list}")
+        if self.quick_mode:
+            print(f"# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
+        print(f"{'#'*80}")
+
+        # Clean results directory
+        if self.results_dir.exists():
+            print(f"\\n>>> Cleaning existing results directory: {self.results_dir}")
+            shutil.rmtree(self.results_dir)
+
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        # Clean and install
+        self.clean_pts_cache()
+        self.install_benchmark()
+
+        # Run for each thread count
+        for num_threads in self.thread_list:
+            self.run_benchmark(num_threads)
+
+        # Export results to CSV and JSON
+        self.export_results()
+
+        # Generate summary
+        self.generate_summary()
+
+        print(f"\\n{'='*80}")
+        print(f">>> All benchmarks completed successfully")
+        print(f">>> Results directory: {self.results_dir}")
+        print(f"{'='*80}")
+
+        return True
+
+    def export_results(self):
+        """Export benchmark results to CSV and JSON formats."""
+        print(f"\\n{'='*80}")
+        print(f">>> Exporting benchmark results")
+        print(f"{'='*80}")
+
+        pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
+
+        for num_threads in self.thread_list:
+            result_name = f"{self.benchmark}-{num_threads}threads"
+
+            # Check if result exists
+            result_dir = pts_results_dir / result_name
+            if not result_dir.exists():
+                print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
+                continue
+
+            print(f"\\n[INFO] Exporting results for {num_threads} thread(s)...")
+
+            # Export to CSV
+            csv_output = self.results_dir / f"{num_threads}-thread.csv"
+            print(f"  [EXPORT] CSV: {csv_output}")
+            result = subprocess.run(
+                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                # PTS saves to ~/result_name.csv, move it to our results directory
+                home_csv = Path.home() / f"{result_name}.csv"
+                if home_csv.exists():
+                    shutil.move(str(home_csv), str(csv_output))
+                    print(f"  [OK] Saved: {csv_output}")
+            else:
+                print(f"  [WARN] CSV export failed: {result.stderr}")
+
+            # Export to JSON
+            json_output = self.results_dir / f"{num_threads}-thread.json"
+            print(f"  [EXPORT] JSON: {json_output}")
+            result = subprocess.run(
+                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                # PTS saves to ~/result_name.json, move it to our results directory
+                home_json = Path.home() / f"{result_name}.json"
+                if home_json.exists():
+                    shutil.move(str(home_json), str(json_output))
+                    print(f"  [OK] Saved: {json_output}")
+            else:
+                print(f"  [WARN] JSON export failed: {result.stderr}")
+
+        print(f"\\n[OK] Export completed")
 
 def main():
     parser = argparse.ArgumentParser(
