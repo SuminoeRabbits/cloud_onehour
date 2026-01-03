@@ -28,7 +28,7 @@
         "arch": "amd64",
         "hostname": "aws-t3-medium-amd64",
         "vcpus": 2,
-        "name": "aws-t3-medium-amd64_vcpu_2",
+        "name": "aws-t3-medium-amd64-vcpu-2",
         "cpu_cost_hour[730h-mo]": 0.0183,
         "extra_150g_storage": false,
         "extra_150g_storage_cost_hour": 0.0197
@@ -39,7 +39,7 @@
         "arch": "amd64",
         "hostname": "aws-m8a-2xlarge-amd64",
         "vcpus": 8,
-        "name": "aws-m8a-2xlarge-amd64_vcpu_8",
+        "name": "aws-m8a-2xlarge-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.2967,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
@@ -50,7 +50,7 @@
         "arch": "amd64",
         "hostname": "aws-m8i-2xlarge-amd64",
         "vcpus": 8,
-        "name": "aws-m8i-2xlarge-amd64_vcpu_8",
+        "name": "aws-m8i-2xlarge-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.2397,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
@@ -61,7 +61,7 @@
         "arch": "arm64",
         "hostname": "aws-m8g-2xlarge-arm64",
         "vcpus": 8,
-        "name": "aws-m8g-2xlarge-arm64_vcpu_8",
+        "name": "aws-m8g-2xlarge-arm64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.2077,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
@@ -79,7 +79,7 @@
         "arch": "amd64",
         "hostname": "gcp-e2-standard-2-amd64",
         "vcpus": 2,
-        "name": "gcp-e2-standard-2-amd64_vcpu_2",
+        "name": "gcp-e2-standard-2-amd64-vcpu-2",
         "cpu_cost_hour[730h-mo]": 0.0683,
         "extra_150g_storage": false,
         "extra_150g_storage_cost_hour": 0.0267
@@ -90,7 +90,7 @@
         "arch": "amd64",
         "hostname": "gcp-c4d-standard-8-amd64",
         "vcpus": 8,
-        "name": "gcp-c4d-standard-8-amd64_vcpu_8",
+        "name": "gcp-c4d-standard-8-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.3790,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -101,7 +101,7 @@
         "arch": "amd64",
         "hostname": "gcp-c4-standard-8-amd64",
         "vcpus": 8,
-        "name": "gcp-c4-standard-8-amd64_vcpu_8",
+        "name": "gcp-c4-standard-8-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.3964,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -112,7 +112,7 @@
         "arch": "arm64",
         "hostname": "gcp-c4a-standard-8-arm64",
         "vcpus": 8,
-        "name": "gcp-c4a-standard-8-arm64_vcpu_8",
+        "name": "gcp-c4a-standard-8-arm64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.3602,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -123,7 +123,7 @@
         "arch": "arm64",
         "hostname": "gcp-t2a-standard-8-arm64",
         "vcpus": 8,
-        "name": "gcp-t2a-standard-8-arm64_vcpu_8",
+        "name": "gcp-t2a-standard-8-arm64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.3093,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -143,7 +143,7 @@
         "ocpus": 2,
         "vcpus": 4,
         "memory_gb": 16,
-        "name": "oci-vm-standard-e4-flex-amd64_vcpu_4",
+        "name": "oci-vm-standard-e4-flex-amd64-vcpu-4",
         "cpu_cost_hour[730h-mo]": 0.0740,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
@@ -156,7 +156,7 @@
         "ocpus": 4,
         "vcpus": 8,
         "memory_gb": 32,
-        "name": "oci-vm-standard-e5-flex-amd64_vcpu_8",
+        "name": "oci-vm-standard-e5-flex-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.1640,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
@@ -169,7 +169,7 @@
         "ocpus": 4,
         "vcpus": 8,
         "memory_gb": 32,
-        "name": "oci-vm-standard-x10-flex-amd64_vcpu_8",
+        "name": "oci-vm-standard-x10-flex-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.2184,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
@@ -182,7 +182,7 @@
         "ocpus": 8,
         "vcpus": 8,
         "memory_gb": 32,
-        "name": "oci-vm-standard-a1-flex-arm64_vcpu_8",
+        "name": "oci-vm-standard-a1-flex-arm64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 0.1280,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087

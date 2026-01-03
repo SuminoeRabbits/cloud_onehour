@@ -215,7 +215,7 @@ def cleanup_active_instances(signum=None, frame=None):
                     project = inst_info.get('project')
                     zone = inst_info.get('zone')
                     subprocess.run(
-                        f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet",
+                        f"gcloud compute instances delete {instance_id} --project={project} --zone={zone} --quiet",
                         shell=True, capture_output=True, timeout=30
                     )
                 elif cloud == 'oci':
@@ -563,8 +563,6 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
 
 def launch_gcp_instance(inst, config, project, zone, logger=None):
     """Launch GCP instance and return (instance_id, ip)."""
-    name = inst['name']
-
     if logger:
         logger.info(f"Launching GCP instance: {name} ({inst['type']})")
     elif DEBUG_MODE == True:
@@ -1167,6 +1165,12 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
 def process_instance(cloud, inst, config, key_path, log_dir):
     """Process a single cloud instance: launch, benchmark, collect, terminate."""
     name = inst['name']
+    
+    # Global sanitization: replace underscores with hyphens and ensure lowercase
+    # This applies to ALL cloud providers (AWS, GCP, OCI) for consistency
+    name = name.replace('_', '-').lower()
+    inst['name'] = name # Update in place so downstream functions use the sanitized name
+    
     instance_name = f"{cloud.upper()}:{name}"
     
     # Register with dashboard
