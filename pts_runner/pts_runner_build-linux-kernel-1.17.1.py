@@ -2,11 +2,24 @@
 """
 PTS Runner for build-linux-kernel-1.17.1
 
-Based on test_suite.json configuration:
-- test_category: "Build Process"
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * C/C++ Compiler Toolchain (gcc-14/g++-14 recommended)
+  * Flex, Bison
+  * OpenSSL (libssl-dev)
+  * BC (Basic Calculator)
+  * Elfutils (libelf-dev)
+- Estimated Install Time: 2 Minutes (Download), 5-15 Minutes (Build)
+- Environment Size: 4 GB
+- Test Type: Processor (Compilation)
+- Supported Platforms: Linux
+
+Test Characteristics:
+- Multi-threaded: Yes (compilation is highly parallel)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A (Compiler workload)
 - THFix_in_compile: false - Thread count NOT fixed at compile time
 - THChange_at_runtime: true - Can change threads at runtime via make -j $NUM_CPU_CORES
-- TH_scaling: env:NUM_CPU_CORES
 """
 
 import argparse
@@ -19,6 +32,146 @@ import sys
 from pathlib import Path
 
 
+class PreSeedDownloader:
+    """
+    Utility to pre-download large test files into Phoronix Test Suite cache
+    using faster downloaders (aria2c) if available.
+    """
+    def __init__(self, cache_dir=None):
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+        else:
+            self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+        
+        self.aria2_available = shutil.which("aria2c") is not None
+
+    def is_aria2_available(self):
+        return self.aria2_available
+
+    def download_from_xml(self, benchmark_name, threshold_mb=256):
+        """
+        Parse downloads.xml for the benchmark and download large files.
+        
+        Args:
+            benchmark_name: Full benchmark name (e.g., "pts/x265-1.5.0")
+            threshold_mb: Size threshold in MB to trigger aria2c (default: 256MB)
+        """
+        if not self.aria2_available:
+            return False
+
+        # Locate downloads.xml
+        # ~/.phoronix-test-suite/test-profiles/<benchmark_name>/downloads.xml
+        profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
+        
+        if not profile_path.exists():
+            # downloads.xml might not exist if test isn't installed/info'd yet, but that's fine.
+            return False
+            
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(profile_path)
+            root = tree.getroot()
+            
+            # Find all Package elements
+            downloads_node = root.find('Downloads')
+            if downloads_node is None:
+                return False
+                
+            for package in downloads_node.findall('Package'):
+                url_node = package.find('URL')
+                filename_node = package.find('FileName')
+                filesize_node = package.find('FileSize')
+                
+                if url_node is None or filename_node is None:
+                    continue
+                    
+                url = url_node.text.strip()
+                filename = filename_node.text.strip()
+                
+                # Determine size
+                size_bytes = -1
+                if filesize_node is not None and filesize_node.text:
+                    try:
+                        size_bytes = int(filesize_node.text.strip())
+                    except ValueError:
+                        pass
+                
+                # If size not in XML, try to get it from network (fallback)
+                if size_bytes <= 0:
+                    size_bytes = self.get_remote_file_size(url)
+                    
+                # Check threshold
+                if size_bytes > 0:
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb >= threshold_mb:
+                        print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
+                        self.ensure_file(url, filename)
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to parse downloads.xml: {e}")
+            return False
+
+        return True
+
+    def get_remote_file_size(self, url):
+        """
+        Get remote file size in bytes using curl.
+        Returns -1 if size cannot be determined.
+        """
+        try:
+            # -s: Silent, -I: Header only, -L: Follow redirects
+            cmd = ['curl', '-s', '-I', '-L', url]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                return -1
+                
+            # Parse Content-Length
+            for line in result.stdout.splitlines():
+                if line.lower().startswith('content-length:'):
+                    try:
+                        size_str = line.split(':')[1].strip()
+                        return int(size_str)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+            
+        return -1
+
+    def ensure_file(self, url, filename):
+        """
+        Directly download file using aria2c (assumes size check passed).
+        """
+        target_path = self.cache_dir / filename
+        
+        # Check if file exists in cache
+        if target_path.exists():
+            print(f"  [CACHE] File found: {filename}")
+            return True
+
+        # Need to download
+        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # aria2c command
+        cmd = [
+            "aria2c", "-x", "16", "-s", "16", 
+            "-d", str(self.cache_dir), 
+            "-o", filename,
+            url
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"  [aria2c] Download completed: {filename}")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            # Clean up partial download
+            if target_path.exists():
+                target_path.unlink()
+            return False
 class BuildLinuxKernelRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
@@ -214,6 +367,11 @@ class BuildLinuxKernelRunner:
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
         """
+        # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
+        print(f"\n>>> Checking for large files to pre-seed...")
+        downloader = PreSeedDownloader()
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=256)
+
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Remove existing installation first
