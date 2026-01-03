@@ -469,7 +469,14 @@ class BuildLLVMRunner:
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         perf_env = 'LINUX_PERF=1 '
-        batch_env = f'{quick_env}{perf_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-llvm-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-llvm-{num_threads}threads'
+        
+        # [Fix] Explicitly set builder environment variables to prevent CMake errors
+        # Error observed: "Generator: execution of make failed. Make command was: -j 1"
+        builder_env = ''
+        if shutil.which('ninja'):
+            builder_env = 'MAKE=ninja CMAKE_GENERATOR=Ninja '
+            
+        batch_env = f'{quick_env}{perf_env}{builder_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-llvm-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-llvm-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
