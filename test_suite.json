@@ -162,7 +162,7 @@
                 "pts/x265-1.5.0": {
                     "enabled": true,
                     "THFix_in_compile": false,
-                    "THChange_at_runtime": false,
+                    "THChange_at_runtime": true,
                     "TH_scaling": "auto-detect",
                     "sve2_support": true,
                     "notes": "x265 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them"
