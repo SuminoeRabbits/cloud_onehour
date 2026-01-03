@@ -8,7 +8,10 @@
       "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
       "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
       "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
-      "cd ~/cloud_onehour/pts_runner && ./pts_runner_build-llvm-1.6.0.py 288 --quick > /tmp/pts_runner_build-llvm-1.6.0.log 2>&1"
+      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-1st --all > /tmp/pts_regression1.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-2nd --all > /tmp/pts_regression2.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-3rd --all > /tmp/pts_regression3.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_regression.py --quick --max --split-4th --all > /tmp/pts_regression4.log 2>&1"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",

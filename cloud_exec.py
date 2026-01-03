@@ -296,11 +296,14 @@ def run_cmd(cmd, capture=True, ignore=False, timeout=None, logger=None):
     except subprocess.TimeoutExpired:
         msg = f"Command timed out after {timeout} seconds"
         if logger:
-            logger.error(msg)
+            if ignore:
+                logger.warn(msg)
+            else:
+                logger.error(msg)
         elif DEBUG_MODE == True:
-            log(msg, "ERROR")
+            log(msg, "WARN" if ignore else "ERROR")
         elif DEBUG_MODE == False and not logger:
-            print(f"[Error] {msg}")
+            print(f"[{'Warn' if ignore else 'Error'}] {msg}")
             
         if not ignore:
             raise
@@ -309,11 +312,14 @@ def run_cmd(cmd, capture=True, ignore=False, timeout=None, logger=None):
         err_msg = e.stderr if e.stderr else 'No error message'
         msg = f"Command failed: {err_msg}"
         if logger:
-            logger.error(msg)
+            if ignore:
+                logger.warn(msg)
+            else:
+                logger.error(msg)
         elif DEBUG_MODE == True:
-            log(msg, "ERROR")
+            log(msg, "WARN" if ignore else "ERROR")
         elif DEBUG_MODE == False and not logger:
-            print(f"[Error] {err_msg}")
+            print(f"[{'Warn' if ignore else 'Error'}] {err_msg}")
             
         if not ignore:
             raise
@@ -670,6 +676,36 @@ def launch_oci_instance(inst, config, compartment_id, region, logger=None):
     # return instance_id, ip
 
     return None, None
+
+
+def get_instance_status(cloud, instance_id, region=None, project=None, zone=None, logger=None):
+    """Check if instance is running, terminated, or missing."""
+    try:
+        if cloud == 'aws':
+            status = run_cmd(
+                f"aws ec2 describe-instances --region {region} --instance-ids {instance_id} "
+                f"--query 'Reservations[0].Instances[0].State.Name' --output text",
+                capture=True, ignore=True, logger=logger
+            )
+            return status.strip() if status else "unknown"
+
+        elif cloud == 'gcp':
+            # GCP status: PROVISIONING, STAGING, RUNNING, STOPPING, SUSPENDING, SUSPENDED, REPAIRING, and TERMINATED.
+            # If instance is deleted, this command usually fails.
+            status = run_cmd(
+                f"gcloud compute instances describe {instance_id} --project={project} --zone={zone} "
+                f"--format='get(status)'",
+                capture=True, ignore=True, logger=logger
+            )
+            return status.strip() if status else "TERMINATED" # Assume terminated if verify fails
+
+        elif cloud == 'oci':
+            return "unknown" 
+
+    except Exception:
+        return "unknown"
+    
+    return "unknown"
 
 
 def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True, logger=None):
@@ -1229,6 +1265,7 @@ def process_instance(cloud, inst, config, key_path, log_dir):
         if not ip or ip == "None":
             msg = f"Failed to get IP for {name}"
             logger.error(msg)
+            progress(instance_name, "Launch Failed", logger)
             return
 
         # Register instance for cleanup on signal/exception
@@ -1276,8 +1313,22 @@ def process_instance(cloud, inst, config, key_path, log_dir):
         # Run all commands sequentially
         commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name, logger=logger)
         if not commands_success:
-            msg = f"Command execution failed for {name}"
-            logger.error(msg)
+            # Check if instance was terminated externally
+            status = get_instance_status(cloud, instance_id, region, project, zone, logger)
+            
+            # AWS: terminated, shutting-down
+            # GCP: TERMINATED (or empty if deleted)
+            is_terminated = status in ['terminated', 'shutting-down', 'TERMINATED', 'STOPPING']
+            
+            if is_terminated:
+                msg = f"Instance {name} was terminated externally (Status: {status})"
+                logger.error(msg)
+                progress(instance_name, "Terminated Externally", logger)
+                DASHBOARD.update(instance_name, status="TERMINATED")
+            else:
+                msg = f"Command execution failed for {name}"
+                logger.error(msg)
+                progress(instance_name, "Workload Failed", logger)
             return
 
         # Collect results
