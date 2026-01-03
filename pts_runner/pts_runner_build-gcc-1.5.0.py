@@ -437,190 +437,6 @@ class BuildGccRunner:
 
         print(f"  [OK] Installation completed and verified")
 
-    def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
-        """
-        Parse perf stat output and CPU frequency files to generate performance summary.
-
-        Args:
-            perf_stats_file: Path to perf stat output file
-            freq_start_file: Path to start frequency file
-            freq_end_file: Path to end frequency file
-            cpu_list: String of CPU IDs used (e.g., "0,2,4")
-
-        Returns:
-            dict: Performance summary containing per-CPU metrics
-        """
-        print(f"\n>>> Parsing perf stats and frequency data")
-        print(f"  [INFO] perf stats file: {perf_stats_file}")
-        print(f"  [INFO] freq start file: {freq_start_file}")
-        print(f"  [INFO] freq end file: {freq_end_file}")
-        print(f"  [INFO] cpu list: {cpu_list}")
-
-        # Parse CPU list to get individual CPU IDs
-        cpu_ids = [int(c.strip()) for c in cpu_list.split(',')]
-        print(f"  [DEBUG] Parsed CPU IDs: {cpu_ids}")
-
-        # Initialize data structures for per-CPU metrics
-        per_cpu_metrics = {}
-        for cpu_id in cpu_ids:
-            per_cpu_metrics[cpu_id] = {
-                'cycles': 0,
-                'instructions': 0,
-                'cpu_clock': 0,
-                'task_clock': 0,
-                'context_switches': 0,
-                'cpu_migrations': 0
-            }
-
-        # Parse perf stat output file
-        print(f"  [INFO] Parsing perf stat output...")
-        try:
-            with open(perf_stats_file, 'r') as f:
-                perf_content = f.read()
-                print(f"  [DEBUG] perf stat file size: {len(perf_content)} bytes")
-
-                # Parse per-CPU metrics (format: "CPU<n>   <value>   <event>")
-                # Example: "CPU0                123456789      cycles"
-                for line in perf_content.split('\n'):
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-
-                    # Match CPU-specific lines
-                    # Format: "CPU<n>   <value>   <event>"
-                    match = re.match(r'CPU(\d+)\s+([0-9,]+)\s+(\S+)', line)
-                    if match:
-                        cpu_num = int(match.group(1))
-                        value_str = match.group(2).replace(',', '')
-                        event = match.group(3)
-
-                        # Only process CPUs in our cpu_list
-                        if cpu_num not in cpu_ids:
-                            continue
-
-                        try:
-                            value = float(value_str)
-                        except ValueError:
-                            print(f"  [WARN] Failed to parse value '{value_str}' for CPU{cpu_num} {event}")
-                            continue
-
-                        # Map event names to our data structure
-                        if event == 'cycles':
-                            per_cpu_metrics[cpu_num]['cycles'] = value
-                        elif event == 'instructions':
-                            per_cpu_metrics[cpu_num]['instructions'] = value
-                        elif event == 'cpu-clock':
-                            per_cpu_metrics[cpu_num]['cpu_clock'] = value
-                        elif event == 'task-clock':
-                            per_cpu_metrics[cpu_num]['task_clock'] = value
-                        elif event == 'context-switches':
-                            per_cpu_metrics[cpu_num]['context_switches'] = value
-                        elif event == 'cpu-migrations':
-                            per_cpu_metrics[cpu_num]['cpu_migrations'] = value
-
-            print(f"  [OK] Parsed perf stat data for {len(per_cpu_metrics)} CPUs")
-
-        except Exception as e:
-            print(f"  [ERROR] Failed to parse perf stat file: {e}")
-            raise
-
-        # Parse frequency files
-        print(f"  [INFO] Parsing frequency files...")
-        freq_start = {}
-        freq_end = {}
-
-        try:
-            # Read start frequencies (format: one frequency per line in kHz)
-            with open(freq_start_file, 'r') as f:
-                lines = f.read().strip().split('\n')
-                for i, line in enumerate(lines):
-                    if line.strip():
-                        freq_start[i] = float(line.strip())
-            print(f"  [DEBUG] Read {len(freq_start)} start frequencies")
-
-            # Read end frequencies
-            with open(freq_end_file, 'r') as f:
-                lines = f.read().strip().split('\n')
-                for i, line in enumerate(lines):
-                    if line.strip():
-                        freq_end[i] = float(line.strip())
-            print(f"  [DEBUG] Read {len(freq_end)} end frequencies")
-
-        except Exception as e:
-            print(f"  [ERROR] Failed to parse frequency files: {e}")
-            raise
-
-        # Calculate metrics
-        print(f"  [INFO] Calculating performance metrics...")
-        perf_summary = {
-            'avg_frequency_ghz': {},
-            'start_frequency_ghz': {},
-            'end_frequency_ghz': {},
-            'ipc': {},
-            'total_cycles': {},
-            'total_instructions': {},
-            'cpu_utilization_percent': 0.0,
-            'elapsed_time_sec': 0.0
-        }
-
-        total_task_clock = 0.0
-        max_task_clock = 0.0
-
-        for cpu_id in cpu_ids:
-            metrics = per_cpu_metrics[cpu_id]
-
-            # avg_frequency_ghz = cycles / (cpu-clock / 1000) / 1e9
-            if metrics['cpu_clock'] > 0:
-                avg_freq = metrics['cycles'] / (metrics['cpu_clock'] / 1000.0) / 1e9
-                perf_summary['avg_frequency_ghz'][str(cpu_id)] = round(avg_freq, 3)
-            else:
-                perf_summary['avg_frequency_ghz'][str(cpu_id)] = 0.0
-
-            # start_frequency_ghz = freq_start[cpu] / 1,000,000 (kHz to GHz)
-            if cpu_id in freq_start:
-                start_freq = freq_start[cpu_id] / 1_000_000.0
-                perf_summary['start_frequency_ghz'][str(cpu_id)] = round(start_freq, 3)
-            else:
-                perf_summary['start_frequency_ghz'][str(cpu_id)] = 0.0
-
-            # end_frequency_ghz = freq_end[cpu] / 1,000,000 (kHz to GHz)
-            if cpu_id in freq_end:
-                end_freq = freq_end[cpu_id] / 1_000_000.0
-                perf_summary['end_frequency_ghz'][str(cpu_id)] = round(end_freq, 3)
-            else:
-                perf_summary['end_frequency_ghz'][str(cpu_id)] = 0.0
-
-            # ipc = instructions / cycles
-            if metrics['cycles'] > 0:
-                ipc = metrics['instructions'] / metrics['cycles']
-                perf_summary['ipc'][str(cpu_id)] = round(ipc, 2)
-            else:
-                perf_summary['ipc'][str(cpu_id)] = 0.0
-
-            # Store raw values
-            perf_summary['total_cycles'][str(cpu_id)] = int(metrics['cycles'])
-            perf_summary['total_instructions'][str(cpu_id)] = int(metrics['instructions'])
-
-            # Track task-clock for utilization calculation
-            total_task_clock += metrics['task_clock']
-            max_task_clock = max(max_task_clock, metrics['task_clock'])
-
-        # Calculate elapsed time (use max task-clock as elapsed time in ms)
-        if max_task_clock > 0:
-            perf_summary['elapsed_time_sec'] = round(max_task_clock / 1000.0, 2)
-
-        # Calculate CPU utilization (total task-clock / elapsed_time / num_cpus * 100)
-        # This represents the average CPU utilization across all CPUs
-        if max_task_clock > 0:
-            utilization = (total_task_clock / max_task_clock / len(cpu_ids)) * 100.0
-            perf_summary['cpu_utilization_percent'] = round(utilization, 1)
-
-        print(f"  [OK] Performance metrics calculated")
-        print(f"  [DEBUG] Elapsed time: {perf_summary['elapsed_time_sec']} sec")
-        print(f"  [DEBUG] CPU utilization: {perf_summary['cpu_utilization_percent']}%")
-
-        return perf_summary
-
     def run_benchmark(self, num_threads):
         """
         Run benchmark with specified thread count.
@@ -637,11 +453,9 @@ class BuildGccRunner:
         log_file = self.results_dir / f"{num_threads}-thread.log"
         stdout_log = self.results_dir / "stdout.log"
 
-        # Define file paths for perf stats and frequency monitoring
-        perf_stats_file = self.results_dir / f"{num_threads}-thread_perf_stats.txt"
+        # Define file paths for frequency monitoring
         freq_start_file = self.results_dir / f"{num_threads}-thread_freq_start.txt"
         freq_end_file = self.results_dir / f"{num_threads}-thread_freq_end.txt"
-        perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
         # Build PTS command based on thread count
         # If N >= vCPU: don't use taskset (all vCPUs assigned)
@@ -651,9 +465,11 @@ class BuildGccRunner:
         # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
+        # LINUX_PERF=1: Enable PTS's built-in perf stat module (System Monitor)
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-gcc-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-gcc-{num_threads}threads'
+        perf_env = 'LINUX_PERF=1 '
+        batch_env = f'{quick_env}{perf_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-gcc-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-gcc-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
@@ -666,10 +482,9 @@ class BuildGccRunner:
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
-        # Wrap PTS command with perf stat
-        # CRITICAL: Environment variables MUST come BEFORE perf stat (README)
-        # Otherwise perf stat won't propagate them to the actual command
-        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        # Construct Final Command (Env Vars + PTS Command)
+        # Note: We rely on LINUX_PERF=1 instead of manual `perf stat` wrapping
+        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
 
         print(f"[INFO] {cpu_info}")
 
@@ -681,10 +496,8 @@ class BuildGccRunner:
         print(f"  Output:")
         print(f"    Thread log: {log_file}")
         print(f"    Stdout log: {stdout_log}")
-        print(f"    Perf stats: {perf_stats_file}")
         print(f"    Freq start: {freq_start_file}")
         print(f"    Freq end: {freq_end_file}")
-        print(f"    Perf summary: {perf_summary_file}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
@@ -751,24 +564,6 @@ class BuildGccRunner:
             print(f"\n[OK] Benchmark completed successfully")
             print(f"     Thread log: {log_file}")
             print(f"     Stdout log: {stdout_log}")
-
-            # Parse perf stats and save summary
-            try:
-                perf_summary = self.parse_perf_stats_and_freq(
-                    perf_stats_file,
-                    freq_start_file,
-                    freq_end_file,
-                    cpu_list
-                )
-
-                # Save perf summary to JSON
-                with open(perf_summary_file, 'w') as f:
-                    json.dump(perf_summary, f, indent=2)
-                print(f"     Perf summary: {perf_summary_file}")
-
-            except Exception as e:
-                print(f"  [ERROR] Failed to parse perf stats: {e}")
-                print(f"  [INFO] Benchmark results are still valid, continuing...")
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
