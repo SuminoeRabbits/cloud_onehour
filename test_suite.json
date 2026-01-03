@@ -181,7 +181,7 @@
                     "notes": "PostgreSQL pgbench uses -j $NUM_CPU_CORES for worker threads (already implemented in install.sh). Client count controlled via -c option in test settings"
                 },
                 "pts/redis-1.3.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "redis-benchmark:--threads",
@@ -191,10 +191,10 @@
             }
         },
         "Memory Access": {
-            "enabled": false,
+            "enabled": true,
             "items": {
                 "pts/stream-1.3.4": {
-                    "enabled": false,
+                    "enabled": true,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:OMP_NUM_THREADS",
@@ -202,8 +202,8 @@
                     "notes": "Uses OpenMP with OMP_NUM_THREADS=$NUM_CPU_CORES. Need to set -fopenmp at build, export OMP_NUM_THREADS=`nproc`"
                 },
                 "pts/tinymembench-1.0.2": {
-                    "enabled": false,
-                    "THFix_in_compile": true,
+                    "enabled": true,
+                    "THFix_in_compile": false,
                     "THChange_at_runtime": false,
                     "TH_scaling": "single-threaded",
                     "sve2_support": false,

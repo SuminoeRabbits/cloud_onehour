@@ -52,9 +52,10 @@
 #          それ以外の機能は持たせません。
 # --dry-run: 実行コマンドの生成のみを行い、実行しません。
 # --no-execute: 実行コマンドの生成のみを行い、実行しません。
-# --split-1st: 実行コマンドを総数の1/3に分割し、最初の1/3のみを生成・実行します。
-# --split-2nd: 実行コマンドを総数の1/3に分割し、中盤の1/3のみを生成・実行します。
-# --split-3rd: 実行コマンドを総数の1/3に分割し、最後の1/3のみを生成・実行します。
+# --split-1st: 実行コマンドを総数の1/4に分割し、最初の1/4のみを生成・実行します。
+# --split-2nd: 実行コマンドを総数の1/4に分割し、2番目の1/4のみを生成・実行します。
+# --split-3rd: 実行コマンドを総数の1/4に分割し、3番目の1/4のみを生成・実行します。
+# --split-4th: 実行コマンドを総数の1/4に分割し、最後の1/4のみを生成・実行します。
 # 
 # 例外処理：
 # - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
@@ -292,9 +293,10 @@ Examples:
   %(prog)s --max --all             # Override to 288 threads and execute
   %(prog)s --suite custom.json     # Use custom test suite file
   %(prog)s --dry-run               # Generate commands but don't execute (default)
-  %(prog)s --split-1st --all       # Execute first 1/3 of tests only
-  %(prog)s --split-2nd --all       # Execute middle 1/3 of tests only
-  %(prog)s --split-3rd --all       # Execute last 1/3 of tests only
+  %(prog)s --split-1st --all       # Execute first 1/4 of tests only
+  %(prog)s --split-2nd --all       # Execute 2nd 1/4 of tests only
+  %(prog)s --split-3rd --all       # Execute 3rd 1/4 of tests only
+  %(prog)s --split-4th --all       # Execute last 1/4 of tests only
         """
     )
 
@@ -337,19 +339,25 @@ Examples:
     parser.add_argument(
         '--split-1st',
         action='store_true',
-        help='Execute only the first 1/3 of tests (for splitting long runs)'
+        help='Execute only the first 1/4 of tests (for splitting long runs)'
     )
 
     parser.add_argument(
         '--split-2nd',
         action='store_true',
-        help='Execute only the middle 1/3 of tests (for splitting long runs)'
+        help='Execute only the 2nd 1/4 of tests (for splitting long runs)'
     )
 
     parser.add_argument(
         '--split-3rd',
         action='store_true',
-        help='Execute only the last 1/3 of tests (for splitting long runs)'
+        help='Execute only the 3rd 1/4 of tests (for splitting long runs)'
+    )
+
+    parser.add_argument(
+        '--split-4th',
+        action='store_true',
+        help='Execute only the last 1/4 of tests (for splitting long runs)'
     )
 
     # Exception handling: Ignore invalid options and continue execution
@@ -370,7 +378,8 @@ Examples:
                 no_execute=False,
                 split_1st=False,
                 split_2nd=False,
-                split_3rd=False
+                split_3rd=False,
+                split_4th=False
             )
         else:
             # Normal exit (--help was called)
@@ -400,28 +409,30 @@ Examples:
     commands = generate_test_commands(test_suite, max_threads=max_threads, quick_mode=args.quick)
 
     # Apply split filter if requested
-    # Apply split filter if requested
-    split_flags = [args.split_1st, args.split_2nd, args.split_3rd]
+    split_flags = [args.split_1st, args.split_2nd, args.split_3rd, args.split_4th]
     if sum(split_flags) > 1:
         print("[ERROR] Cannot use multiple split options at the same time")
         sys.exit(1)
 
     if any(split_flags):
         total_commands = len(commands)
-        
-        # Calculate split sizes for 3 chunks
-        base_size = total_commands // 3
-        remainder = total_commands % 3
-        
+
+        # Calculate split sizes for 4 chunks
+        base_size = total_commands // 4
+        remainder = total_commands % 4
+
         # Distribute remainder to first chunks
-        # If rem=1: size+1, size, size
-        # If rem=2: size+1, size+1, size
+        # If rem=1: size+1, size, size, size
+        # If rem=2: size+1, size+1, size, size
+        # If rem=3: size+1, size+1, size+1, size
         size1 = base_size + (1 if remainder > 0 else 0)
         size2 = base_size + (1 if remainder > 1 else 0)
-        # size3 = base_size
-        
+        size3 = base_size + (1 if remainder > 2 else 0)
+        # size4 = base_size
+
         p1 = size1
         p2 = size1 + size2
+        p3 = size1 + size2 + size3
 
         if args.split_1st:
             commands = commands[:p1]
@@ -430,8 +441,11 @@ Examples:
             commands = commands[p1:p2]
             print(f"[INFO] Split mode: Executing 2nd part ({p1+1}-{p2} of {total_commands})")
         elif args.split_3rd:
-            commands = commands[p2:]
-            print(f"[INFO] Split mode: Executing 3rd part ({p2+1}-{total_commands} of {total_commands})")
+            commands = commands[p2:p3]
+            print(f"[INFO] Split mode: Executing 3rd part ({p2+1}-{p3} of {total_commands})")
+        elif args.split_4th:
+            commands = commands[p3:]
+            print(f"[INFO] Split mode: Executing 4th part ({p3+1}-{total_commands} of {total_commands})")
         print()
 
     # Print commands
