@@ -42,7 +42,7 @@
         "vcpus": 8,
         "name": "aws-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.2967,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       },
       {
@@ -53,7 +53,7 @@
         "vcpus": 8,
         "name": "aws-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.2397,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       },
       {
@@ -64,7 +64,7 @@
         "vcpus": 8,
         "name": "aws-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.2077,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       }
     ]
@@ -93,7 +93,7 @@
         "vcpus": 8,
         "name": "gcp-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.3790,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       },
       {
@@ -104,7 +104,7 @@
         "vcpus": 8,
         "name": "gcp-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.3964,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       },
       {
@@ -115,7 +115,7 @@
         "vcpus": 8,
         "name": "gcp-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.3602,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       },
       {
@@ -126,7 +126,7 @@
         "vcpus": 8,
         "name": "gcp-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.3093,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       }
     ]
@@ -144,7 +144,7 @@
         "vcpus": 2,
         "name": "oci-benchmark-instance",
         "cpu_cost_hour[730h-mo]": 0.3093,
-        "extra_50g_storage": false,
+        "extra_50g_storage": true,
         "extra_50g_storage_cost_hour": 0.0055
       }
     ]
