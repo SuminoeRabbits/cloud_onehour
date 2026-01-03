@@ -563,6 +563,8 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
 
 def launch_gcp_instance(inst, config, project, zone, logger=None):
     """Launch GCP instance and return (instance_id, ip)."""
+    name = inst['name']
+
     if logger:
         logger.info(f"Launching GCP instance: {name} ({inst['type']})")
     elif DEBUG_MODE == True:
