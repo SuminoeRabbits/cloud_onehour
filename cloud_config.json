@@ -8,7 +8,6 @@
       "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
       "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
       "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
-      "cd ~/cloud_onehour/pts_runner && ./pts_runner_build-linux-kernel-1.17.1.py 288 --quick > /tmp/pts_runner_build-linux-kernel-1.17.1.log 2>&1",
       "cd ~/cloud_onehour/pts_runner && ./pts_runner_build-llvm-1.6.0.py 288 --quick > /tmp/pts_runner_build-llvm-1.6.0.log 2>&1"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
@@ -20,7 +19,7 @@
     "debug_stdout": true
   },
   "aws": {
-    "enable": false,
+    "enable": true,
     "region": "ap-northeast-1",
     "instances": [
       {
@@ -29,7 +28,7 @@
         "arch": "amd64",
         "hostname": "aws-t3-medium-amd64",
         "vcpus": 2,
-        "name": "aws-benchmark-instance",
+        "name": "aws-t3-medium-amd64_vcpu_2",
         "cpu_cost_hour[730h-mo]": 0.0183,
         "extra_150g_storage": false,
         "extra_150g_storage_cost_hour": 0.0197
@@ -40,7 +39,7 @@
         "arch": "amd64",
         "hostname": "aws-m8a-2xlarge-amd64",
         "vcpus": 8,
-        "name": "aws-benchmark-instance",
+        "name": "aws-m8a-2xlarge-amd64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.2967,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
@@ -51,7 +50,7 @@
         "arch": "amd64",
         "hostname": "aws-m8i-2xlarge-amd64",
         "vcpus": 8,
-        "name": "aws-benchmark-instance",
+        "name": "aws-m8i-2xlarge-amd64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.2397,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
@@ -62,7 +61,7 @@
         "arch": "arm64",
         "hostname": "aws-m8g-2xlarge-arm64",
         "vcpus": 8,
-        "name": "aws-benchmark-instance",
+        "name": "aws-m8g-2xlarge-arm64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.2077,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
@@ -80,7 +79,7 @@
         "arch": "amd64",
         "hostname": "gcp-e2-standard-2-amd64",
         "vcpus": 2,
-        "name": "gcp-benchmark-instance",
+        "name": "gcp-e2-standard-2-amd64_vcpu_2",
         "cpu_cost_hour[730h-mo]": 0.0683,
         "extra_150g_storage": false,
         "extra_150g_storage_cost_hour": 0.0267
@@ -91,7 +90,7 @@
         "arch": "amd64",
         "hostname": "gcp-c4d-standard-8-amd64",
         "vcpus": 8,
-        "name": "gcp-benchmark-instance",
+        "name": "gcp-c4d-standard-8-amd64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.3790,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -102,7 +101,7 @@
         "arch": "amd64",
         "hostname": "gcp-c4-standard-8-amd64",
         "vcpus": 8,
-        "name": "gcp-benchmark-instance",
+        "name": "gcp-c4-standard-8-amd64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.3964,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -113,7 +112,7 @@
         "arch": "arm64",
         "hostname": "gcp-c4a-standard-8-arm64",
         "vcpus": 8,
-        "name": "gcp-benchmark-instance",
+        "name": "gcp-c4a-standard-8-arm64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.3602,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -124,7 +123,7 @@
         "arch": "arm64",
         "hostname": "gcp-t2a-standard-8-arm64",
         "vcpus": 8,
-        "name": "gcp-benchmark-instance",
+        "name": "gcp-t2a-standard-8-arm64_vcpu_8",
         "cpu_cost_hour[730h-mo]": 0.3093,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
@@ -137,13 +136,54 @@
     "region": "ap-tokyo-1",
     "instances": [
       {
-        "enable": false,
+        "enable": true,
         "type": "VM.Standard.E4.Flex",
         "arch": "amd64",
         "hostname": "oci-vm-standard-e4-flex-amd64",
-        "vcpus": 2,
-        "name": "oci-benchmark-instance",
-        "cpu_cost_hour[730h-mo]": 0.3093,
+        "ocpus": 2,
+        "vcpus": 4,
+        "memory_gb": 16,
+        "name": "oci-vm-standard-e4-flex-amd64_vcpu_4",
+        "cpu_cost_hour[730h-mo]": 0.0740,
+        "extra_150g_storage": true,
+        "extra_150g_storage_cost_hour": 0.0087
+      },
+      {
+        "enable": false,
+        "type": "VM.Standard.E5.Flex",
+        "arch": "amd64",
+        "hostname": "oci-vm-standard-e5-flex-amd64",
+        "ocpus": 4,
+        "vcpus": 8,
+        "memory_gb": 32,
+        "name": "oci-vm-standard-e5-flex-amd64_vcpu_8",
+        "cpu_cost_hour[730h-mo]": 0.1640,
+        "extra_150g_storage": true,
+        "extra_150g_storage_cost_hour": 0.0087
+      },
+      {
+        "enable": false,
+        "type": "VM.Standard.X10.Flex",
+        "arch": "amd64",
+        "hostname": "oci-vm-standard-x10-flex-amd64",
+        "ocpus": 4,
+        "vcpus": 8,
+        "memory_gb": 32,
+        "name": "oci-vm-standard-x10-flex-amd64_vcpu_8",
+        "cpu_cost_hour[730h-mo]": 0.2184,
+        "extra_150g_storage": true,
+        "extra_150g_storage_cost_hour": 0.0087
+      },
+      {
+        "enable": false,
+        "type": "VM.Standard.A1.Flex",
+        "arch": "arm64",
+        "hostname": "oci-vm-standard-a1-flex-arm64",
+        "ocpus": 8,
+        "vcpus": 8,
+        "memory_gb": 32,
+        "name": "oci-vm-standard-a1-flex-arm64_vcpu_8",
+        "cpu_cost_hour[730h-mo]": 0.1280,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
       }

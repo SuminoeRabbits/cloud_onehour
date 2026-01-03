@@ -31,6 +31,12 @@ from abc import ABC, abstractmethod
 #    - Orchestrates the parallel execution using ThreadPoolExecutor.
 #    - Uses InstanceLogger to log operations and update the Dashboard.
 #
+# [Execution Model]
+# - Parallel: AWS execution flow and GCP execution flow run simultaneously.
+# - Sequential: Within an AWS (or GCP) thread, Instance A finishes before Instance B starts.
+#   (並列: AWSの処理フロー と GCPの処理フロー は同時に走ります。)
+#   (順次: AWSスレッドの中では、Instance A が終わってから Instance B が始まります。)
+#
 # =========================================================================================
 
 class Dashboard:
@@ -359,22 +365,32 @@ def build_storage_config(inst, cloud_type):
         return ""
 
 
-def get_gcp_project():
+def get_gcp_project(logger=None):
     """Detect GCP project ID from gcloud config."""
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info("Detecting GCP project ID...")
+    elif DEBUG_MODE == True:
         log("Detecting GCP project ID...")
-    project = run_cmd("gcloud config get-value project")
+
+    project = run_cmd("gcloud config get-value project", logger=logger)
     if project and "(unset)" not in project:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"GCP project: {project}")
+        elif DEBUG_MODE == True:
             log(f"GCP project: {project}")
         return project
-    if DEBUG_MODE == True:
+        
+    if logger:
+        logger.warn("GCP project not configured")
+    elif DEBUG_MODE == True:
         log("GCP project not configured", "WARN")
     return None
 
-def setup_aws_sg(region, sg_name):
+def setup_aws_sg(region, sg_name, logger=None):
     """Create/retrieve AWS security group and authorize SSH access from current IP."""
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Setting up AWS security group: {sg_name} in {region}")
+    elif DEBUG_MODE == True:
         log(f"Setting up AWS security group: {sg_name} in {region}")
         log("Checking for existing security group...")
 
@@ -382,32 +398,51 @@ def setup_aws_sg(region, sg_name):
         f"aws ec2 describe-security-groups --region {region} --group-names {sg_name} "
         f"--query 'SecurityGroups[0].GroupId' --output text",
         ignore=True,
+        logger=logger
     )
 
     if not sg_id or sg_id == "None":
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info("Security group not found, creating new one...")
+        elif DEBUG_MODE == True:
             log("Security group not found, creating new one...")
+            
         vpc_id = run_cmd(
-            f"aws ec2 describe-vpcs --region {region} --query 'Vpcs[0].VpcId' --output text"
+            f"aws ec2 describe-vpcs --region {region} --query 'Vpcs[0].VpcId' --output text",
+            logger=logger
         )
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Using VPC: {vpc_id}")
+        elif DEBUG_MODE == True:
             log(f"Using VPC: {vpc_id}")
 
         sg_id = run_cmd(
             f"aws ec2 create-security-group --group-name {sg_name} "
             f"--description 'SG for benchmarking' --vpc-id {vpc_id} --region {region} "
-            f"--query 'GroupId' --output text"
+            f"--query 'GroupId' --output text",
+            logger=logger
         )
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Created security group: {sg_id}")
+        elif DEBUG_MODE == True:
             log(f"Created security group: {sg_id}")
     else:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Using existing security group: {sg_id}")
+        elif DEBUG_MODE == True:
             log(f"Using existing security group: {sg_id}")
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info("Getting current public IP...")
+    elif DEBUG_MODE == True:
         log("Getting current public IP...")
-    my_ip = run_cmd("curl -s https://checkip.amazonaws.com")
-    if DEBUG_MODE == True:
+        
+    my_ip = run_cmd("curl -s https://checkip.amazonaws.com", logger=logger)
+    
+    if logger:
+        logger.info(f"Current IP: {my_ip}")
+        logger.info(f"Authorizing SSH access from {my_ip}/32...")
+    elif DEBUG_MODE == True:
         log(f"Current IP: {my_ip}")
         log(f"Authorizing SSH access from {my_ip}/32...")
 
@@ -415,15 +450,20 @@ def setup_aws_sg(region, sg_name):
         f"aws ec2 authorize-security-group-ingress --group-id {sg_id} "
         f"--protocol tcp --port 22 --cidr {my_ip}/32 --region {region}",
         ignore=True,
+        logger=logger
     )
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info("Security group configured")
+    elif DEBUG_MODE == True:
         log("Security group configured")
 
     return sg_id
 
-def launch_aws_instance(inst, config, region, key_name, sg_id):
+def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
     """Launch AWS instance and return (instance_id, ip)."""
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Launching AWS instance: {inst['name']} ({inst['type']})")
+    elif DEBUG_MODE == True:
         log(f"Launching AWS instance: {inst['name']} ({inst['type']})")
 
     os_version = config['common']['os_version']
@@ -435,7 +475,9 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
     }
     codename = version_to_codename.get(os_version, 'jammy')
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Finding AMI for Ubuntu {os_version} ({codename}) {inst['arch']}...")
+    elif DEBUG_MODE == True:
         log(f"Finding AMI for Ubuntu {os_version} ({codename}) {inst['arch']}...")
 
     # Try multiple AMI patterns (gp3, gp2, standard ssd) to find the latest image
@@ -448,30 +490,40 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
 
     ami = None
     for pattern in ami_patterns:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Trying AMI pattern: {pattern}")
+        elif DEBUG_MODE == True:
             log(f"Trying AMI pattern: {pattern}")
 
         ami = run_cmd(
             f"aws ec2 describe-images --region {region} --owners 099720109477 "
             f"--filters 'Name=name,Values={pattern}' "
-            f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text"
+            f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text",
+            logger=logger
         )
 
         if ami and ami != "None" and ami.strip():
-            if DEBUG_MODE == True:
+            if logger:
+                logger.info(f"Found AMI with pattern '{pattern}': {ami}")
+            elif DEBUG_MODE == True:
                 log(f"Found AMI with pattern '{pattern}': {ami}")
             break
 
 
     if not ami or ami == "None":
         msg = f"No AMI found for Ubuntu {os_version} ({codename}) {inst['arch']} in {region}"
-        if DEBUG_MODE == True:
+        if logger:
+            logger.error(msg)
+        elif DEBUG_MODE == True:
             log(msg, "ERROR")
         else:
             print(f"[Error] {msg}")
         return None, None
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Using AMI: {ami}")
+        logger.info("Starting instance...")
+    elif DEBUG_MODE == True:
         log(f"Using AMI: {ami}")
         log("Starting instance...")
 
@@ -482,31 +534,40 @@ def launch_aws_instance(inst, config, region, key_name, sg_id):
         f"aws ec2 run-instances --region {region} --image-id {ami} "
         f"--instance-type {inst['type']} --key-name {key_name} "
         f"--security-group-ids {sg_id} {storage_config}"
-        f"--query 'Instances[0].InstanceId' --output text"
+        f"--query 'Instances[0].InstanceId' --output text",
+        logger=logger
     )
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Instance ID: {instance_id}")
+        logger.info("Waiting for instance to be running...")
+    elif DEBUG_MODE == True:
         log(f"Instance ID: {instance_id}")
         log("Waiting for instance to be running...")
 
-    run_cmd(f"aws ec2 wait instance-running --region {region} --instance-ids {instance_id}")
+    run_cmd(f"aws ec2 wait instance-running --region {region} --instance-ids {instance_id}", logger=logger)
 
     ip = run_cmd(
         f"aws ec2 describe-instances --region {region} --instance-ids {instance_id} "
-        f"--query 'Reservations[0].Instances[0].PublicIpAddress' --output text"
+        f"--query 'Reservations[0].Instances[0].PublicIpAddress' --output text",
+        logger=logger
     )
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Instance running with IP: {ip}")
+    elif DEBUG_MODE == True:
         log(f"Instance running with IP: {ip}")
 
     return instance_id, ip
 
 
-def launch_gcp_instance(inst, config, project, zone):
+def launch_gcp_instance(inst, config, project, zone, logger=None):
     """Launch GCP instance and return (instance_id, ip)."""
     name = inst['name']
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Launching GCP instance: {name} ({inst['type']})")
+    elif DEBUG_MODE == True:
         log(f"Launching GCP instance: {name} ({inst['type']})")
 
     os_version = config['common']['os_version']
@@ -517,7 +578,10 @@ def launch_gcp_instance(inst, config, project, zone):
     lts_suffix = "-lts" if is_lts else ""
     image_family = f"ubuntu-{version_number}{lts_suffix}-{img_arch}"
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Using image family: {image_family}")
+        logger.info("Creating instance...")
+    elif DEBUG_MODE == True:
         log(f"Using image family: {image_family}")
         log("Creating instance...")
 
@@ -529,14 +593,19 @@ def launch_gcp_instance(inst, config, project, zone):
         f"--zone={zone} --machine-type={inst['type']} "
         f"{storage_config}"
         f"--image-family={image_family} --image-project=ubuntu-os-cloud "
-        f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'"
+        f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'",
+        logger=logger
     )
 
     if ip:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Instance created with IP: {ip}")
+        elif DEBUG_MODE == True:
             log(f"Instance created with IP: {ip}")
     else:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.error("Failed to create instance")
+        elif DEBUG_MODE == True:
             log("Failed to create instance", "ERROR")
         else:
             print("[Error] Failed to create GCP instance")
@@ -544,28 +613,25 @@ def launch_gcp_instance(inst, config, project, zone):
     return name if ip else None, ip
 
 
-def launch_oci_instance(inst, config, compartment_id, region):
+def launch_oci_instance(inst, config, compartment_id, region, logger=None):
     """Launch OCI instance and return (instance_id, ip).
-
+    
     Args:
         inst: Instance configuration dict
         config: Full configuration dict
         compartment_id: OCI compartment ID
         region: OCI region
+        logger: InstanceLogger object
 
     Returns:
         tuple: (instance_id, ip) or (None, None) if not implemented/failed
-
-    TODO: Implement OCI instance launch using OCI CLI
-    Reference commands:
-        - Launch: oci compute instance launch --compartment-id <id> --shape <type> ...
-        - Get IP: oci compute instance get --instance-id <id> --query 'data."primary-public-ip"'
-        - Storage: --boot-volume-size-in-gbs 150 (for extra_150g_storage)
-        - Delete: oci compute instance terminate --instance-id <id> --force
     """
     name = inst['name']
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Launching OCI instance: {name} ({inst['type']})")
+        logger.warn("OCI launch not yet implemented")
+    elif DEBUG_MODE == True:
         log(f"Launching OCI instance: {name} ({inst['type']})")
         log("OCI launch not yet implemented", "WARN")
     else:
@@ -606,7 +672,7 @@ def launch_oci_instance(inst, config, compartment_id, region):
     return None, None
 
 
-def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True):
+def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True, logger=None):
     """
     Verify SSH build status after build_openssh.sh execution.
 
@@ -616,40 +682,51 @@ def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True):
         ssh_user: SSH username
         instance_name: Instance name for logging
         auto_rollback: If True, automatically rollback on verification failure
+        logger: InstanceLogger object
 
     Returns:
         bool: True if build succeeded, False otherwise
     """
     try:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info("Verifying SSH build status...")
+        elif DEBUG_MODE == True:
             log("Verifying SSH build status...")
 
         # Wait for delayed SSH restart to complete
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info("Waiting 10 seconds for SSH service restart...")
+        elif DEBUG_MODE == True:
             log("Waiting 10 seconds for SSH service restart...")
         time.sleep(10)
 
         # Check build status file
         status_cmd = f"ssh {ssh_opt} {ssh_user}@{ip} 'cat /tmp/ssh_build_status.txt 2>/dev/null || echo UNKNOWN'"
-        status = run_cmd(status_cmd, capture=True, timeout=10)
+        status = run_cmd(status_cmd, capture=True, timeout=10, logger=logger)
 
         if status == "SUCCESS":
-            if DEBUG_MODE == True:
+            if logger:
+                logger.info("SSH build verified successfully")
+            elif DEBUG_MODE == True:
                 log("SSH build verified successfully", "INFO")
             elif DEBUG_MODE == False:
                 print("  [SSH Build] ✓ Verification successful")
-            progress(instance_name, "SSH build verified")
+            progress(instance_name, "SSH build verified", logger)
             return True
         else:
-            if DEBUG_MODE == True:
+            if logger:
+                logger.error(f"SSH build verification failed: {status}")
+            elif DEBUG_MODE == True:
                 log(f"SSH build verification failed: {status}", "ERROR")
             elif DEBUG_MODE == False:
                 print(f"  [SSH Build] ✗ Verification failed: {status}")
-            progress(instance_name, f"SSH build failed: {status}")
+            progress(instance_name, f"SSH build failed: {status}", logger)
 
             # Attempt automatic rollback
             if auto_rollback and status == "FAILED":
-                if DEBUG_MODE == True:
+                if logger:
+                    logger.info("Attempting automatic rollback to previous SSH version...")
+                elif DEBUG_MODE == True:
                     log("Attempting automatic rollback to previous SSH version...")
                 elif DEBUG_MODE == False:
                     print("  [SSH Build] Attempting rollback to previous version...")
@@ -663,15 +740,19 @@ def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True):
                     f"echo ROLLBACK_SUCCESS || echo ROLLBACK_FAILED'"
                 )
 
-                rollback_result = run_cmd(rollback_cmd, capture=True, timeout=30, ignore=True)
+                rollback_result = run_cmd(rollback_cmd, capture=True, timeout=30, ignore=True, logger=logger)
 
                 if rollback_result == "ROLLBACK_SUCCESS":
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.info("Rollback successful, SSH restored to previous version")
+                    elif DEBUG_MODE == True:
                         log("Rollback successful, SSH restored to previous version", "INFO")
                     elif DEBUG_MODE == False:
                         print("  [SSH Build] ✓ Rollback successful")
                 else:
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.error(f"Rollback failed: {rollback_result}")
+                    elif DEBUG_MODE == True:
                         log(f"Rollback failed: {rollback_result}", "ERROR")
                     elif DEBUG_MODE == False:
                         print(f"  [SSH Build] ✗ Rollback failed: {rollback_result}")
@@ -679,14 +760,16 @@ def verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, auto_rollback=True):
             return False
 
     except Exception as e:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.error(f"SSH build verification error: {e}")
+        elif DEBUG_MODE == True:
             log(f"SSH build verification error: {e}", "ERROR")
         elif DEBUG_MODE == False:
             print(f"  [SSH Build] ✗ Verification error: {e}")
         return False
 
 
-def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name):
+def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, instance_name, logger=None):
     """Execute all commands via SSH sequentially with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
@@ -719,14 +802,18 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     workloads.append(cmd)
 
     if not workloads:
-        if DEBUG_MODE == True:
+        if logger:
+            logger.warn("No workloads to execute")
+        elif DEBUG_MODE == True:
             log("No workloads to execute", "WARNING")
         return False
 
     total_workloads = len(workloads)
-    progress(instance_name, f"Workload execution started ({total_workloads} workloads)")
+    progress(instance_name, f"Workload execution started ({total_workloads} workloads)", logger)
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Starting workload execution for {ip} ({total_workloads} workloads)")
+    elif DEBUG_MODE == True:
         log(f"Starting workload execution for {ip} ({total_workloads} workloads)")
     elif DEBUG_MODE == False:
         print(f"  [Workloads] Starting execution of {total_workloads} workloads...")
@@ -738,9 +825,12 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
         if not cmd or cmd.strip() == "":
             continue
 
-        progress(instance_name, f"Workload {i}/{total_workloads}")
+        progress(instance_name, f"Workload {i}/{total_workloads}", logger)
 
-        if DEBUG_MODE == True:
+        if logger:
+            logger.info(f"Workload {i}/{total_workloads}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
+            logger.info(f"Timeout: {workload_timeout}s ({workload_timeout//60} minutes)")
+        elif DEBUG_MODE == True:
             log(f"Workload {i}/{total_workloads}: {cmd[:80]}{'...' if len(cmd) > 80 else ''}")
             log(f"Timeout: {workload_timeout}s ({workload_timeout//60} minutes)")
         elif DEBUG_MODE == False:
@@ -753,7 +843,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
         if is_long_running:
             # Run via nohup to survive SSH disconnections
-            if DEBUG_MODE == True:
+            if logger:
+                logger.info("Detected long-running command, using nohup for robustness")
+            elif DEBUG_MODE == True:
                 log("Detected long-running command, using nohup for robustness")
             elif DEBUG_MODE == False:
                 print(f"  [Workload {i}/{total_workloads}] Using nohup for long-running task")
@@ -769,9 +861,11 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             wrapped_cmd = f'nohup sh -c "{escaped_cmd} && echo SUCCESS > {marker_file} || echo FAILED > {marker_file}" > {log_file} 2>&1 &'
 
             # Start the command in background
-            run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=30)
+            run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=30, logger=logger)
 
-            if DEBUG_MODE == True:
+            if logger:
+                logger.info("Command started in background, waiting for completion...")
+            elif DEBUG_MODE == True:
                 log("Command started in background, waiting for completion...")
             elif DEBUG_MODE == False:
                 print(f"  [Workload {i}/{total_workloads}] Started in background, monitoring...")
@@ -790,73 +884,105 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                 # Check if marker file exists
                 marker_check = run_cmd(
                     f"ssh {ssh_opt} {ssh_user}@{ip} 'cat {marker_file} 2>/dev/null || echo RUNNING'",
-                    capture=True, timeout=10, ignore=True
+                    capture=True, timeout=10, ignore=True, logger=logger
                 )
 
                 # Show progress by checking log file size
                 log_size_check = run_cmd(
                     f"ssh {ssh_opt} {ssh_user}@{ip} 'wc -c < {log_file} 2>/dev/null || echo 0'",
-                    capture=True, timeout=10, ignore=True
+                    capture=True, timeout=10, ignore=True, logger=logger
                 )
 
                 try:
                     current_log_size = int(log_size_check or "0")
                     if current_log_size > last_log_size:
-                        if DEBUG_MODE == True:
+                        if logger:
+                            logger.info(f"Progress: Log file size {current_log_size} bytes (+{current_log_size - last_log_size})")
+                        elif DEBUG_MODE == True:
                             log(f"Progress: Log file size {current_log_size} bytes (+{current_log_size - last_log_size})")
                         last_log_size = current_log_size
                 except:
                     pass
 
                 if marker_check == "SUCCESS":
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.info(f"Workload {i}/{total_workloads} completed successfully")
+                    elif DEBUG_MODE == True:
                         log(f"Workload {i}/{total_workloads} completed successfully")
                     else:
-                        print(f"  [Workload {i}/{total_workloads}] ✓ Completed successfully (took {elapsed}s)")
+                        print(f"  [Workload {i}/{total_workloads}] ✓ Completed successfully")
                         if i < total_workloads:
                             print(f"  [Progress] {i}/{total_workloads} workloads completed, {total_workloads - i} remaining")
                     break
                 elif marker_check == "FAILED":
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.error(f"Workload {i}/{total_workloads} failed")
+                    elif DEBUG_MODE == True:
                         log(f"Workload {i}/{total_workloads} failed", "ERROR")
                     else:
                         print(f"  [Error] Workload {i}/{total_workloads} failed")
 
                     # Fetch log file for debugging
-                    print(f"  [Debug] Fetching error log from {log_file}...")
+                    if logger:
+                        logger.info(f"Fetching error log from {log_file}...")
+                    else:
+                        print(f"  [Debug] Fetching error log from {log_file}...")
+                    
                     log_output = run_cmd(
                         f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {log_file} 2>/dev/null || echo \"[Error] Could not read log file\"'",
-                        capture=True, timeout=30, ignore=True
+                        capture=True, timeout=30, ignore=True, logger=logger
                     )
-                    if log_output and log_output.strip():
-                        print(f"  [Error Log] Last 100 lines from {log_file}:")
-                        print("  " + "="*78)
-                        for line in log_output.strip().split('\n'):
-                            print(f"  {line}")
-                        print("  " + "="*78)
+                    
+                    if logger:
+                        if log_output and log_output.strip():
+                            logger.info(f"Last 100 lines from {log_file}:")
+                            for line in log_output.strip().split('\n'):
+                                logger.info(f"  {line}")
+                        else:
+                            logger.warn("Could not fetch error log")
                     else:
-                        print(f"  [Warning] Could not fetch error log")
+                        if log_output and log_output.strip():
+                            print(f"  [Error Log] Last 100 lines from {log_file}:")
+                            print("  " + "="*78)
+                            for line in log_output.strip().split('\n'):
+                                print(f"  {line}")
+                            print("  " + "="*78)
+                        else:
+                            print(f"  [Warning] Could not fetch error log")
 
                     # Also check if there's any useful info in the workload output log
                     # Extract log file path from the workload command (e.g., "> /tmp/xxx.log")
                     workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', cmd)
                     if workload_log_match:
                         workload_log_path = workload_log_match.group(1)
-                        print(f"  [Debug] Checking workload output log: {workload_log_path}...")
+                        if logger:
+                            logger.info(f"Checking workload output log: {workload_log_path}...")
+                        else:
+                            print(f"  [Debug] Checking workload output log: {workload_log_path}...")
+                            
                         workload_log = run_cmd(
                             f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {workload_log_path} 2>/dev/null || echo \"No workload log found\"'",
-                            capture=True, timeout=30, ignore=True
+                            capture=True, timeout=30, ignore=True, logger=logger
                         )
-                        if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
-                            print(f"  [Workload Log] Last 50 lines from {workload_log_path}:")
-                            print("  " + "="*78)
-                            for line in workload_log.strip().split('\n'):
-                                print(f"  {line}")
-                            print("  " + "="*78)
+                        
+                        if logger:
+                            if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
+                                logger.info(f"Last 50 lines from {workload_log_path}:")
+                                for line in workload_log.strip().split('\n'):
+                                    logger.info(f"  {line}")
+                        else:
+                            if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
+                                print(f"  [Workload Log] Last 50 lines from {workload_log_path}:")
+                                print("  " + "="*78)
+                                for line in workload_log.strip().split('\n'):
+                                    print(f"  {line}")
+                                print("  " + "="*78)
 
                     return False
                 elif marker_check and marker_check != "RUNNING":
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.warn(f"Unexpected marker status: {marker_check}")
+                    elif DEBUG_MODE == True:
                         log(f"Unexpected marker status: {marker_check}", "WARN")
 
                 # Still running, continue polling
@@ -867,7 +993,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     f"ssh {ssh_opt} {ssh_user}@{ip} "
                     f"'mpstat -P ALL 1 1 | awk \"/^[0-9]/ {{if (\\$2 ~ /^[0-9]+$/) print \\$2,100-\\$NF}}\" | sort -n'"
                 )
-                cpu_usage_output = run_cmd(cpu_usage_cmd, capture=True, timeout=10, ignore=True)
+                cpu_usage_output = run_cmd(cpu_usage_cmd, capture=True, timeout=10, ignore=True, logger=logger)
 
                 vcpu_ids = []
                 vcpu_usage = []
@@ -881,7 +1007,11 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             except:
                                 pass
 
-                if DEBUG_MODE == True:
+                if logger:
+                    logger.info(f"Still running... ({elapsed}s / {workload_timeout}s)")
+                    if vcpu_ids:
+                        logger.info(f"vCPU usage: {dict(zip(vcpu_ids, vcpu_usage))}")
+                elif DEBUG_MODE == True:
                     log(f"Still running... ({elapsed}s / {workload_timeout}s)")
                     if vcpu_ids:
                         log(f"vCPU usage: {dict(zip(vcpu_ids, vcpu_usage))}")
@@ -894,7 +1024,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
             else:
                 # Timeout reached
-                if DEBUG_MODE == True:
+                if logger:
+                    logger.error(f"Workload {i}/{total_workloads} timed out after {workload_timeout}s")
+                elif DEBUG_MODE == True:
                     log(f"Workload {i}/{total_workloads} timed out after {workload_timeout}s", "ERROR")
                 elif DEBUG_MODE == False:
                     print(f"  [Error] Workload {i}/{total_workloads} timed out")
@@ -902,16 +1034,20 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
         else:
             # Regular command execution (short-running)
-            result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=workload_timeout)
+            result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=workload_timeout, logger=logger)
 
             if result is None:
-                if DEBUG_MODE == True:
+                if logger:
+                    logger.error(f"Workload {i}/{total_workloads} failed or timed out")
+                elif DEBUG_MODE == True:
                     log(f"Workload {i}/{total_workloads} failed or timed out", "ERROR")
                 elif DEBUG_MODE == False:
                     print(f"  [Warning] Workload {i}/{total_workloads} failed or timed out")
                 return False
 
-            if DEBUG_MODE == True:
+            if logger:
+                logger.info(f"Workload {i}/{total_workloads} completed")
+            elif DEBUG_MODE == True:
                 log(f"Workload {i}/{total_workloads} completed")
             else:
                 print(f"  [Workload {i}/{total_workloads}] ✓ Completed")
@@ -926,44 +1062,56 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             try:
                 status_check = run_cmd(
                     f"ssh {ssh_opt} {ssh_user}@{ip} 'test -f /tmp/ssh_build_status.txt && echo EXISTS || echo NOTFOUND'",
-                    capture=True, timeout=5, ignore=True
+                    capture=True, timeout=5, ignore=True, logger=logger
                 )
 
                 if status_check == "EXISTS":
                     # SSH build was executed, verify it
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.info("Detected SSH build execution, verifying build status...")
+                    elif DEBUG_MODE == True:
                         log("Detected SSH build execution, verifying build status...")
                     elif DEBUG_MODE == False:
                         print("  [SSH Build] Verifying OpenSSH installation...")
 
-                    if not verify_ssh_build(ip, ssh_opt, ssh_user, instance_name):
-                        if DEBUG_MODE == True:
+                    if not verify_ssh_build(ip, ssh_opt, ssh_user, instance_name, logger=logger):
+                        if logger:
+                            logger.error("SSH build verification failed, aborting command execution")
+                        elif DEBUG_MODE == True:
                             log("SSH build verification failed, aborting command execution", "ERROR")
                         elif DEBUG_MODE == False:
                             print("  [Error] SSH build verification failed")
                         return False
                 else:
                     # Status file doesn't exist - SSH build was not executed (skip verification)
-                    if DEBUG_MODE == True:
+                    if logger:
+                        logger.info("SSH build script detected but no status file found (build may have been skipped)")
+                    elif DEBUG_MODE == True:
                         log("SSH build script detected but no status file found (build may have been skipped)")
             except Exception as e:
                 # Verification check failed, but continue (don't block on verification issues)
-                if DEBUG_MODE == True:
+                if logger:
+                    logger.warn(f"SSH build verification check failed: {e}, continuing...")
+                elif DEBUG_MODE == True:
                     log(f"SSH build verification check failed: {e}, continuing...", "WARNING")
 
-    progress(instance_name, "All workloads completed")
+    progress(instance_name, "All workloads completed", logger)
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info("All workloads completed successfully")
+    elif DEBUG_MODE == True:
         log("All workloads completed successfully")
 
     return True
 
 
-def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key_checking, instance_name):
+def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key_checking, instance_name, logger=None):
     """Collect benchmark results from remote instance."""
-    progress(instance_name, "Collecting results")
+    progress(instance_name, "Collecting results", logger)
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Collecting results from {ip}")
+    elif DEBUG_MODE == True:
         log(f"Collecting results from {ip}")
 
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
@@ -971,13 +1119,16 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     ssh_user = config['common']['ssh_user']
     cloud_rep_dir = config['common']['cloud_reports_dir']
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info("Creating tarball on remote instance...")
+    elif DEBUG_MODE == True:
         log("Creating tarball on remote instance...")
 
     run_cmd(
         f"ssh {ssh_opt} {ssh_user}@{ip} "
         f"'tar -czf /tmp/reports.tar.gz -C $(dirname {cloud_rep_dir}) $(basename {cloud_rep_dir})'",
         capture=False,
+        logger=logger
     )
 
     host_rep_dir = config['common']['host_reports_dir']
@@ -990,7 +1141,9 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
     local_f = f"{host_rep_dir}/{file_basename}_{os_label}_{timestamp}.tar.gz"
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Downloading to {local_f} via SSH (avoiding SCP OpenSSL mismatch)...")
+    elif DEBUG_MODE == True:
         log(f"Downloading to {local_f} via SSH (avoiding SCP OpenSSL mismatch)...")
 
     # Use SSH with stdout redirection instead of SCP to avoid OpenSSL version mismatch
@@ -998,11 +1151,14 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     run_cmd(
         f"ssh {ssh_opt} {ssh_user}@{ip} 'cat /tmp/reports.tar.gz' > {local_f}",
         capture=False,
+        logger=logger
     )
 
-    progress(instance_name, "Results collected")
+    progress(instance_name, "Results collected", logger)
 
-    if DEBUG_MODE == True:
+    if logger:
+        logger.info(f"Results collected: {local_f}")
+    elif DEBUG_MODE == True:
         log(f"Results collected: {local_f}")
     else:
         print(f"Collected: {local_f}")
@@ -1150,17 +1306,6 @@ def process_instance(cloud, inst, config, key_path, log_dir):
             # Unregister from active instances tracking
             unregister_instance(instance_id)
 
-def process_csp_instances(cloud, instances, config, key_path):
-    """Process all instances for a single CSP sequentially."""
-    csp_name = cloud.upper()
-    if DEBUG_MODE == True:
-        log(f"{csp_name} instances enabled")
-
-    enabled_count = 0
-    for inst in instances:
-        if inst.get('enable'):
-            process_instance(cloud, inst, config, key_path)
-            enabled_count += 1
 
 def process_csp_instances(cloud, instances, config, key_path, log_dir):
     """Process all instances for a single CSP sequentially."""
@@ -1239,10 +1384,6 @@ def main():
 
         if DEBUG_MODE == True:
             log(f"Results directory: {host_rep_dir}")
-
-        if DEBUG_MODE == True:
-            log(f"Results directory: {host_rep_dir}")
-
         # Validate SSH key
         key_path_template = config['common']['ssh_key_path']
         key_path = validate_key_path(key_path_template)

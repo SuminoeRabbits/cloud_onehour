@@ -311,6 +311,25 @@ class BuildLLVMRunner:
             print(f"         Running in LIMITED mode without per-CPU metrics")
             return 2
 
+    def get_builder_env(self):
+        """
+        Detect Ninja and return environment variables to enforce its usage.
+        Returns a dict of environment variables.
+        """
+        env = {}
+        ninja_path = shutil.which('ninja')
+        if ninja_path:
+            # Use absolute path to avoid PATH issues
+            env['MAKE'] = ninja_path
+            env['CMAKE_MAKE_PROGRAM'] = ninja_path
+            env['CMAKE_GENERATOR'] = 'Ninja'
+            return env
+        return {}
+
+    def _env_dict_to_str(self, env_dict):
+        """Convert env dict to space-separated string for shell command."""
+        return ' '.join([f'{k}={v}' for k, v in env_dict.items()]) + ' ' if env_dict else ''
+
     def clean_pts_cache(self):
         """Clean PTS installed tests for fresh installation."""
         print(">>> Cleaning PTS cache...")
@@ -388,7 +407,15 @@ class BuildLLVMRunner:
         # Use batch-install to suppress prompts
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        
+        # [Fix] Enforce Ninja usage if available
+        builder_env_dict = self.get_builder_env()
+        if builder_env_dict:
+            print(f"  [INFO] Enforcing builder environment: {builder_env_dict}")
+            
+        builder_env_str = self._env_dict_to_str(builder_env_dict)
+        
+        install_cmd = f'{builder_env_str}MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
@@ -472,11 +499,10 @@ class BuildLLVMRunner:
         
         # [Fix] Explicitly set builder environment variables to prevent CMake errors
         # Error observed: "Generator: execution of make failed. Make command was: -j 1"
-        builder_env = ''
-        if shutil.which('ninja'):
-            builder_env = 'MAKE=ninja CMAKE_GENERATOR=Ninja '
+        builder_env_dict = self.get_builder_env()
+        builder_env_str = self._env_dict_to_str(builder_env_dict)
             
-        batch_env = f'{quick_env}{perf_env}{builder_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-llvm-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-llvm-{num_threads}threads'
+        batch_env = f'{quick_env}{perf_env}{builder_env_str}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-llvm-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-llvm-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
