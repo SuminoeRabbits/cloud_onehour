@@ -2,12 +2,21 @@
 """
 PTS Runner for java-jmh-1.0.1
 
-Based on test_suite.json configuration:
-- test_category: "Java Applications"
-- THFix_in_compile: false - Thread count can be changed at runtime
-- THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
-- TH_scaling: jmh:-t max - JMH uses -t max to utilize all available threads
-- sve2_support: true - SVE2 is supported after OpenJDK9
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * Java
+  * Apache Maven
+- Estimated Install Time: 33 Seconds
+- Environment Size: 1.3 MB
+- Test Type: System
+- Supported Platforms: Linux, Solaris, BSD, MacOSX
+
+Test Characteristics:
+- Multi-threaded: Yes (JMH manages threading internally)
+- Honors CFLAGS/CXXFLAGS: N/A (Java-based)
+- Notable Instructions: SVE2 support via JVM (OpenJDK 9+)
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via JMH -t max option
 """
 
 import argparse

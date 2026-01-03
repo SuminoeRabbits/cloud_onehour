@@ -4,17 +4,19 @@ PTS Runner for pgbench-1.11.1
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-  * C/C++ Compiler Toolchain (gcc-14 recommended)
-  * BC (calculator utility)
-- Estimated Install Time: 38 Seconds
+  * C/C++ Compiler Toolchain
+  * BC
+- Estimated Install Time: 37 Seconds
 - Environment Size: 1500 MB
-- Test Type: System (Database benchmark)
+- Test Type: System
 - Supported Platforms: Linux, MacOSX, BSD, Solaris, Windows
 
 Test Characteristics:
-- Multi-threaded: Yes (CPU Core Scaling supported)
-- THFix_in_compile: false - Thread count adjustable at runtime
-- THChange_at_runtime: true - NUM_CPU_CORES changes thread count
+- Multi-threaded: Yes (pgbench worker threads scale with cores)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via -j $NUM_CPU_CORES option
 """
 
 import argparse

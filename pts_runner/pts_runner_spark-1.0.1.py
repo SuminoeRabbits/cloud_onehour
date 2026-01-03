@@ -2,13 +2,21 @@
 """
 PTS Runner for spark-1.0.1
 
-Based on test_suite.json configuration:
-- test_category: "Network"
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * Java
+  * Python
+- Estimated Install Time: 7 Seconds
+- Environment Size: 2100 MB
+- Test Type: System
+- Supported Platforms: Linux
+
+Test Characteristics:
+- Multi-threaded: Yes (Spark manages parallelism internally)
+- Honors CFLAGS/CXXFLAGS: N/A (Java/Python-based)
+- Notable Instructions: SVE2 support via JVM (OpenJDK 9+)
 - THFix_in_compile: false - Thread count NOT fixed at compile time
-- THChange_at_runtime: true - Can change threads at runtime
-- TH_scaling: spark-internal (auto-detect, configurable via spark-defaults.conf)
-- Notes: Spark auto-detects CPU cores. Thread control via spark.executor.cores,
-  spark.default.parallelism in spark-defaults.conf
+- THChange_at_runtime: true - Spark auto-detects cores, configurable via spark-defaults.conf
 """
 
 import argparse

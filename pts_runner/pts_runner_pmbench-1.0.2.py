@@ -4,19 +4,20 @@ PTS Runner for pmbench-1.0.2
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-  * C/C++ Compiler Toolchain (gcc-14 recommended)
-  * UUID (libuuid development libraries)
-  * Libxml2 (libxml2 development libraries)
+  * C/C++ Compiler Toolchain
+  * UUID
+  * Libxml2
 - Estimated Install Time: 2 Seconds
 - Environment Size: 3 MB
-- Test Type: Memory (Linux paging and virtual memory benchmark)
+- Test Type: Memory
 - Supported Platforms: Linux
 
 Test Characteristics:
 - Multi-threaded: Yes (supports concurrent worker threads)
-- Notable Instructions: MMX, SSE, SSE2
-- THFix_in_compile: false
-- THChange_at_runtime: true - Supports configurable worker thread count
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via -j option
 """
 
 import argparse

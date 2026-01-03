@@ -2,13 +2,24 @@
 """
 PTS Runner for ffmpeg-7.0.1
 
-Based on test_suite.json configuration:
-- test_category: "Multimedia"
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * C/C++ Compiler Toolchain
+  * Yasm Assembler
+  * Nasm Assembler
+  * Python
+  * CMake
+- Estimated Install Time: 453 Seconds
+- Environment Size: 1300 MB
+- Test Type: Processor
+- Supported Platforms: Linux
+
+Test Characteristics:
+- Multi-threaded: Yes (video encoding is highly parallel)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: SVE2 support for ARM architectures
 - THFix_in_compile: false - Thread count NOT fixed at compile time
-- THChange_at_runtime: true - Can change threads at runtime via -threads $NUM_CPU_CORES
-- TH_scaling: env:NUM_CPU_CORES
-- sve2_support: true
-- Notes: Uses -threads $NUM_CPU_CORES runtime option for video encoding
+- THChange_at_runtime: true - Runtime thread configuration via -threads $NUM_CPU_CORES option
 """
 
 import argparse
@@ -644,7 +655,13 @@ class FFmpegRunner:
             for result in all_results:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+
+                # Check for None to avoid f-string crash
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: None (Test Failed)\n")
+
                 f.write("\n")
 
         print(f"[OK] Summary log saved: {summary_log}")

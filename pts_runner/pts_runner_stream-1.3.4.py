@@ -4,18 +4,18 @@ PTS Runner for stream-1.3.4
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-  * C/C++ Compiler Toolchain (gcc-14 recommended)
+  * C/C++ Compiler Toolchain
 - Estimated Install Time: 2 Seconds
 - Environment Size: 0.1 MB
-- Test Type: Memory (RAM benchmark)
+- Test Type: Memory
 - Supported Platforms: Linux, Solaris, MacOSX, BSD
 
 Test Characteristics:
-- Multi-threaded: Yes (uses libgomp.so.1 for OpenMP parallelization)
+- Multi-threaded: Yes (OpenMP parallelization)
 - Honors CFLAGS/CXXFLAGS: Yes
-- Notable Instructions: AVX, AVX2, FMA (can be optimized further with AVX512)
-- THFix_in_compile: false
-- THChange_at_runtime: true - Thread count adjustable via OpenMP environment
+- Notable Instructions: N/A (memory bandwidth test)
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via OMP_NUM_THREADS=$NUM_CPU_CORES
 """
 
 import argparse

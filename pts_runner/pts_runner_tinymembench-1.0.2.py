@@ -4,18 +4,18 @@ PTS Runner for tinymembench-1.0.2
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-  * C/C++ Compiler Toolchain (gcc-14 recommended)
+  * C/C++ Compiler Toolchain
 - Estimated Install Time: 2 Seconds
 - Environment Size: 0.3 MB
-- Test Type: Memory (RAM performance benchmark)
+- Test Type: Memory
 - Supported Platforms: Linux
 
 Test Characteristics:
-- Multi-threaded: No (single-threaded benchmark)
+- Multi-threaded: No (single-threaded by design)
 - Honors CFLAGS/CXXFLAGS: Yes
-- Notable Instructions: MMX, SSE2 (can be optimized with FMA)
-- THFix_in_compile: false
-- THChange_at_runtime: false - Single-threaded benchmark
+- Notable Instructions: MMX, SSE2 (can use FMA with compiler flags)
+- THFix_in_compile: true - Single-threaded benchmark (fixed at 1 thread)
+- THChange_at_runtime: false - Single-threaded benchmark only
 """
 
 import argparse

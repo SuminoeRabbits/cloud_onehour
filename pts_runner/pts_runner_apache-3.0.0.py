@@ -2,16 +2,27 @@
 """
 PTS Runner for apache-3.0.0
 
-Based on test_suite.json configuration:
-- test_category: "Network"
-- THFix_in_compile: false - Thread count NOT set at compile time
-- THChange_at_runtime: false - **IMPORTANT: This is single-threaded**
-- TH_scaling: "single-threaded"
-- sve2_support: false
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * C/C++ Compiler Toolchain
+  * Zlib
+  * PERL
+  * Perl Compatible Regular Expressions
+  * Expat XML Parser Library
+- Estimated Install Time: 143 Seconds
+- Environment Size: 208 MB
+- Test Type: System
+- Supported Platforms: Linux, Solaris, BSD, MacOSX
 
-Apache is a single-threaded benchmark in this test configuration.
-Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test.
-Thread handling: Always runs with 1 thread regardless of system vCPU count.
+Test Characteristics:
+- Multi-threaded: No (single-threaded in this test configuration)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A
+- THFix_in_compile: false - Thread count NOT set at compile time
+- THChange_at_runtime: false - Single-threaded benchmark (wrk for load testing)
+
+Note: Apache HTTPD itself doesn't scale with vCPUs in this test configuration.
+Always runs with 1 thread regardless of system vCPU count.
 """
 
 import argparse
@@ -727,8 +738,21 @@ class ApacheRunner:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
                 f.write(f"  Description: {result['description']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
-                f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in result['raw_values']])}\n")
+
+                # Check for None to avoid f-string crash
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: None (Test Failed)\n")
+
+                # Handle raw values safely
+                raw_vals = result.get('raw_values')
+                if raw_vals:
+                    val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
+                    f.write(f"  Raw values: {val_str}\n")
+                else:
+                    f.write(f"  Raw values: N/A\n")
+
                 f.write("\n")
 
             f.write("="*80 + "\n")
@@ -737,7 +761,8 @@ class ApacheRunner:
             f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
             f.write("-"*80 + "\n")
             for result in all_results:
-                f.write(f"{result['threads']:<10} {result['value']:<15.2f} {result['unit']:<20}\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"
+                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 

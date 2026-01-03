@@ -2,11 +2,20 @@
 """
 PTS Runner for compress-xz-1.1.0
 
-Based on test_suite.json configuration:
-- test_category: "Compression"
-- THFix_in_compile: false - Thread count can be changed at runtime
-- THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
-- TH_scaling: env:NUM_CPU_CORES - Uses -T$NUM_CPU_CORES
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * C/C++ Compiler Toolchain
+- Estimated Install Time: 17 Seconds
+- Environment Size: 848 MB
+- Test Type: Processor
+- Supported Platforms: Linux, BSD, MacOSX, Solaris, Windows
+
+Test Characteristics:
+- Multi-threaded: Yes (XZ compression supports multi-threading)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via -T$NUM_CPU_CORES flag
 """
 
 import argparse
@@ -511,19 +520,12 @@ class CompressXzRunner:
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
-        # Wrap PTS command with perf stat (mode depends on perf_event_paranoid)
-        # Important: Environment variables must come BEFORE perf stat command
-        if self.perf_paranoid <= 0:
-            # Full monitoring mode: per-CPU stats + hardware counters
-            pts_cmd = f'{batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
-            perf_mode = "Full (per-CPU + HW counters)"
-        else:
-            # Limited mode: aggregated software events only (no -A -a, no hardware counters)
-            pts_cmd = f'{batch_env} perf stat -e cpu-clock,task-clock,context-switches,cpu-migrations -o {perf_stats_file} {pts_base_cmd}'
-            perf_mode = "Limited (aggregated SW events only)"
+        # Wrap PTS command with perf stat
+        # CRITICAL: Environment variables MUST come BEFORE perf stat
+        # Otherwise perf stat won't propagate them to the actual command
+        pts_cmd = f'{batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
 
         print(f"[INFO] {cpu_info}")
-        print(f"[INFO] Perf monitoring mode: {perf_mode}")
 
         # Print PTS command to stdout for debugging (as per README requirement)
         print(f"\n{'>'*80}")
@@ -727,8 +729,21 @@ class CompressXzRunner:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
                 f.write(f"  Description: {result['description']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
-                f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in result['raw_values']])}\n")
+
+                # Check for None to avoid f-string crash
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: None (Test Failed)\n")
+
+                # Handle raw values safely
+                raw_vals = result.get('raw_values')
+                if raw_vals:
+                    val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
+                    f.write(f"  Raw values: {val_str}\n")
+                else:
+                    f.write(f"  Raw values: N/A\n")
+
                 f.write("\n")
 
             f.write("="*80 + "\n")
@@ -737,7 +752,8 @@ class CompressXzRunner:
             f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
             f.write("-"*80 + "\n")
             for result in all_results:
-                f.write(f"{result['threads']:<10} {result['value']:<15.2f} {result['unit']:<20}\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"
+                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 

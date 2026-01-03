@@ -4,17 +4,18 @@ PTS Runner for redis-1.3.1
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-  * C/C++ Compiler Toolchain (gcc-14 recommended)
-- Estimated Install Time: 231 Seconds
+  * C/C++ Compiler Toolchain
+- Estimated Install Time: 229 Seconds
 - Environment Size: 52 MB
-- Test Type: System (In-memory data structure store benchmark)
+- Test Type: System
 - Supported Platforms: Linux
 
 Test Characteristics:
-- Multi-threaded: No (single-threaded benchmark)
-- THFix_in_compile: false
-- THChange_at_runtime: false - Redis is single-threaded
-- Note: This is a single-threaded benchmark, thread scaling not applicable
+- Multi-threaded: Yes (redis-benchmark client supports threading)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via redis-benchmark --threads option
 """
 
 import argparse

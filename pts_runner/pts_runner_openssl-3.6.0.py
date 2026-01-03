@@ -2,11 +2,20 @@
 """
 PTS Runner for openssl-3.6.0
 
-Based on test_suite.json configuration:
-- test_category: "Cryptography and TLS"
-- THFix_in_compile: false - Thread count can be changed at runtime
-- THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
-- TH_scaling: env:NUM_CPU_CORES - Uses -multi $NUM_CPU_CORES
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * C/C++ Compiler Toolchain
+- Estimated Install Time: 160 Seconds
+- Environment Size: 430 MB
+- Test Type: Processor
+- Supported Platforms: Linux, Solaris, BSD, MacOSX
+
+Test Characteristics:
+- Multi-threaded: Yes (openssl speed supports multi-threading)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: SVE2 support for ARM architectures
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via -multi $NUM_CPU_CORES option
 """
 
 import argparse
@@ -727,8 +736,21 @@ class OpensslRunner:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
                 f.write(f"  Description: {result['description']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
-                f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in result['raw_values']])}\n")
+
+                # Check for None to avoid f-string crash
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: None (Test Failed)\n")
+
+                # Handle raw values safely
+                raw_vals = result.get('raw_values')
+                if raw_vals:
+                    val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
+                    f.write(f"  Raw values: {val_str}\n")
+                else:
+                    f.write(f"  Raw values: N/A\n")
+
                 f.write("\n")
 
             f.write("="*80 + "\n")
@@ -737,7 +759,8 @@ class OpensslRunner:
             f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
             f.write("-"*80 + "\n")
             for result in all_results:
-                f.write(f"{result['threads']:<10} {result['value']:<15.2f} {result['unit']:<20}\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"
+                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 

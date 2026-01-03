@@ -2,18 +2,26 @@
 """
 PTS Runner for x265-1.5.0
 
-Based on test_suite.json configuration:
-- test_category: "Multimedia"
-- THFix_in_compile: false - Thread count NOT fixed at compile time
-- THChange_at_runtime: false - Does NOT change threads at runtime (auto-detects)
-- TH_scaling: auto-detect
-- sve2_support: true
-- Notes: x265 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * C/C++ Compiler Toolchain
+  * 7-Zip / p7zip
+  * CMake
+  * Yasm Assembler
+- Estimated Install Time: 238 Seconds
+- Environment Size: 3400 MB
+- Test Type: Processor
+- Supported Platforms: Linux, MacOSX, BSD
 
-IMPORTANT: Since x265 auto-detects CPU cores and THChange_at_runtime=false,
-this runner uses taskset to limit CPU availability for thread scaling tests.
-Unlike other benchmarks, we don't pass NUM_CPU_CORES to x265 - instead we use
-taskset to physically limit which CPUs x265 can detect and use.
+Test Characteristics:
+- Multi-threaded: Yes (video encoding is highly parallel)
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: MMX, SSE, SSE2, SVE2 support for ARM architectures
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: false - x265 auto-detects CPU cores (no explicit thread control in PTS)
+
+Note: x265 supports --pools and --threads options but PTS test doesn't use them.
+This runner uses taskset to limit CPU availability for thread scaling tests.
 """
 
 import argparse
@@ -750,7 +758,13 @@ class X265Runner:
             for result in all_results:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+
+                # Check for None to avoid f-string crash
+                if result['value'] is not None:
+                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                else:
+                    f.write(f"  Average: None (Test Failed)\n")
+
                 f.write("\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
