@@ -209,7 +209,14 @@ class BenchmarkRunner:
         # 1. Setup environment variables
         # Quick mode: FORCE_TIMES_TO_RUN=1 for development (60-70% time reduction)
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        
+        # LINUX_PERF=1: Enable PTS's built-in perf stat module (System Monitor)
+        # - Automatically wraps test binary execution with perf stat
+        # - Records cycles, instructions, IPC, cache-misses, etc.
+        # - Embeds results in benchmark XML/JSON output
+        perf_env = 'LINUX_PERF=1 '
+        
+        batch_env = f'{quick_env}{perf_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
         
         # 2. Build PTS command (NO environment variables in pts_base_cmd!)
         if num_threads >= self.vcpu_count:
@@ -219,15 +226,17 @@ class BenchmarkRunner:
             cpu_list = self.get_cpu_affinity_list(num_threads)
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
         
-        # 3. Wrap with perf stat (environment variables BEFORE perf stat!)
-        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        # 3. Construct Final Command (Env Vars + PTS Command)
+        # Note: We rely on LINUX_PERF=1 instead of manual `perf stat` wrapping
+        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
         
-        # 4. Record CPU frequency BEFORE benchmark
+        # 4. Record CPU frequency BEFORE benchmark (Optional but recommended for stability check)
         cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
         command = cmd_template.format(file=freq_start_file)
         subprocess.run(['bash', '-c', command], capture_output=True, text=True)
         
         # 5. Execute PTS command
+        print(f"  [EXEC] {pts_cmd}")
         subprocess.run(['bash', '-c', pts_cmd])
         
         # 6. Record CPU frequency AFTER benchmark
@@ -235,16 +244,10 @@ class BenchmarkRunner:
         command = cmd_template.format(file=freq_end_file)
         subprocess.run(['bash', '-c', command], capture_output=True, text=True)
         
-        # 7. Parse perf stats
-        perf_summary = self.parse_perf_stats_and_freq(
-            perf_stats_file, freq_start_file, freq_end_file, cpu_list
-        )
+        # 7. (Optional) Parse perf stats from PTS output if needed
+        # Since LINUX_PERF=1 is used, data is in the result file.
+        # self.parse_pts_results_for_perf(...)
     
-    def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
-        """Parse perf stat output and CPU frequency files."""
-        # 実装は既存のpts_runner_build-llvm-1.6.0.pyを参照
-        pass
-
     def clean_pts_cache(self):
         """
         Clean PTS installed tests for fresh installation.
@@ -278,22 +281,22 @@ class BenchmarkRunner:
 
         CRITICAL: PTS may return exit code 0 even when download fails.
         This method implements robust error detection.
+        
+        [Pattern 5] Large File Download Optimization (PreSeedDownloader)
+        - Problem: Large test files take too long to download via standard single-threaded wget.
+        - Fix: Use generic PreSeedDownloader class to pre-download files into PTS cache using aria2c (multiconnection).
+        - Example usage:
+            print(f"\\n>>> Checking for large files to pre-seed...")
+            downloader = PreSeedDownloader()
+            if downloader.is_aria2_available():
+                # List of large files (URL, filename)
+                files_to_download = [
+                    {"url": "http://example.com/bigfile1.7z", "name": "bigfile1.7z"},
+                    {"url": "http://example.com/bigfile2.7z", "name": "bigfile2.7z"}
+                ]
+                for f in files_to_download:
+                    downloader.ensure_file(f["url"], f["name"])
         """
-        # [Pattern 5] Pre-download large files if needed
-        # (Place this logic OUTSIDE the docstring to avoid SyntaxErrors)
-        # -----------------------------------------------------------------
-        # print(f"\\n>>> Checking for large files to pre-seed...")
-        # downloader = PreSeedDownloader()
-        # if downloader.is_aria2_available():
-        #     # List of large files (URL, filename)
-        #     files_to_download = [
-        #         {"url": "http://example.com/bigfile1.7z", "name": "bigfile1.7z"},
-        #         {"url": "http://example.com/bigfile2.7z", "name": "bigfile2.7z"}
-        #     ]
-        #     for f in files_to_download:
-        #         downloader.ensure_file(f["url"], f["name"])
-        # -----------------------------------------------------------------
-
         print(f"\n>>> Installing {self.benchmark_full}...")
 
 
