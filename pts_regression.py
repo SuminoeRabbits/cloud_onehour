@@ -52,8 +52,9 @@
 #          それ以外の機能は持たせません。
 # --dry-run: 実行コマンドの生成のみを行い、実行しません。
 # --no-execute: 実行コマンドの生成のみを行い、実行しません。
-# --split-1st: 実行コマンドを総数の半分に分割し、前半分のみを生成・実行します。
-# --split-2nd: 実行コマンドを総数の半分に分割し、後半分のみを生成・実行します。  
+# --split-1st: 実行コマンドを総数の1/3に分割し、最初の1/3のみを生成・実行します。
+# --split-2nd: 実行コマンドを総数の1/3に分割し、中盤の1/3のみを生成・実行します。
+# --split-3rd: 実行コマンドを総数の1/3に分割し、最後の1/3のみを生成・実行します。
 # 
 # 例外処理：
 # - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
@@ -291,8 +292,9 @@ Examples:
   %(prog)s --max --all             # Override to 288 threads and execute
   %(prog)s --suite custom.json     # Use custom test suite file
   %(prog)s --dry-run               # Generate commands but don't execute (default)
-  %(prog)s --split-1st --all       # Execute first half of tests only
-  %(prog)s --split-2nd --all       # Execute second half of tests only
+  %(prog)s --split-1st --all       # Execute first 1/3 of tests only
+  %(prog)s --split-2nd --all       # Execute middle 1/3 of tests only
+  %(prog)s --split-3rd --all       # Execute last 1/3 of tests only
         """
     )
 
@@ -335,13 +337,19 @@ Examples:
     parser.add_argument(
         '--split-1st',
         action='store_true',
-        help='Execute only the first half of tests (for splitting long runs)'
+        help='Execute only the first 1/3 of tests (for splitting long runs)'
     )
 
     parser.add_argument(
         '--split-2nd',
         action='store_true',
-        help='Execute only the second half of tests (for splitting long runs)'
+        help='Execute only the middle 1/3 of tests (for splitting long runs)'
+    )
+
+    parser.add_argument(
+        '--split-3rd',
+        action='store_true',
+        help='Execute only the last 1/3 of tests (for splitting long runs)'
     )
 
     # Exception handling: Ignore invalid options and continue execution
@@ -361,7 +369,8 @@ Examples:
                 dry_run=True,
                 no_execute=False,
                 split_1st=False,
-                split_2nd=False
+                split_2nd=False,
+                split_3rd=False
             )
         else:
             # Normal exit (--help was called)
@@ -391,20 +400,38 @@ Examples:
     commands = generate_test_commands(test_suite, max_threads=max_threads, quick_mode=args.quick)
 
     # Apply split filter if requested
-    if args.split_1st and args.split_2nd:
-        print("[ERROR] Cannot use both --split-1st and --split-2nd at the same time")
+    # Apply split filter if requested
+    split_flags = [args.split_1st, args.split_2nd, args.split_3rd]
+    if sum(split_flags) > 1:
+        print("[ERROR] Cannot use multiple split options at the same time")
         sys.exit(1)
 
-    if args.split_1st or args.split_2nd:
+    if any(split_flags):
         total_commands = len(commands)
-        split_point = (total_commands + 1) // 2  # Round up for first half
+        
+        # Calculate split sizes for 3 chunks
+        base_size = total_commands // 3
+        remainder = total_commands % 3
+        
+        # Distribute remainder to first chunks
+        # If rem=1: size+1, size, size
+        # If rem=2: size+1, size+1, size
+        size1 = base_size + (1 if remainder > 0 else 0)
+        size2 = base_size + (1 if remainder > 1 else 0)
+        # size3 = base_size
+        
+        p1 = size1
+        p2 = size1 + size2
 
         if args.split_1st:
-            commands = commands[:split_point]
-            print(f"[INFO] Split mode: Executing first half (1-{split_point} of {total_commands})")
-        else:  # args.split_2nd
-            commands = commands[split_point:]
-            print(f"[INFO] Split mode: Executing second half ({split_point+1}-{total_commands} of {total_commands})")
+            commands = commands[:p1]
+            print(f"[INFO] Split mode: Executing 1st part (1-{p1} of {total_commands})")
+        elif args.split_2nd:
+            commands = commands[p1:p2]
+            print(f"[INFO] Split mode: Executing 2nd part ({p1+1}-{p2} of {total_commands})")
+        elif args.split_3rd:
+            commands = commands[p2:]
+            print(f"[INFO] Split mode: Executing 3rd part ({p2+1}-{total_commands} of {total_commands})")
         print()
 
     # Print commands
