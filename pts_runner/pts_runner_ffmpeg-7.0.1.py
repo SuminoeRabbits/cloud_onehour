@@ -179,11 +179,9 @@ class FFmpegRunner:
             print(f"  [CLEAN] Removing installed test: {installed_dir}")
             shutil.rmtree(installed_dir)
 
-        # Force remove test profile to ensure fresh downloads.xml (avoids corruption from previous runs)
-        profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
-        if profile_dir.exists():
-            print(f"  [CLEAN] Removing test profile: {profile_dir}")
-            shutil.rmtree(profile_dir)
+        # NOTE: We do NOT remove the test profile here.
+        # We want to keep it (or download it) so we can patch downloads.xml.
+        # Removing it forces a re-download which might just act weirdly or fail.
 
         print("  [OK] PTS cache cleaned")
 
@@ -275,6 +273,17 @@ class FFmpegRunner:
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
+        # Ensure test profile exists (download if needed) so we can patch it
+        print(f"  [INFO] Ensuring test profile exists...")
+        subprocess.run(
+            ['phoronix-test-suite', 'info', self.benchmark_full],
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL
+        )
+
+        # Pre-apply x264 checksum fix to avoid double installation time
+        self.fix_x264_checksum()
+
         # Remove existing installation first
         print(f"  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
@@ -294,10 +303,6 @@ class FFmpegRunner:
         print(f"[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
-
-        # Pre-apply x264 checksum fix to avoid double installation time
-        # The profile should be present from the 'info' call in run()
-        self.fix_x264_checksum()
 
         # Execute install command (attempt 1)
         result = subprocess.run(
