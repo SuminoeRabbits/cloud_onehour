@@ -52,10 +52,11 @@
 #          それ以外の機能は持たせません。
 # --dry-run: 実行コマンドの生成のみを行い、実行しません。
 # --no-execute: 実行コマンドの生成のみを行い、実行しません。
-# --split-1st: 実行コマンドを総数の1/4に分割し、最初の1/4のみを生成・実行します。
-# --split-2nd: 実行コマンドを総数の1/4に分割し、2番目の1/4のみを生成・実行します。
-# --split-3rd: 実行コマンドを総数の1/4に分割し、3番目の1/4のみを生成・実行します。
-# --split-4th: 実行コマンドを総数の1/4に分割し、最後の1/4のみを生成・実行します。
+# --split-1st: 実行コマンドを総数の1/5に分割し、1番目の1/5のみを生成・実行します。
+# --split-2nd: 実行コマンドを総数の1/5に分割し、2番目の1/5のみを生成・実行します。
+# --split-3rd: 実行コマンドを総数の1/5に分割し、3番目の1/5のみを生成・実行します。
+# --split-4th: 実行コマンドを総数の1/5に分割し、4番目の1/5のみを生成・実行します。
+# --split-5th: 実行コマンドを総数の1/5に分割し、5番目の1/5のみを生成・実行します。
 # 
 # 例外処理：
 # - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
@@ -351,13 +352,19 @@ Examples:
     parser.add_argument(
         '--split-3rd',
         action='store_true',
-        help='Execute only the 3rd 1/4 of tests (for splitting long runs)'
+        help='Execute only the 3rd 1/5 of tests (for splitting long runs)'
     )
 
     parser.add_argument(
         '--split-4th',
         action='store_true',
-        help='Execute only the last 1/4 of tests (for splitting long runs)'
+        help='Execute only the 4th 1/5 of tests (for splitting long runs)'
+    )
+
+    parser.add_argument(
+        '--split-5th',
+        action='store_true',
+        help='Execute only the last 1/5 of tests (for splitting long runs)'
     )
 
     # Exception handling: Ignore invalid options and continue execution
@@ -379,7 +386,8 @@ Examples:
                 split_1st=False,
                 split_2nd=False,
                 split_3rd=False,
-                split_4th=False
+                split_4th=False,
+                split_5th=False
             )
         else:
             # Normal exit (--help was called)
@@ -409,7 +417,7 @@ Examples:
     commands = generate_test_commands(test_suite, max_threads=max_threads, quick_mode=args.quick)
 
     # Apply split filter if requested
-    split_flags = [args.split_1st, args.split_2nd, args.split_3rd, args.split_4th]
+    split_flags = [args.split_1st, args.split_2nd, args.split_3rd, args.split_4th, args.split_5th]
     if sum(split_flags) > 1:
         print("[ERROR] Cannot use multiple split options at the same time")
         sys.exit(1)
@@ -417,22 +425,24 @@ Examples:
     if any(split_flags):
         total_commands = len(commands)
 
-        # Calculate split sizes for 4 chunks
-        base_size = total_commands // 4
-        remainder = total_commands % 4
+        # Calculate split sizes for 5 chunks
+        base_size = total_commands // 5
+        remainder = total_commands % 5
 
         # Distribute remainder to first chunks
-        # If rem=1: size+1, size, size, size
-        # If rem=2: size+1, size+1, size, size
-        # If rem=3: size+1, size+1, size+1, size
+        # If rem=1: size+1, size, size, size, size
+        # If rem=2: size+1, size+1, size, size, size
+        # ...
         size1 = base_size + (1 if remainder > 0 else 0)
         size2 = base_size + (1 if remainder > 1 else 0)
         size3 = base_size + (1 if remainder > 2 else 0)
-        # size4 = base_size
+        size4 = base_size + (1 if remainder > 3 else 0)
+        # size5 = base_size
 
         p1 = size1
         p2 = size1 + size2
         p3 = size1 + size2 + size3
+        p4 = size1 + size2 + size3 + size4
 
         if args.split_1st:
             commands = commands[:p1]
@@ -444,8 +454,11 @@ Examples:
             commands = commands[p2:p3]
             print(f"[INFO] Split mode: Executing 3rd part ({p2+1}-{p3} of {total_commands})")
         elif args.split_4th:
-            commands = commands[p3:]
-            print(f"[INFO] Split mode: Executing 4th part ({p3+1}-{total_commands} of {total_commands})")
+            commands = commands[p3:p4]
+            print(f"[INFO] Split mode: Executing 4th part ({p3+1}-{p4} of {total_commands})")
+        elif args.split_5th:
+            commands = commands[p4:]
+            print(f"[INFO] Split mode: Executing 5th part ({p4+1}-{total_commands} of {total_commands})")
         print()
 
     # Print commands
