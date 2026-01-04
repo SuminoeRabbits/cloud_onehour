@@ -668,6 +668,11 @@ class X265Runner:
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+            err_file = self.results_dir / f"{num_threads}-thread.err"
+            with open(err_file, 'w') as f:
+                f.write(f"Benchmark failed with return code {returncode}\n")
+                f.write(f"See {log_file} for details.\n")
+            print(f"     Error log: {err_file}")
             return False
 
         return True
@@ -760,10 +765,8 @@ class X265Runner:
                 f.write(f"  Test: {result['test_name']}\n")
 
                 # Check for None to avoid f-string crash
-                if result['value'] is not None:
-                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
-                else:
-                    f.write(f"  Average: None (Test Failed)\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
+                f.write(f"  Average: {val_str} {result['unit']}\n")
 
                 f.write("\n")
 

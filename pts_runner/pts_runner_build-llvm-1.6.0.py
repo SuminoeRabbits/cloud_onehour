@@ -512,6 +512,9 @@ class BuildLLVMRunner:
         else:
             # Partial vCPU mode - use taskset with affinity
             cpu_list = self.get_cpu_affinity_list(num_threads)
+            # Force Ninja using PTS environment variables
+            # PTS_TEST_ARGUMENTS often works for single-option tests
+            batch_env += 'PTS_TEST_ARGUMENTS=Ninja '
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
@@ -600,6 +603,11 @@ class BuildLLVMRunner:
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+            err_file = self.results_dir / f"{num_threads}-thread.err"
+            with open(err_file, 'w') as f:
+                f.write(f"Benchmark failed with return code {returncode}\n")
+                f.write(f"See {log_file} for details.\n")
+            print(f"     Error log: {err_file}")
             return False
 
         return True
@@ -703,7 +711,8 @@ class BuildLLVMRunner:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
                 f.write(f"  Description: {result['description']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
+                f.write(f"  Average: {val_str} {result['unit']}\n")
                 f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in result['raw_values']])}\n")
                 f.write("\n")
 
@@ -713,7 +722,8 @@ class BuildLLVMRunner:
             f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
             f.write("-"*80 + "\n")
             for result in all_results:
-                f.write(f"{result['threads']:<10} {result['value']:<15.2f} {result['unit']:<20}\n")
+                val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
+                f.write(f"{result['threads']:<10} {val_str} {result['unit']:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 

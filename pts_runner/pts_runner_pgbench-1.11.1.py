@@ -456,6 +456,9 @@ class PgbenchRunner:
         thread_dir = self.results_dir / f"{num_threads}-thread"
         thread_dir.mkdir(parents=True, exist_ok=True)
 
+        log_file = self.results_dir / f"{num_threads}-thread.log"
+        stdout_log = self.results_dir / "stdout.log"
+
         perf_stats_file = thread_dir / f"{num_threads}-thread_perf_stats.txt"
         freq_start_file = thread_dir / f"{num_threads}-thread_freq_start.txt"
         freq_end_file = thread_dir / f"{num_threads}-thread_freq_end.txt"
@@ -495,7 +498,30 @@ class PgbenchRunner:
             print(f"  [OK] Start frequency recorded")
 
         # Execute PTS command
-        subprocess.run(['bash', '-c', pts_cmd])
+        with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
+            stdout_f.write(f"\n{'='*80}\n")
+            stdout_f.write(f"[PTS BENCHMARK COMMAND - {num_threads} thread(s)]\n")
+            stdout_f.write(f"{pts_cmd}\n")
+            stdout_f.write(f"{'='*80}\n\n")
+            stdout_f.flush()
+
+            process = subprocess.Popen(
+                ['bash', '-c', pts_cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+            for line in process.stdout:
+                print(line, end='')
+                log_f.write(line)
+                stdout_f.write(line)
+                log_f.flush()
+                stdout_f.flush()
+
+            process.wait()
+            returncode = process.returncode
 
         # Record CPU frequency AFTER benchmark
         print(f"\n[INFO] Recording CPU frequency after benchmark...")
@@ -507,15 +533,32 @@ class PgbenchRunner:
         else:
             print(f"  [OK] End frequency recorded")
 
-        # Parse perf stats
-        perf_summary = self.parse_perf_stats_and_freq(
-            perf_stats_file, freq_start_file, freq_end_file, cpu_list
-        )
+        if returncode == 0:
+            print(f"\n[OK] Benchmark completed successfully")
 
-        # Save perf summary
-        with open(perf_summary_file, 'w') as f:
-            json.dump(perf_summary, f, indent=2)
-        print(f"  [OK] Perf summary saved to {perf_summary_file}")
+            # Parse perf stats
+            try:
+                perf_summary = self.parse_perf_stats_and_freq(
+                    perf_stats_file, freq_start_file, freq_end_file, cpu_list
+                )
+
+                # Save perf summary
+                with open(perf_summary_file, 'w') as f:
+                    json.dump(perf_summary, f, indent=2)
+                print(f"  [OK] Perf summary saved to {perf_summary_file}")
+            except Exception as e:
+                print(f"  [ERROR] Failed to parse perf stats: {e}")
+
+        else:
+            print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+            err_file = self.results_dir / f"{num_threads}-thread.err"
+            with open(err_file, 'w') as f:
+                f.write(f"Benchmark failed with return code {returncode}\n")
+                f.write(f"See {log_file} for details.\n")
+            print(f"     Error log: {err_file}")
+            return False
+
+        return True
 
     def run(self):
         """Main execution flow."""
@@ -541,8 +584,10 @@ class PgbenchRunner:
         self.install_benchmark()
 
         # Run for each thread count
+        failed = []
         for num_threads in self.thread_list:
-            self.run_benchmark(num_threads)
+            if not self.run_benchmark(num_threads):
+                failed.append(num_threads)
 
         # Export results to CSV and JSON
         self.export_results()
@@ -551,11 +596,14 @@ class PgbenchRunner:
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f">>> All benchmarks completed successfully")
-        print(f">>> Results directory: {self.results_dir}")
+        print(f"Benchmark Summary")
+        print(f"{'='*80}")
+        print(f"Total tests: {len(self.thread_list)}")
+        print(f"Successful: {len(self.thread_list) - len(failed)}")
+        print(f"Failed: {len(failed)}")
         print(f"{'='*80}")
 
-        return True
+        return len(failed) == 0
 
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
@@ -658,10 +706,8 @@ class PgbenchRunner:
                 f.write(f"  Description: {result['description']}\\n")
                 
                 # Check for None to avoid f-string crash
-                if result['value'] is not None:
-                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\\n")
-                else:
-                    f.write(f"  Average: None (Test Failed)\\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
+                f.write(f"  Average: {val_str} {result['unit']}\\n")
                     
                 # Handle raw values safely
                 raw_vals = result.get('raw_values')

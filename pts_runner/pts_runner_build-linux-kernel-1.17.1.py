@@ -569,6 +569,11 @@ class BuildLinuxKernelRunner:
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+            err_file = self.results_dir / f"{num_threads}-thread.err"
+            with open(err_file, 'w') as f:
+                f.write(f"Benchmark failed with return code {returncode}\n")
+                f.write(f"See {log_file} for details.\n")
+            print(f"     Error log: {err_file}")
             return False
 
         return True
@@ -672,7 +677,8 @@ class BuildLinuxKernelRunner:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
                 f.write(f"  Description: {result['description']}\n")
-                f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
+                val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
+                f.write(f"  Average: {val_str} {result['unit']}\n")
                 f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in result['raw_values']])}\n")
                 f.write("\n")
 
