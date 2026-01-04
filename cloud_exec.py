@@ -61,7 +61,7 @@ class Dashboard:
         self.ENDC = '\033[0m'
         self.BOLD = '\033[1m'
 
-    def register(self, instance_name, cloud_type, machine_type):
+    def register(self, instance_name, cloud_type, machine_type, cpu_cost=0.0, storage_cost=0.0):
         with self.lock:
             self.instances[instance_name] = {
                 'cloud': cloud_type,
@@ -69,6 +69,10 @@ class Dashboard:
                 'status': 'PENDING',
                 'step': 'Initializing...',
                 'last_update': datetime.now(),
+                'start_time': datetime.now(),
+                'end_time': None,
+                'cpu_cost': cpu_cost,
+                'storage_cost': storage_cost,
                 'color': self.BLUE
             }
 
@@ -76,10 +80,14 @@ class Dashboard:
         if not self.enabled: return
         with self.lock:
             if instance_name in self.instances:
-                if status: self.instances[instance_name]['status'] = status
-                if step: self.instances[instance_name]['step'] = step
-                if color: self.instances[instance_name]['color'] = color
-                self.instances[instance_name]['last_update'] = datetime.now()
+                data = self.instances[instance_name]
+                if status: 
+                    data['status'] = status
+                    if status in ['COMPLETED', 'TERMINATED'] and data['end_time'] is None:
+                        data['end_time'] = datetime.now()
+                if step: data['step'] = step
+                if color: data['color'] = color
+                data['last_update'] = datetime.now()
 
     def set_log_dir(self, log_dir):
         self.log_dir = log_dir
@@ -116,9 +124,9 @@ class Dashboard:
         print(f"Run Duration: {str(run_duration).split('.')[0]}")
         if self.log_dir:
             print(f"Detailed Logs: {self.log_dir}")
-        print("=" * 100)
-        print(f"{'INSTANCE':<30} | {'STATUS':<15} | {'CURRENT STEP':<50}")
-        print("-" * 100)
+        print("=" * 130)
+        print(f"{'INSTANCE':<30} | {'STATUS':<15} | {'DURATION':<12} | {'COST':<12} | {'CURRENT STEP':<50}")
+        print("-" * 130)
 
         with self.lock:
             # Sort by cloud provider for grouping
@@ -126,8 +134,27 @@ class Dashboard:
             
             for name, data in sorted_insts:
                 status_str = f"{data['color']}{data['status']}{self.ENDC}"
+                
+                # Calculate Duration
+                end = data['end_time'] if data['end_time'] else datetime.now()
+                duration = end - data['start_time']
+                duration_str = str(duration).split('.')[0] # Remove microseconds
+                if duration_str.startswith('0:'):
+                    duration_str = duration_str[2:] # Trim 0: if < 1 hour (optional, but requested format roughly)
+                # Actually str(duration) is like H:MM:SS.mmmm or D days, ...
+                # Let's keep full H:MM:SS
+                duration_str = str(duration).split('.')[0]
+                
+                # Calculate Cost
+                hours = duration.total_seconds() / 3600.0
+                total_rate = data['cpu_cost'] + data['storage_cost']
+                cost = hours * total_rate
+                cost_str = f"${cost:.4f}"
+
                 step_str = data['step'][:48] + ".." if len(data['step']) > 48 else data['step']
-                print(f"{name:<30} | {status_str:<24} | {step_str:<50}")
+                print(f"{name:<30} | {status_str:<24} | {duration_str:<12} | {cost_str:<12} | {step_str:<50}")
+        
+        print("=" * 130)
         
         print("=" * 100)
         sys.stdout.flush()
@@ -815,28 +842,39 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     # Each workload timeout (backward compatible with command_timeout)
     workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
 
-    # Support both new format (workloads array), old format (commands array), and legacy format
+    # -----------------------------------------------------------
+    # Determine Command List (Testloads vs Workloads)
+    # -----------------------------------------------------------
+    # If 'testloads' is True for this instance, run ONLY testloads commands.
+    # Otherwise, run the standard workloads.
     workloads = []
-    if 'workloads' in config['common']:
-        # New format: array of workloads
-        workloads = config['common']['workloads']
-    elif 'commands' in config['common']:
-        # Old format: array of commands (backward compatibility)
-        workloads = config['common']['commands']
+    
+    if inst and inst.get('testloads', False):
+        if logger:
+            logger.info(f"Testloads ENABLED for {instance_name}. Running ONLY testloads.")
+        workloads = config['common'].get('testloads', [])
     else:
-        # Legacy format: fallback for backward compatibility
-        for i in range(1, 10):  # Support up to 9 setup commands
-            cmd_key = f"setup_command{i}"
-            if cmd_key in config['common']:
-                cmd = config['common'][cmd_key]
-                if cmd and cmd.strip():
-                    workloads.append(cmd)
-        for i in range(1, 10):  # Support up to 9 benchmark commands
-            cmd_key = f"benchmark_command{i}"
-            if cmd_key in config['common']:
-                cmd = config['common'][cmd_key]
-                if cmd and cmd.strip():
-                    workloads.append(cmd)
+        # Standard workloads execution
+        if 'workloads' in config['common']:
+            # New format: array of workloads
+            workloads = config['common']['workloads']
+        elif 'commands' in config['common']:
+            # Old format: array of commands (backward compatibility)
+            workloads = config['common']['commands']
+        else:
+            # Legacy format: fallback for backward compatibility
+            for i in range(1, 10):  # Support up to 9 setup commands
+                cmd_key = f"setup_command{i}"
+                if cmd_key in config['common']:
+                    cmd = config['common'][cmd_key]
+                    if cmd and cmd.strip():
+                        workloads.append(cmd)
+            for i in range(1, 10):  # Support up to 9 benchmark commands
+                cmd_key = f"benchmark_command{i}"
+                if cmd_key in config['common']:
+                    cmd = config['common'][cmd_key]
+                    if cmd and cmd.strip():
+                        workloads.append(cmd)
 
     if not workloads:
         if logger:
@@ -1071,7 +1109,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
         else:
             # Regular command execution (short-running)
-            result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, timeout=workload_timeout, logger=logger)
+            result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, ignore=True, timeout=workload_timeout, logger=logger)
 
             if result is None:
                 if logger:
@@ -1212,8 +1250,15 @@ def process_instance(cloud, inst, config, key_path, log_dir):
     
     instance_name = f"{cloud.upper()}:{name}"
     
+    # Calculate costs
+    cpu_cost = inst.get('cpu_cost_hour[730h-mo]', 0.0)
+    # Extra storage cost is conditional
+    storage_cost = 0.0
+    if inst.get('extra_150g_storage'):
+        storage_cost = inst.get('extra_150g_storage_cost_hour', 0.0)
+
     # Register with dashboard
-    DASHBOARD.register(instance_name, cloud.upper(), inst['type'])
+    DASHBOARD.register(instance_name, cloud.upper(), inst['type'], cpu_cost=cpu_cost, storage_cost=storage_cost)
     
     # Initialize logger
     logger = InstanceLogger(instance_name, DASHBOARD, log_dir)
