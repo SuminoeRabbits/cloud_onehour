@@ -220,28 +220,58 @@ class FFmpegRunner:
             with open(downloads_xml, 'r') as f:
                 content = f.read()
 
-            # Replace x264 checksums with correct values
-            # Old checksums (from PTS repo)
-            old_md5 = 'dec93f9a2fd2a91afff1e9d5fb2fea54'
-            old_sha256 = '48b9160177774f3efd29a60d722d9eddd6c023c0904a9a4f83377aa6e6845edb'
-            old_size = '1222728'
-
+            # Target x264 file: x264-7ed753b10a61d0be95f683289dfb925b800b0676.zip
             # New checksums (actual current file)
             new_md5 = '62a5d6c7207be9f0aa6e1a9552345c8c'
             new_sha256 = 'd859f2b4b0b70d6f10a33e9b5e0a6bf41d97e4414644c4f85f02b7665c0d1292'
             new_size = '1222391'
 
-            if old_sha256 in content:
-                print(f"  [FIX] Updating x264 checksums in downloads.xml")
-                content = content.replace(old_md5, new_md5)
-                content = content.replace(old_sha256, new_sha256)
-                content = content.replace(f'<FileSize>{old_size}</FileSize>', f'<FileSize>{new_size}</FileSize>')
+            # Regex to find the Package block containing the specific x264 file
+            # This captures the whole <Package>...</Package> block that contains the x264 URL
+            package_pattern = re.compile(
+                r'(<Package>.*?(?:x264-7ed753b10a61d0be95f683289dfb925b800b0676\.zip).*?</Package>)',
+                re.DOTALL
+            )
 
-                with open(downloads_xml, 'w') as f:
-                    f.write(content)
-                print(f"  [OK] x264 checksums updated")
+            modified_content = content
+            match = package_pattern.search(content)
+
+            if match:
+                package_block = match.group(1)
+                original_block = package_block
+                
+                # Update MD5 in this block
+                package_block = re.sub(
+                    r'<MD5>[a-fA-F0-9]+</MD5>',
+                    f'<MD5>{new_md5}</MD5>',
+                    package_block
+                )
+                
+                # Update SHA256 in this block
+                package_block = re.sub(
+                    r'<SHA256>[a-fA-F0-9]+</SHA256>',
+                    f'<SHA256>{new_sha256}</SHA256>',
+                    package_block
+                )
+                
+                # Update FileSize in this block
+                package_block = re.sub(
+                    r'<FileSize>\d+</FileSize>',
+                    f'<FileSize>{new_size}</FileSize>',
+                    package_block
+                )
+
+                if package_block != original_block:
+                    print(f"  [FIX] Updating x264 checksums in downloads.xml (Robust Regex)")
+                    modified_content = content.replace(original_block, package_block)
+                    
+                    with open(downloads_xml, 'w') as f:
+                        f.write(modified_content)
+                    print(f"  [OK] x264 checksums updated")
+                else:
+                    print(f"  [INFO] x264 checksums already correct")
             else:
-                print(f"  [INFO] x264 checksums already correct")
+                print(f"  [WARN] x264 package block not found in downloads.xml")
 
         except Exception as e:
             print(f"  [WARN] Failed to fix checksums: {e}")
