@@ -68,11 +68,13 @@ class Dashboard:
                 'type': machine_type,
                 'status': 'PENDING',
                 'step': 'Initializing...',
+                'step_start': datetime.now(),
                 'last_update': datetime.now(),
                 'start_time': datetime.now(),
                 'end_time': None,
                 'cpu_cost': cpu_cost,
                 'storage_cost': storage_cost,
+                'history': [],
                 'color': self.BLUE
             }
 
@@ -85,9 +87,53 @@ class Dashboard:
                     data['status'] = status
                     if status in ['COMPLETED', 'TERMINATED'] and data['end_time'] is None:
                         data['end_time'] = datetime.now()
-                if step: data['step'] = step
+                if step: 
+                    if data['step'] != step:
+                        data['step'] = step
+                        data['step_start'] = datetime.now()
                 if color: data['color'] = color
                 data['last_update'] = datetime.now()
+
+    def add_history(self, instance_name, step_name, duration_sec, status="OK"):
+        """Record a completed step in history."""
+        if not self.enabled: return
+        with self.lock:
+            if instance_name in self.instances:
+                data = self.instances[instance_name]
+                
+                # Format duration
+                if duration_sec < 60:
+                    dur_str = f"{int(duration_sec)}s"
+                elif duration_sec < 3600:
+                    dur_str = f"{int(duration_sec//60)}m{int(duration_sec%60):02}s"
+                else:
+                    dur_str = f"{int(duration_sec//3600)}h{int((duration_sec%3600)//60):02}m"
+                
+                # Format status
+                stat_str = "OK"
+                if status == "TIMEOUT": stat_str = "TO"
+                elif status == "ERROR": stat_str = "ERR"
+                elif status == "SKIPPED": stat_str = "SKIP"
+                
+                # Extract simple step name (e.g., "Workload 1/5: build-llvm..." -> "W1: build-llvm")
+                # Attempt to parse "Workload X/Y: name"
+                simple_name = step_name
+                if "Workload" in step_name:
+                    try:
+                        parts = step_name.split(':')
+                        # "Workload 1/5" -> "W1"
+                        w_part = parts[0].replace('Workload', 'W').split('/')[0].strip()
+                        # " build-llvm..." -> "build-llvm"
+                        cmd_part = parts[1].strip().split('...')[0].strip()
+                        simple_name = f"{w_part}: {cmd_part}"
+                    except:
+                        pass
+                
+                data['history'].append({
+                    'status': stat_str,
+                    'name': simple_name,
+                    'duration': dur_str
+                })
 
     def set_log_dir(self, log_dir):
         self.log_dir = log_dir
@@ -111,50 +157,99 @@ class Dashboard:
             time.sleep(0.5)
 
     def _render_once(self):
-        # Clear screen and move to top (using generic ANSI codes)
-        # Typically \033[2J clears screen, \033[H moves to home
-        # For a scrolling dashboard, we might want to just re-print the table
-        # But fully clearing can be flickering. 
-        # Strategy: Use a fixed number of lines or print a header and status table.
-        # Since we can't easily do curses here without complexity, we'll clear screen.
+        # Clear screen and move to top
         print("\033[2J\033[H", end="")
         
         run_duration = datetime.now() - self.start_time
-        print(f"{self.BOLD}CLOUD BENCHMARKING EXECUTOR (Parallel Mode){self.ENDC}")
-        print(f"Run Duration: {str(run_duration).split('.')[0]}")
-        if self.log_dir:
-            print(f"Detailed Logs: {self.log_dir}")
-        print("=" * 130)
-        print(f"{'INSTANCE':<30} | {'STATUS':<15} | {'DURATION':<12} | {'COST':<12} | {'CURRENT STEP':<50}")
-        print("-" * 130)
+        run_str = str(run_duration).split('.')[0]
+        print(f"{self.BOLD}CLOUD BENCHMARKING EXECUTOR (Run: {run_str}){self.ENDC}")
+        print("=" * 100)
+        # Header only for main row concepts
+        print(f"{'INSTANCE (TYPE)':<30} | {'STAT':<4} | {'TIME':<7} | {'COST':<7}")
+        print("-" * 100)
 
         with self.lock:
             # Sort by cloud provider for grouping
             sorted_insts = sorted(self.instances.items())
             
             for name, data in sorted_insts:
-                status_str = f"{data['color']}{data['status']}{self.ENDC}"
+                # 1. Instance Row
                 
-                # Calculate Duration
+                # Compact Status
+                raw_stat = data['status']
+                stat_map = {
+                    'RUNNING': 'RUN ', 'COMPLETED': 'DONE', 'TERMINATED': 'TERM', 
+                    'PENDING': 'WAIT', 'ERROR': 'ERR '
+                }
+                compact_stat = stat_map.get(raw_stat, raw_stat[:4])
+                status_str = f"{data['color']}{compact_stat}{self.ENDC}"
+                
+                # Compact Name
+                short_name = name
+                for suffix in ['-amd64', '-arm64', '-vcpu-2', '-vcpu-4', '-vcpu-8', '-vcpu-16']:
+                    short_name = short_name.replace(suffix, '')
+                
+                short_type = data['type'].replace('standard', 'std').replace('large', 'lg')
+                display_name = f"{short_name} ({short_type})"
+                if len(display_name) > 30:
+                    display_name = display_name[:27] + "..."
+
+                # Duration
                 end = data['end_time'] if data['end_time'] else datetime.now()
                 duration = end - data['start_time']
-                duration_str = str(duration).split('.')[0] # Remove microseconds
-                if duration_str.startswith('0:'):
-                    duration_str = duration_str[2:] # Trim 0: if < 1 hour (optional, but requested format roughly)
-                # Actually str(duration) is like H:MM:SS.mmmm or D days, ...
-                # Let's keep full H:MM:SS
                 duration_str = str(duration).split('.')[0]
                 
-                # Calculate Cost
+                # Cost
                 hours = duration.total_seconds() / 3600.0
                 total_rate = data['cpu_cost'] + data['storage_cost']
                 cost = hours * total_rate
-                cost_str = f"${cost:.4f}"
+                cost_str = f"${cost:.2f}"
 
-                step_str = data['step'][:48] + ".." if len(data['step']) > 48 else data['step']
-                print(f"{name:<30} | {status_str:<24} | {duration_str:<12} | {cost_str:<12} | {step_str:<50}")
-        
-        print("=" * 130)
+                print(f"{display_name:<30} | {status_str:<4} | {duration_str:<7} | {cost_str:<7}")
+
+                # 2. History Rows (Indented)
+                for item in data.get('history', []):
+                     # Format: "  [OK] W1: name (10m30s)"
+                     stat = item['status']
+                     # Color code the history status?
+                     color = self.GREEN if stat == "OK" else (self.FAIL if stat in ["ERR", "TO"] else self.BOLD)
+                     item_str = f"  [{color}{stat}{self.ENDC}] {item['name']} ({item['duration']})"
+                     print(f"{item_str}")
+
+                # 3. Current Step Row (Indented)
+                if raw_stat not in ['COMPLETED', 'TERMINATED']:
+                    step_elapsed = datetime.now() - data.get('step_start', datetime.now())
+                    step_time_str = str(step_elapsed).split('.')[0]
+                    # Format: "  [>>] W1: name... [05:22]"
+                    
+                    if step_elapsed.total_seconds() < 3600:
+                        mm = int(step_elapsed.total_seconds() // 60)
+                        ss = int(step_elapsed.total_seconds() % 60)
+                        step_timer = f"[{mm:02}:{ss:02}]"
+                    else:
+                        step_timer = f"[{step_time_str}]"
+                    
+                    # Try to parse step name to Wx format to match history
+                    step_name = data['step']
+                    simple_step_name = step_name
+                    if "Workload" in step_name:
+                         try:
+                            # "Workload X/Y: name" -> "WX: name"
+                            parts = step_name.split(':')
+                            w_part = parts[0].replace('Workload', 'W').split('/')[0].strip()
+                            cmd_part = parts[1].strip()
+                            simple_step_name = f"{w_part}: {cmd_part}"
+                         except:
+                            pass
+                    
+                    # Truncate if too long (arbitrary limit to avoid wrapping too much)
+                    if len(simple_step_name) > 60:
+                        simple_step_name = simple_step_name[:57] + "..."
+                        
+                    current_str = f"  [{self.CYAN}>>{self.ENDC}]   {simple_step_name} {step_timer}"
+                    print(f"{current_str}")
+                    
+                print("-" * 100)
         
         print("=" * 100)
         sys.stdout.flush()
@@ -837,7 +932,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     """Execute all commands via SSH sequentially with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=300 -o ServerAliveCountMax=3"
     ssh_user = config['common']['ssh_user']
     # Each workload timeout (backward compatible with command_timeout)
     workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
@@ -894,6 +989,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
         print(f"  [Workloads] Starting execution of {total_workloads} workloads...")
 
     for i, workload in enumerate(workloads, start=1):
+        workload_start = time.time()
         # Format workload with vcpu substitution
         cmd = workload.format(vcpus=inst['vcpus'])
 
@@ -913,7 +1009,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             print(f"  [Workload {i}/{total_workloads}] Timeout: {workload_timeout}s ({workload_timeout//60} minutes)")
 
         # Detect long-running benchmark commands and run them via nohup
-        long_running_indicators = ['pts_regression.py', 'benchmark', 'phoronix-test-suite']
+        long_running_indicators = config['common'].get('long_running_indicators', ['pts_regression.py', 'benchmark', 'phoronix-test-suite', 'pts_runner'])
         is_long_running = any(indicator in cmd for indicator in long_running_indicators)
 
         if is_long_running:
@@ -936,7 +1032,16 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             wrapped_cmd = f'nohup sh -c "{escaped_cmd} && echo SUCCESS > {marker_file} || echo FAILED > {marker_file}" > {log_file} 2>&1 &'
 
             # Start the command in background
-            run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=30, logger=logger)
+            # Start the command in background
+            try:
+                run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=60, logger=logger)
+            except subprocess.TimeoutExpired:
+                # If starting the background command times out, it might have actually started but SSH didn't return.
+                # We will proceed to polling to verify.
+                if logger:
+                    logger.warn("Timeout while starting background command, proceeding to verification...")
+                elif DEBUG_MODE:
+                    log("Timeout while starting background command, proceeding to verification...", "WARN")
 
             if logger:
                 logger.info("Command started in background, waiting for completion...")
@@ -949,6 +1054,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             start_time = time.time()
             check_count = 0
             last_log_size = 0
+            ssh_fail_count = 0
 
             while time.time() - start_time < workload_timeout:
                 # Exponential backoff: 30s -> 45s -> 67s -> 101s -> 151s -> 227s -> 300s (max 5 min)
@@ -961,6 +1067,44 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     f"ssh {ssh_opt} {ssh_user}@{ip} 'cat {marker_file} 2>/dev/null || echo RUNNING'",
                     capture=True, timeout=10, ignore=True, logger=logger
                 )
+
+                if marker_check:
+                    ssh_fail_count = 0
+                else:
+                    ssh_fail_count += 1
+                    if ssh_fail_count >= 3:
+                        # consecutive SSH failures, check cloud status
+                        if logger:
+                            logger.warn(f"SSH failed {ssh_fail_count} times, checking instance status...")
+                        elif DEBUG_MODE == True:
+                            log(f"SSH failed {ssh_fail_count} times, checking instance status...", "WARN")
+
+                        status = get_instance_status(
+                            cloud=inst.get('cloud'),
+                            instance_id=inst.get('instance_id'),
+                            region=inst.get('region'),
+                            project=inst.get('project'),
+                            zone=inst.get('zone'),
+                            logger=logger
+                        )
+                        
+                        if status in ['terminated', 'TERMINATED', 'stopped', 'STOPPING', 'shutting-down']:
+                            msg = f"Instance {instance_name} terminated externally (Status: {status})"
+                            if logger: 
+                                logger.error(msg)
+                            elif DEBUG_MODE == True:
+                                log(msg, "ERROR")
+                            
+                            DASHBOARD.update(instance_name, status='TERMINATED')
+                            duration = time.time() - workload_start
+                            DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "EXT_TERM")
+                            return False
+                        else:
+                            if logger:
+                                logger.warn(f"Instance status is {status}, continuing SSH retries...")
+                            elif DEBUG_MODE == True:
+                                log(f"Instance status is {status}, continuing SSH retries...", "WARN")
+
 
                 # Show progress by checking log file size
                 log_size_check = run_cmd(
@@ -988,6 +1132,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                         print(f"  [Workload {i}/{total_workloads}] ✓ Completed successfully")
                         if i < total_workloads:
                             print(f"  [Progress] {i}/{total_workloads} workloads completed, {total_workloads - i} remaining")
+                    
+                    duration = time.time() - workload_start
+                    DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "OK")
                     break
                 elif marker_check == "FAILED":
                     if logger:
@@ -1053,6 +1200,8 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                                     print(f"  {line}")
                                 print("  " + "="*78)
 
+                    duration = time.time() - workload_start
+                    DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "ERROR")
                     return False
                 elif marker_check and marker_check != "RUNNING":
                     if logger:
@@ -1105,29 +1254,68 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     log(f"Workload {i}/{total_workloads} timed out after {workload_timeout}s", "ERROR")
                 elif DEBUG_MODE == False:
                     print(f"  [Error] Workload {i}/{total_workloads} timed out")
-                return False
+                
+                duration = time.time() - workload_start
+                DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
+                continue # Proceed to next workload on timeout
 
         else:
             # Regular command execution (short-running)
-            result = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, ignore=True, timeout=workload_timeout, logger=logger)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'", capture=False, ignore=False, timeout=workload_timeout, logger=logger)
+                    
+                    # Success
+                    if logger:
+                        logger.info(f"Workload {i}/{total_workloads} completed")
+                    elif DEBUG_MODE == True:
+                        log(f"Workload {i}/{total_workloads} completed")
+                    else:
+                        print(f"  [Workload {i}/{total_workloads}] ✓ Completed")
+                        if i < total_workloads:
+                            print(f"  [Progress] {i}/{total_workloads} workloads completed, {total_workloads - i} remaining")
 
-            if result is None:
-                if logger:
-                    logger.error(f"Workload {i}/{total_workloads} failed or timed out")
-                elif DEBUG_MODE == True:
-                    log(f"Workload {i}/{total_workloads} failed or timed out", "ERROR")
-                elif DEBUG_MODE == False:
-                    print(f"  [Warning] Workload {i}/{total_workloads} failed or timed out")
-                return False
+                    duration = time.time() - workload_start
+                    DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "OK")
+                    break # Break retry loop on success
 
-            if logger:
-                logger.info(f"Workload {i}/{total_workloads} completed")
-            elif DEBUG_MODE == True:
-                log(f"Workload {i}/{total_workloads} completed")
-            else:
-                print(f"  [Workload {i}/{total_workloads}] ✓ Completed")
-                if i < total_workloads:
-                    print(f"  [Progress] {i}/{total_workloads} workloads completed, {total_workloads - i} remaining")
+                except subprocess.TimeoutExpired:
+                    if attempt < max_retries - 1:
+                        msg = f"Workload {i}/{total_workloads} timed out (Attempt {attempt+1}/{max_retries}), retrying..."
+                        if logger: logger.warn(msg)
+                        else: print(f"  [Warn] {msg}")
+                        time.sleep(10)
+                        continue
+
+                    msg = f"Workload {i}/{total_workloads} timed out after {workload_timeout}s"
+                    if logger: logger.error(msg)
+                    elif DEBUG_MODE: log(msg, "ERROR")
+                    else: print(f"  [Error] {msg}")
+
+                    duration = time.time() - workload_start
+                    DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
+                    # No abort on timeout? The original code continued.
+                    continue 
+
+                except subprocess.CalledProcessError as e:
+                    # Check return code
+                    if attempt < max_retries - 1:
+                        # Retry on SSH errors (255) or generally any error for setup commands
+                        msg = f"Workload {i}/{total_workloads} failed with {e.returncode} (Attempt {attempt+1}/{max_retries}), retrying..."
+                        if logger: logger.warn(msg)
+                        else: print(f"  [Warn] {msg}")
+                        time.sleep(10)
+                        continue
+
+                    msg = f"Workload {i}/{total_workloads} failed: {e}"
+                    if logger: logger.error(msg)
+                    elif DEBUG_MODE: log(msg, "ERROR")
+                    else: print(f"  [Error] {msg}")
+
+                    duration = time.time() - workload_start
+                    DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "ERROR")
+                    return False
 
         # Special handling: Verify SSH build after SSH-related scripts execution
         # Detects both direct execution and execution via wrapper scripts
@@ -1259,6 +1447,9 @@ def process_instance(cloud, inst, config, key_path, log_dir):
 
     # Register with dashboard
     DASHBOARD.register(instance_name, cloud.upper(), inst['type'], cpu_cost=cpu_cost, storage_cost=storage_cost)
+    
+    # Inject cloud provider into instance dict for downstream use
+    inst['cloud'] = cloud
     
     # Initialize logger
     logger = InstanceLogger(instance_name, DASHBOARD, log_dir)

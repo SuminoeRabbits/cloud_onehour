@@ -37,9 +37,16 @@
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "workload_timeout": 3600,
+    "workload_timeout": 10800,
     "ssh_strict_host_key_checking": false,
-    "debug_stdout": true
+    "debug_stdout": true,
+    "long_running_indicators": [
+      "pts_regression.py",
+      "benchmark",
+      "phoronix-test-suite",
+      "pts_runner",
+      "prepare_tools.sh"
+    ]
   },
   "aws": {
     "enable": true,
