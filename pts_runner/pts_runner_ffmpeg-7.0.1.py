@@ -179,6 +179,12 @@ class FFmpegRunner:
             print(f"  [CLEAN] Removing installed test: {installed_dir}")
             shutil.rmtree(installed_dir)
 
+        # Force remove test profile to ensure fresh downloads.xml (avoids corruption from previous runs)
+        profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
+        if profile_dir.exists():
+            print(f"  [CLEAN] Removing test profile: {profile_dir}")
+            shutil.rmtree(profile_dir)
+
         print("  [OK] PTS cache cleaned")
 
     def get_cpu_affinity_list(self, n):
@@ -226,53 +232,37 @@ class FFmpegRunner:
             new_sha256 = 'd859f2b4b0b70d6f10a33e9b5e0a6bf41d97e4414644c4f85f02b7665c0d1292'
             new_size = '1222391'
 
-            # Regex to find the Package block containing the specific x264 file
-            # This captures the whole <Package>...</Package> block that contains the x264 URL
-            package_pattern = re.compile(
-                r'(<Package>.*?(?:x264-7ed753b10a61d0be95f683289dfb925b800b0676\.zip).*?</Package>)',
-                re.DOTALL
-            )
+            # Safer approach: Split content into Package blocks to avoid regex crossing boundaries
+            packages = content.split('</Package>')
+            output_packages = []
+            modified = False
 
-            modified_content = content
-            match = package_pattern.search(content)
-
-            if match:
-                package_block = match.group(1)
-                original_block = package_block
-                
-                # Update MD5 in this block
-                package_block = re.sub(
-                    r'<MD5>[a-fA-F0-9]+</MD5>',
-                    f'<MD5>{new_md5}</MD5>',
-                    package_block
-                )
-                
-                # Update SHA256 in this block
-                package_block = re.sub(
-                    r'<SHA256>[a-fA-F0-9]+</SHA256>',
-                    f'<SHA256>{new_sha256}</SHA256>',
-                    package_block
-                )
-                
-                # Update FileSize in this block
-                package_block = re.sub(
-                    r'<FileSize>\d+</FileSize>',
-                    f'<FileSize>{new_size}</FileSize>',
-                    package_block
-                )
-
-                if package_block != original_block:
-                    print(f"  [FIX] Updating x264 checksums in downloads.xml (Robust Regex)")
-                    modified_content = content.replace(original_block, package_block)
+            for pkg in packages:
+                if 'x264-7ed753b10a61d0be95f683289dfb925b800b0676.zip' in pkg:
+                    # found the target package
                     
-                    with open(downloads_xml, 'w') as f:
-                        f.write(modified_content)
-                    print(f"  [OK] x264 checksums updated")
-                else:
-                    print(f"  [INFO] x264 checksums already correct")
-            else:
-                print(f"  [WARN] x264 package block not found in downloads.xml")
+                    # Update MD5
+                    pkg = re.sub(r'<MD5>[a-fA-F0-9]+</MD5>', f'<MD5>{new_md5}</MD5>', pkg)
+                    # Update SHA256
+                    pkg = re.sub(r'<SHA256>[a-fA-F0-9]+</SHA256>', f'<SHA256>{new_sha256}</SHA256>', pkg)
+                    # Update FileSize
+                    pkg = re.sub(r'<FileSize>\d+</FileSize>', f'<FileSize>{new_size}</FileSize>', pkg)
+                    
+                    modified = True
+                    print(f"  [DEBUG] Fixed checksums in x264 package block")
+                
+                output_packages.append(pkg)
 
+            if modified:
+                print(f"  [FIX] Updating x264 checksums in downloads.xml (Safe Split)")
+                modified_content = '</Package>'.join(output_packages)
+                
+                with open(downloads_xml, 'w') as f:
+                    f.write(modified_content)
+                print(f"  [OK] x264 checksums updated")
+            else:
+                print(f"  [INFO] x264 package not found or already correct (no changes needed)") 
+            
         except Exception as e:
             print(f"  [WARN] Failed to fix checksums: {e}")
 
@@ -304,6 +294,10 @@ class FFmpegRunner:
         print(f"[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
+
+        # Pre-apply x264 checksum fix to avoid double installation time
+        # The profile should be present from the 'info' call in run()
+        self.fix_x264_checksum()
 
         # Execute install command (attempt 1)
         result = subprocess.run(
