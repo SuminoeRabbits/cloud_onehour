@@ -211,14 +211,11 @@ class BenchmarkRunner:
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         
         # LINUX_PERF=1: Enable PTS's built-in perf stat module (System Monitor)
-        # - Automatically wraps test binary execution with perf stat
-        # - Records cycles, instructions, IPC, cache-misses, etc.
-        # - Embeds results in benchmark XML/JSON output
         perf_env = 'LINUX_PERF=1 '
         
         batch_env = f'{quick_env}{perf_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
         
-        # 2. Build PTS command (NO environment variables in pts_base_cmd!)
+        # 2. Build PTS command
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
             pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
@@ -226,321 +223,71 @@ class BenchmarkRunner:
             cpu_list = self.get_cpu_affinity_list(num_threads)
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
         
-        # 3. Construct Final Command (Env Vars + PTS Command)
-        # Note: We rely on LINUX_PERF=1 instead of manual `perf stat` wrapping
+        # 3. Construct Final Command
         pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
         
-        # 4. Record CPU frequency BEFORE benchmark (Optional but recommended for stability check)
+        # 4. Record CPU frequency BEFORE benchmark
         cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
-        command = cmd_template.format(file=freq_start_file)
+        command = cmd_template.format(file=self.results_dir / f"{num_threads}-thread_freq_start.txt")
         subprocess.run(['bash', '-c', command], capture_output=True, text=True)
         
         # 5. Execute PTS command
         print(f"  [EXEC] {pts_cmd}")
-        subprocess.run(['bash', '-c', pts_cmd])
+        # Using run() here for simplicity in template, but Popen() with streaming is generic best practice
+        result = subprocess.run(['bash', '-c', pts_cmd])
+        returncode = result.returncode
         
         # 6. Record CPU frequency AFTER benchmark
         cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
-        command = cmd_template.format(file=freq_end_file)
+        command = cmd_template.format(file=self.results_dir / f"{num_threads}-thread_freq_end.txt")
         subprocess.run(['bash', '-c', command], capture_output=True, text=True)
         
-        # 7. (Optional) Parse perf stats from PTS output if needed
-        # Since LINUX_PERF=1 is used, data is in the result file.
-        # self.parse_pts_results_for_perf(...)
-    
-    def clean_pts_cache(self):
-        """
-        Clean PTS installed tests for fresh installation.
+        if returncode != 0:
+            print(f"\\n[ERROR] Benchmark failed with return code {returncode}")
+            # Generate error log
+            err_file = self.results_dir / f"{num_threads}-thread.err"
+            with open(err_file, 'w') as f:
+                f.write(f"Benchmark failed with return code {returncode}\\n")
+                f.write(f"Command: {pts_cmd}\\n")
+            print(f"     Error log: {err_file}")
+            return False
 
-        NOTE: This method only removes installed tests, NOT test profiles.
-        Test profiles may contain manual fixes (e.g., checksum corrections)
-        and should be preserved.
+        return True
 
-        Directory structure:
-        - ~/.phoronix-test-suite/installed-tests/pts/<testname>/ → DELETED
-        - ~/.phoronix-test-suite/test-profiles/pts/<testname>/ → PRESERVED
-        """
-        print(">>> Cleaning PTS cache...")
-
-        pts_home = Path.home() / '.phoronix-test-suite'
-
-        # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
-        # Only clean installed tests to force fresh compilation
-
-        # Clean installed tests
-        installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
-        if installed_dir.exists():
-            print(f"  [CLEAN] Removing installed test: {installed_dir}")
-            shutil.rmtree(installed_dir)
-
-        print("  [OK] PTS cache cleaned")
-
-    def install_benchmark(self):
-        """
-        Install benchmark with error detection and verification.
-
-        CRITICAL: PTS may return exit code 0 even when download fails.
-        This method implements robust error detection.
-        
-        [Pattern 5] Large File Download Optimization (PreSeedDownloader)
-        - Problem: Large test files take too long to download via standard single-threaded wget.
-        - Fix: Use generic PreSeedDownloader class to pre-download files into PTS cache using aria2c (multiconnection).
-        - Example usage:
-            print(f"\\n>>> Checking for large files to pre-seed...")
-            downloader = PreSeedDownloader()
-            if downloader.is_aria2_available():
-                # List of large files (URL, filename)
-                files_to_download = [
-                    {"url": "http://example.com/bigfile1.7z", "name": "bigfile1.7z"},
-                    {"url": "http://example.com/bigfile2.7z", "name": "bigfile2.7z"}
-                ]
-                for f in files_to_download:
-                    downloader.ensure_file(f["url"], f["name"])
-        """
-        print(f"\n>>> Installing {self.benchmark_full}...")
-
-
-        # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
-        remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
-        subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        # Build install command
-        nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
-
-        print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
-        print(f"  {install_cmd}")
-        print(f"{'<'*80}\n")
-
-        # Execute install command with output capture (REQUIRED for error detection)
-        result = subprocess.run(
-            ['bash', '-c', install_cmd],
-            capture_output=True,  # ← CRITICAL: Must capture to detect errors
-            text=True
-        )
-
-        # Check for installation failure
-        # PTS may return 0 even if download failed, so check stdout/stderr for error messages
-        install_failed = False
-        if result.returncode != 0:
-            install_failed = True
-        elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
-            install_failed = True
-        elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower()):
-            install_failed = True
-
-        if install_failed:
-            print(f"  [ERROR] Installation failed")
-            if result.stdout:
-                print(f"  [ERROR] stdout: {result.stdout[-500:]}")  # Last 500 chars
-            if result.stderr:
-                print(f"  [ERROR] stderr: {result.stderr[-500:]}")
-            sys.exit(1)
-
-        # Verify installation by checking if test is actually installed
-        verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
-        verify_result = subprocess.run(
-            ['bash', '-c', verify_cmd],
-            capture_output=True,
-            text=True
-        )
-
-        if verify_result.returncode != 0 or 'not found' in verify_result.stdout.lower():
-            print(f"  [ERROR] Installation verification failed - test not found")
-            print(f"  [INFO] This may be due to download/checksum failures")
-            print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
-            sys.exit(1)
-
-        print(f"  [OK] Installation completed and verified")
-
-    def fix_benchmark_specific_issues(self):
-        """
-        Fix benchmark-specific build/installation issues (optional).
-
-        IMPORTANT: This method is OPTIONAL and only needed for special cases.
-        Most benchmarks do NOT require this.
-
-        Use cases:
-        1. GCC-14 compatibility fixes (e.g., OpenSSL inline assembly errors)
-        2. Checksum auto-correction (e.g., upstream dependency changes)
-        3. Build option adjustments
-
-        Implementation patterns:
-
-        Pattern 1: Modify PTS test profile's install.sh (wrk/OpenSSL case)
-        - File location: ~/.phoronix-test-suite/test-profiles/pts/<testname>/install.sh
-        - Modification: Use sed to inject build options into Makefile
-        - Example: apache-3.0.0, nginx-3.0.1 (wrk's OpenSSL no-asm fix)
-
-        Pattern 2: Python-side checksum fix with retry (ffmpeg case)
-        - Implement fix method in pts_runner script
-        - Detect failure, apply fix, retry installation
-        - Example: ffmpeg-7.0.1 (x264 checksum update)
-
-        Pattern 3: Patching generated build files via install.sh (Java/Maven case)
-        - Problem: Newer JDKs (e.g., Java 25) require explicit annotation processing
-        - Fix: Patch install.sh to inject compiler flags (e.g., -proc:full) into pom.xml
-        - Example: java-jmh-1.0.1 (fixes META-INF/BenchmarkList missing error)
-
-        Pattern 4: Patching launcher scripts and data generation (Spark case)
-        - Problem: Hardcoded absolute paths, missing data, runtime compatibility issues (Java 25)
-        - Fix: Patch install.sh to correct paths, inject 'export' env vars into launcher scripts, and run generation scripts
-        - Example: spark-1.0.1 (fixes Py4JJavaError and missing test-data)
-
-        See README.md "PTS test profile の install.sh 修正" section for details.
-
-        Pattern 5: Large File Download Optimization (PreSeedDownloader)
-        - Problem: Large test files take too long to download via standard single-threaded wget.
-        - Fix: Use generic PreSeedDownloader class to pre-download files into PTS cache using aria2c (multiconnection).
-        - Example: x265-1.5.0 (2.6GB video file)
-        """
-        # Example: Pre-seed large file using aria2c
-        # downloader = PreSeedDownloader()
-        # if downloader.is_aria2_available():
-        #     target_files = [
-        #         {"url": "http://example.com/large-file1.7z", "name": "large-file1.7z"},
-        #         {"url": "http://example.com/large-file2.7z", "name": "large-file2.7z"}
-        #     ]
-        #     for f in target_files:
-        #         downloader.ensure_file(f["url"], f["name"])
-
-        # Example: Fix downloads.xml checksum (ffmpeg pattern)
-        # downloads_xml = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'downloads.xml'
-        # ...apply fixes...
-
-        # Example: Modify install.sh before installation (wrk pattern)
-        # install_sh = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
-        # ...modify file...
-
-        pass  # Most benchmarks don't need this
-    
-    def generate_summary(self):
-        """Generate summary.log and summary.json from all thread results."""
-        print(f"\n{'='*80}")
-        print(f">>> Generating summary")
-        print(f"{'='*80}")
-
-        summary_log = self.results_dir / "summary.log"
-        summary_json_file = self.results_dir / "summary.json"
-
-        # Collect results from all JSON files
-        all_results = []
-        for num_threads in self.thread_list:
-            json_file = self.results_dir / f"{num_threads}-thread.json"
-            if json_file.exists():
-                with open(json_file, 'r') as f:
-                    data = json.load(f)
-                    # Extract benchmark result
-                    for result_id, result in data.get('results', {}).items():
-                        for system_id, system_result in result.get('results', {}).items():
-                            all_results.append({
-                                'threads': num_threads,
-                                'value': system_result.get('value'),
-                                'raw_values': system_result.get('raw_values', []),
-                                'test_name': result.get('title'),
-                                'description': result.get('description'),
-                                'unit': result.get('scale')
-                            })
-
-        if not all_results:
-            print("[WARN] No results found for summary generation")
-            return
-
-        # Generate summary.log (human-readable)
-        with open(summary_log, 'w') as f:
-            f.write("="*80 + "\n")
-            f.write(f"Benchmark Summary: {self.benchmark}\n")
-            f.write(f"Machine: {self.machine_name}\n")
-            f.write(f"Test Category: {self.test_category}\n")
-            f.write("="*80 + "\n\n")
-
-            for result in all_results:
-                f.write(f"Threads: {result['threads']}\n")
-                f.write(f"  Test: {result['test_name']}\n")
-                f.write(f"  Description: {result['description']}\n")
-                
-                # Check for None to avoid f-string crash
-                if result['value'] is not None:
-                    f.write(f"  Average: {result['value']:.2f} {result['unit']}\n")
-                else:
-                    f.write(f"  Average: None (Test Failed)\n")
-                    
-                # Handle raw values safely
-                raw_vals = result.get('raw_values')
-                if raw_vals:
-                    val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
-                    f.write(f"  Raw values: {val_str}\n")
-                else:
-                    f.write(f"  Raw values: N/A\n")
-                    
-                f.write("\n")
-
-            f.write("="*80 + "\n")
-            f.write("Summary Table\n")
-            f.write("="*80 + "\n")
-            f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
-            f.write("-"*80 + "\n")
-            for result in all_results:
-                val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"
-                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\n")
-
-        print(f"[OK] Summary log saved: {summary_log}")
-
-        # Generate summary.json (AI-friendly format)
-        summary_data = {
-            "benchmark": self.benchmark,
-            "test_category": self.test_category,
-            "machine": self.machine_name,
-            "vcpu_count": self.vcpu_count,
-            "results": all_results
-        }
-
-        with open(summary_json_file, 'w') as f:
-            json.dump(summary_data, f, indent=2)
-
-        print(f"[OK] Summary JSON saved: {summary_json_file}")
+    # ... (clean_pts_cache, install_benchmark methods) ...
 
     def run(self):
         """Main execution flow."""
         print(f"\\n{'#'*80}")
         print(f"# PTS Runner: {self.benchmark_full}")
         print(f"# Machine: {self.machine_name}")
-        print(f"# OS: {self.os_name}")
-        print(f"# vCPU Count: {self.vcpu_count}")
-        print(f"# Thread List: {self.thread_list}")
-        if self.quick_mode:
-            print(f"# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
+        # ...
         print(f"{'#'*80}")
 
         # Clean results directory
         if self.results_dir.exists():
-            print(f"\\n>>> Cleaning existing results directory: {self.results_dir}")
             shutil.rmtree(self.results_dir)
-
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Clean and install
         self.clean_pts_cache()
         self.install_benchmark()
 
-        # Run for each thread count
+        failed = []
         for num_threads in self.thread_list:
-            self.run_benchmark(num_threads)
+            if not self.run_benchmark(num_threads):
+                failed.append(num_threads)
 
-        # Export results to CSV and JSON
         self.export_results()
-
-        # Generate summary
         self.generate_summary()
 
         print(f"\\n{'='*80}")
-        print(f">>> All benchmarks completed successfully")
+        print(f">>> Benchmark run completed")
+        if failed:
+            print(f">>> Failed thread counts: {failed}")
         print(f">>> Results directory: {self.results_dir}")
         print(f"{'='*80}")
 
-        return True
+        return len(failed) == 0
 
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
