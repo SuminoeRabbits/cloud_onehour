@@ -236,7 +236,8 @@ class FFmpegRunner:
             modified = False
 
             for pkg in packages:
-                if 'x264-7ed753b10a61d0be95f683289dfb925b800b0676.zip' in pkg:
+                # Ensure we only target the x264 package, avoiding false positives (e.g. if x264 is mentioned in ffmpeg block)
+                if 'x264-7ed753b10a61d0be95f683289dfb925b800b0676.zip' in pkg and 'ffmpeg-7.0.tar.xz' not in pkg:
                     # found the target package
                     
                     # Update MD5
@@ -361,6 +362,12 @@ class FFmpegRunner:
         if verify_result.returncode != 0 or 'not found' in verify_result.stdout.lower():
             print(f"  [ERROR] Installation verification failed - test not found")
             print(f"  [INFO] This may be due to download/checksum failures")
+            # Print previous install stdout/stderr for debugging context since we returned 0 but failed verify
+            if result.stdout:
+                print(f"  [DEBUG] Install stdout: {result.stdout[-1000:]}")
+            if result.stderr:
+                print(f"  [DEBUG] Install stderr: {result.stderr[-1000:]}")
+
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
