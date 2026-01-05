@@ -19,6 +19,12 @@ if [ -f "$SCRIPT_DIR/setup_passwordless_sudo.sh" ]; then
     fi
 fi
 
+# Install essential build dependencies (always needed)
+echo "Installing essential build dependencies..."
+sudo apt-get update
+sudo apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev \
+    flex bison texinfo libzstd-dev wget
+
 # Check if GCC-14 is already installed
 gcc14_installed=false
 if [[ -f /usr/bin/gcc-14 ]] || [[ -f /usr/local/bin/gcc-14 ]]; then
@@ -57,13 +63,7 @@ if [[ "$gcc14_installed" = false ]]; then
         GCC_VERSION="14.2.0"
         INSTALL_PREFIX="/usr/local"
         BUILD_DIR="/tmp/gcc-${GCC_VERSION}-build"
-        
-        # Install build dependencies
-        echo "Installing build dependencies..."
-        sudo apt-get update
-        sudo apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev \
-            flex bison texinfo libzstd-dev wget
-        
+
         # Download GCC source
         echo "Downloading GCC ${GCC_VERSION} source code..."
         cd /tmp

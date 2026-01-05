@@ -152,21 +152,22 @@ class Dashboard:
         self._render_once() # Final render
 
     def _render_loop(self):
+        # Initial render immediately
+        self._render_once()
         while self._running:
+            time.sleep(5)  # Refresh every 5 seconds to reduce flickering
             self._render_once()
-            time.sleep(0.5)
 
     def _render_once(self):
-        # Clear screen and move to top
-        print("\033[2J\033[H", end="")
+        lines = []
         
         run_duration = datetime.now() - self.start_time
         run_str = str(run_duration).split('.')[0]
-        print(f"{self.BOLD}CLOUD BENCHMARKING EXECUTOR (Run: {run_str}){self.ENDC}")
-        print("=" * 100)
+        lines.append(f"{self.BOLD}CLOUD BENCHMARKING EXECUTOR (Run: {run_str}){self.ENDC}")
+        lines.append("=" * 100)
         # Header only for main row concepts
-        print(f"{'INSTANCE (TYPE)':<30} | {'STAT':<4} | {'TIME':<7} | {'COST':<7}")
-        print("-" * 100)
+        lines.append(f"{'INSTANCE (TYPE)':<30} | {'STAT':<4} | {'TIME':<7} | {'COST':<7}")
+        lines.append("-" * 100)
 
         with self.lock:
             # Sort by cloud provider for grouping
@@ -205,7 +206,7 @@ class Dashboard:
                 cost = hours * total_rate
                 cost_str = f"${cost:.2f}"
 
-                print(f"{display_name:<30} | {status_str:<4} | {duration_str:<7} | {cost_str:<7}")
+                lines.append(f"{display_name:<30} | {status_str:<4} | {duration_str:<7} | {cost_str:<7}")
 
                 # 2. History Rows (Indented)
                 for item in data.get('history', []):
@@ -214,7 +215,7 @@ class Dashboard:
                      # Color code the history status?
                      color = self.GREEN if stat == "OK" else (self.FAIL if stat in ["ERR", "TO"] else self.BOLD)
                      item_str = f"  [{color}{stat}{self.ENDC}] {item['name']} ({item['duration']})"
-                     print(f"{item_str}")
+                     lines.append(f"{item_str}")
 
                 # 3. Current Step Row (Indented)
                 if raw_stat not in ['COMPLETED', 'TERMINATED']:
@@ -247,12 +248,31 @@ class Dashboard:
                         simple_step_name = simple_step_name[:57] + "..."
                         
                     current_str = f"  [{self.CYAN}>>{self.ENDC}]   {simple_step_name} {step_timer}"
-                    print(f"{current_str}")
+                    lines.append(f"{current_str}")
                     
-                print("-" * 100)
+                lines.append("-" * 100)
         
-        print("=" * 100)
+        lines.append("=" * 100)
+        
+        full_output = "\n".join(lines)
+        
+        # 1. Print to console with clear screen
+        print(f"\033[2J\033[H{full_output}")
         sys.stdout.flush()
+        
+        # 2. Write to dashboard.log (strip ANSI)
+        if self.log_dir:
+            try:
+                # Strip ANSI codes using regex
+                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                clean_output = ansi_escape.sub('', full_output)
+                
+                dashboard_file = self.log_dir / "dashboard.log"
+                with open(dashboard_file, 'w') as f:
+                    f.write(f"Last Update: {datetime.now()}\n")
+                    f.write(clean_output + "\n")
+            except Exception:
+                pass  # Ignore file write errors (don't crash dashboard)
 
 class InstanceLogger:
     """Handles logging to file and updating dashboard for a specific instance."""
