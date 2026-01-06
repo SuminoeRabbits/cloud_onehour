@@ -346,7 +346,9 @@ def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_f
 
                 if cpu_num in per_cpu_metrics and '<not supported>' not in value_str:
                     try:
-                        value = float(value_str.replace(',', ''))
+                        # Remove units like "msec" if present (e.g. "123.45 msec" -> "123.45")
+                        value_clean = value_str.split()[0]
+                        value = float(value_clean.replace(',', ''))
                         per_cpu_metrics[cpu_num][event] = value
                     except ValueError:
                         continue

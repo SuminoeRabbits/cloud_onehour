@@ -202,6 +202,18 @@ class StreamRunner:
         # Quick mode for development
         self.quick_mode = quick_mode
 
+        # Detect environment for logging
+        self.is_wsl_env = self.is_wsl()
+        if self.is_wsl_env:
+            print("  [INFO] Running on WSL environment")
+
+        # Feature Detection: Check if perf is actually functional
+        self.perf_events = self.get_perf_events()
+        if self.perf_events:
+            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
+        else:
+            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
         # Check perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
 
@@ -237,6 +249,71 @@ class StreamRunner:
             pass
 
         return "Unknown_OS"
+
+    def is_wsl(self):
+        """
+        Detect if running in WSL environment (for logging purposes only).
+
+        Returns:
+            bool: True if running in WSL, False otherwise
+        """
+        try:
+            if not os.path.exists('/proc/version'):
+                return False
+            with open('/proc/version', 'r') as f:
+                content = f.read().lower()
+                return 'microsoft' in content or 'wsl' in content
+        except Exception:
+            return False
+
+    def get_perf_events(self):
+        """
+        Determine available perf events by testing actual command execution.
+        Tests in this order:
+        1. Hardware + Software events (cycles, instructions, etc.)
+        2. Software-only events (cpu-clock, task-clock, etc.)
+        3. None (perf not available)
+
+        Returns:
+            str: Comma-separated list of available perf events, or None if perf unavailable
+        """
+        perf_path = shutil.which("perf")
+        if not perf_path:
+            print("  [INFO] perf command not found")
+            return None
+
+        # Test 1: Try hardware + software events
+        hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {hw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            # Check if output contains error about unsupported events
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return hw_events
+
+        # Test 2: Try software-only events
+        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {sw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return sw_events
+
+        # Test 3: perf unavailable
+        print("  [WARN] perf events not available")
+        return None
 
     def check_and_setup_perf_permissions(self):
         """Check and adjust perf_event_paranoid setting."""
@@ -476,7 +553,19 @@ class StreamRunner:
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
         # Wrap with perf stat (environment variables BEFORE perf stat)
-        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        # Conditional perf monitoring based on feature detection
+        if self.perf_events:
+            if self.perf_paranoid <= 0:
+                # Full monitoring mode: per-CPU stats + hardware counters
+                perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
+                pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
+            else:
+                # Limited mode: aggregated events only (no -A -a)
+                perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
+                pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
+        else:
+            # No perf monitoring available
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
 
         print(f"  [INFO] {cpu_info}")
         print(f"\n{'>'*80}")
@@ -613,45 +702,56 @@ class StreamRunner:
         for num_threads in self.thread_list:
             result_name = f"{self.benchmark}-{num_threads}threads"
 
+            # PTS removes dots from directory names, so "stream-1.3.4" becomes "stream-134"
+            result_dir_name = result_name.replace('.', '')
+            result_dir = pts_results_dir / result_dir_name
+
             # Check if result exists
-            result_dir = pts_results_dir / result_name
             if not result_dir.exists():
                 print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
+                print(f"[INFO] Expected result_name: {result_name}, actual dir: {result_dir_name}")
                 continue
 
             print(f"\n[INFO] Exporting results for {num_threads} thread(s)...")
+            print(f"[DEBUG] result_name: {result_name}, result_dir_name: {result_dir_name}")
 
             # Export to CSV
+            # Note: Use result_dir_name (with dots removed) for PTS commands
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{result_name}.csv"
+                # PTS saves to ~/result_dir_name.csv (with dots removed)
+                home_csv = Path.home() / f"{result_dir_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
+                else:
+                    print(f"  [WARN] CSV file not found at {home_csv}")
             else:
                 print(f"  [WARN] CSV export failed: {result.stderr}")
 
             # Export to JSON
+            # Note: Use result_dir_name (with dots removed) for PTS commands
             json_output = self.results_dir / f"{num_threads}-thread.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{result_name}.json"
+                # PTS saves to ~/result_dir_name.json (with dots removed)
+                home_json = Path.home() / f"{result_dir_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")
+                else:
+                    print(f"  [WARN] JSON file not found at {home_json}")
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 

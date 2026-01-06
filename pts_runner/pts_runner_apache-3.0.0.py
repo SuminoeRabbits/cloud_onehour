@@ -35,6 +35,110 @@ import sys
 from pathlib import Path
 
 
+
+class PreSeedDownloader:
+    """
+    Utility to pre-download large test files into Phoronix Test Suite cache
+    using faster downloaders (aria2c) if available.
+    """
+    def __init__(self, cache_dir=None):
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+        else:
+            self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+        
+        self.aria2_available = shutil.which("aria2c") is not None
+
+    def is_aria2_available(self):
+        return self.aria2_available
+
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
+        """
+        Parse downloads.xml for the benchmark and download large files.
+        """
+        if not self.aria2_available:
+            return False
+
+        profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
+        
+        if not profile_path.exists():
+            return False
+            
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(profile_path)
+            root = tree.getroot()
+            
+            downloads_node = root.find('Downloads')
+            if downloads_node is None:
+                return False
+                
+            for package in downloads_node.findall('Package'):
+                url_node = package.find('URL')
+                filename_node = package.find('FileName')
+                filesize_node = package.find('FileSize')
+                
+                if url_node is None or filename_node is None:
+                    continue
+                    
+                url = url_node.text.strip()
+                filename = filename_node.text.strip()
+                
+                size_bytes = -1
+                if filesize_node is not None and filesize_node.text:
+                    try:
+                        size_bytes = int(filesize_node.text.strip())
+                    except ValueError:
+                        pass
+                
+                if size_bytes <= 0:
+                    size_bytes = self.get_remote_file_size(url)
+                    
+                if size_bytes > 0:
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb >= threshold_mb:
+                        print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
+                        self.ensure_file(url, filename)
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to parse downloads.xml: {e}")
+            return False
+
+        return True
+
+    def get_remote_file_size(self, url):
+        try:
+            cmd = ['curl', '-s', '-I', '-L', url]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0: return -1
+            for line in result.stdout.splitlines():
+                if line.lower().startswith('content-length:'):
+                    return int(line.split(':')[1].strip())
+        except Exception:
+            pass
+        return -1
+
+    def ensure_file(self, url, filename):
+        target_path = self.cache_dir / filename
+        if target_path.exists():
+            print(f"  [CACHE] File found: {filename}")
+            return True
+
+        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        cmd = ["aria2c", "-x", "16", "-s", "16", "-d", str(self.cache_dir), "-o", filename, url]
+        
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"  [aria2c] Download completed: {filename}")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            if target_path.exists(): target_path.unlink()
+            return False
+
+
 class ApacheRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
@@ -69,6 +173,18 @@ class ApacheRunner:
 
         # Quick mode for development
         self.quick_mode = quick_mode
+
+        # Detect environment for logging
+        self.is_wsl_env = self.is_wsl()
+        if self.is_wsl_env:
+            print("  [INFO] Running on WSL environment")
+
+        # Feature Detection: Check if perf is actually functional
+        self.perf_events = self.get_perf_events()
+        if self.perf_events:
+            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
+        else:
+            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
         # Check and setup perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -114,6 +230,71 @@ class ApacheRunner:
             pass
             
         return "Unknown_OS"
+
+    def is_wsl(self):
+        """
+        Detect if running in WSL environment (for logging purposes only).
+
+        Returns:
+            bool: True if running in WSL, False otherwise
+        """
+        try:
+            if not os.path.exists('/proc/version'):
+                return False
+            with open('/proc/version', 'r') as f:
+                content = f.read().lower()
+                return 'microsoft' in content or 'wsl' in content
+        except Exception:
+            return False
+
+    def get_perf_events(self):
+        """
+        Determine available perf events by testing actual command execution.
+        Tests in this order:
+        1. Hardware + Software events (cycles, instructions, etc.)
+        2. Software-only events (cpu-clock, task-clock, etc.)
+        3. None (perf not available)
+
+        Returns:
+            str: Comma-separated list of available perf events, or None if perf unavailable
+        """
+        perf_path = shutil.which("perf")
+        if not perf_path:
+            print("  [INFO] perf command not found")
+            return None
+
+        # Test 1: Try hardware + software events
+        hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {hw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            # Check if output contains error about unsupported events
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return hw_events
+
+        # Test 2: Try software-only events
+        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {sw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return sw_events
+
+        # Test 3: perf unavailable
+        print("  [WARN] perf events not available")
+        return None
 
     def check_and_setup_perf_permissions(self):
         """
@@ -218,6 +399,54 @@ class ApacheRunner:
 
         return ','.join(cpu_list)
 
+    def patch_install_script(self):
+        """
+        Patch the install.sh script to add GCC-14 compatibility fix.
+
+        This method modifies the test profile's install.sh to add 'no-asm'
+        to OpenSSL build options, avoiding inline assembly errors with GCC-14.
+        """
+        install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+
+        if not install_sh_path.exists():
+            print(f"  [WARN] install.sh not found at {install_sh_path}")
+            return False
+
+        print(f"  [INFO] Patching install.sh for GCC-14 compatibility...")
+
+        try:
+            with open(install_sh_path, 'r') as f:
+                content = f.read()
+
+            # Check if already patched
+            if 'no-asm' in content and 'GCC-14 compatibility' in content:
+                print(f"  [OK] install.sh already patched")
+                return True
+
+            # Add the patch before 'make -j $NUM_CPU_CORES'
+            patch_line = '# GCC-14 compatibility: Add no-asm to OpenSSL build options to avoid inline assembly errors\nsed -i \'s/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/\' Makefile\n'
+
+            # Insert patch after 'cd wrk-4.2.0'
+            if 'cd wrk-4.2.0' in content:
+                patched_content = content.replace(
+                    'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES',
+                    f'cd wrk-4.2.0\n{patch_line}make -j $NUM_CPU_CORES'
+                )
+
+                # Write patched content
+                with open(install_sh_path, 'w') as f:
+                    f.write(patched_content)
+
+                print(f"  [OK] install.sh patched successfully")
+                return True
+            else:
+                print(f"  [WARN] Could not find 'cd wrk-4.2.0' in install.sh")
+                return False
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch install.sh: {e}")
+            return False
+
     def install_benchmark(self):
         """
         Install apache-3.0.0 with GCC-14 and OpenSSL compatibility workaround.
@@ -229,7 +458,7 @@ class ApacheRunner:
         Apache doesn't use NUM_CPU_CORES for this workload.
 
         GCC-14 Compatibility Fix:
-        - Uses -DOPENSSL_NO_ASM to disable inline assembly in OpenSSL 1.1.1i
+        - Automatically patches install.sh to add 'no-asm' to OpenSSL build options
         - Avoids "expected ')' before ':' token" errors in crypto/bn/asm/x86_64-gcc.c
         - Slightly slower than assembly version, but enables GCC-14 compilation
         """
@@ -244,6 +473,9 @@ class ApacheRunner:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
+
+        # Patch install.sh for GCC-14 compatibility
+        self.patch_install_script()
 
         # Build install command with environment variables
         # Note: NUM_CPU_CORES is NOT set because this is single-threaded (THChange_at_runtime=false)
@@ -355,18 +587,25 @@ class ApacheRunner:
 
                     # Match CPU-specific lines
                     # Format: "CPU<n>   <value>   <event>"
-                    match = re.match(r'CPU(\d+)\s+([0-9,]+)\s+(\S+)', line)
+                    # Example: "CPU0                123,456      cycles"
+                    # Example: "CPU0           123.45 msec      task-clock"
+                    match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+?)\s+([a-zA-Z0-9\-_]+)', line)
                     if match:
                         cpu_num = int(match.group(1))
-                        value_str = match.group(2).replace(',', '')
+                        value_str = match.group(2).strip()
                         event = match.group(3)
 
                         # Only process CPUs in our cpu_list
                         if cpu_num not in cpu_ids:
                             continue
 
+                        if '<not supported>' in value_str:
+                            continue
+
                         try:
-                            value = float(value_str)
+                            # Remove units like "msec" if present (e.g. "123.45 msec" -> "123.45")
+                            value_clean = value_str.split()[0]
+                            value = float(value_clean.replace(',', ''))
                         except ValueError:
                             print(f"  [WARN] Failed to parse value '{value_str}' for CPU{cpu_num} {event}")
                             continue
@@ -530,8 +769,21 @@ class ApacheRunner:
 
         # Wrap PTS command with perf stat
         # CRITICAL: Environment variables MUST come BEFORE perf stat (README)
-        # Otherwise perf stat won't propagate them to the actual command
-        pts_cmd = f'{batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        if self.perf_events:
+            if self.perf_paranoid <= 0:
+                # Full monitoring mode: per-CPU stats + hardware counters
+                pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -A -a -o {perf_stats_file} {pts_base_cmd}'
+                perf_mode = "Full (per-CPU + HW counters)"
+            else:
+                # Limited mode: aggregated events only (no -A -a)
+                pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
+                perf_mode = "Limited (aggregated events only)"
+        else:
+            # No perf monitoring
+            pts_cmd = f'{batch_env} {pts_base_cmd}'
+            perf_mode = "Disabled (perf unavailable)"
+        
+        print(f"[INFO] Perf monitoring mode: {perf_mode}")
 
         print(f"[INFO] {cpu_info}")
 
@@ -654,10 +906,22 @@ class ApacheRunner:
         for num_threads in self.thread_list:
             result_name = f"apache-{num_threads}threads"
 
-            # Check if result exists
+            # Check if result exists, try both with dots (standard) and without dots (PTS sanitized)
             result_dir = pts_results_dir / result_name
-            if not result_dir.exists():
-                print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
+            result_dir_nodots = pts_results_dir / result_name.replace('.', '')
+            
+            target_result_dir = None
+            target_result_name = None
+            
+            if result_dir.exists():
+                target_result_dir = result_dir
+                target_result_name = result_name
+            elif result_dir_nodots.exists():
+                target_result_dir = result_dir_nodots
+                target_result_name = result_name.replace('.', '')
+            
+            if not target_result_dir:
+                print(f"[WARN] Result not found for {num_threads} threads: {result_name}")
                 continue
 
             print(f"\n[INFO] Exporting results for {num_threads} thread(s)...")
@@ -666,13 +930,13 @@ class ApacheRunner:
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{result_name}.csv"
+                home_csv = Path.home() / f"{target_result_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
@@ -683,13 +947,13 @@ class ApacheRunner:
             json_output = self.results_dir / f"{num_threads}-thread.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                ['phoronix-test-suite', 'result-file-to-json', target_result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{result_name}.json"
+                home_json = Path.home() / f"{target_result_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")

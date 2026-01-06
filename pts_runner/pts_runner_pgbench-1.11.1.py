@@ -205,7 +205,19 @@ class PgbenchRunner:
         # Quick mode for development
         self.quick_mode = quick_mode
 
-        # Check perf permissions
+        # Detect environment for logging
+        self.is_wsl_env = self.is_wsl()
+        if self.is_wsl_env:
+            print("  [INFO] Running on WSL environment")
+
+        # Feature Detection: Check if perf is actually functional
+        self.perf_events = self.get_perf_events()
+        if self.perf_events:
+            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
+        else:
+            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
+        # Check and setup perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
 
     def get_os_name(self):
@@ -240,6 +252,71 @@ class PgbenchRunner:
             pass
 
         return "Unknown_OS"
+
+    def is_wsl(self):
+        """
+        Detect if running in WSL environment (for logging purposes only).
+
+        Returns:
+            bool: True if running in WSL, False otherwise
+        """
+        try:
+            if not os.path.exists('/proc/version'):
+                return False
+            with open('/proc/version', 'r') as f:
+                content = f.read().lower()
+                return 'microsoft' in content or 'wsl' in content
+        except Exception:
+            return False
+
+    def get_perf_events(self):
+        """
+        Determine available perf events by testing actual command execution.
+        Tests in this order:
+        1. Hardware + Software events (cycles, instructions, etc.)
+        2. Software-only events (cpu-clock, task-clock, etc.)
+        3. None (perf not available)
+
+        Returns:
+            str: Comma-separated list of available perf events, or None if perf unavailable
+        """
+        perf_path = shutil.which("perf")
+        if not perf_path:
+            print("  [INFO] perf command not found")
+            return None
+
+        # Test 1: Try hardware + software events
+        hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {hw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            # Check if output contains error about unsupported events
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return hw_events
+
+        # Test 2: Try software-only events
+        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {sw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return sw_events
+
+        # Test 3: perf unavailable
+        print("  [WARN] perf events not available")
+        return None
 
     def check_and_setup_perf_permissions(self):
         """Check and adjust perf_event_paranoid setting."""
@@ -591,7 +668,21 @@ class PgbenchRunner:
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
         # Wrap with perf stat (environment variables BEFORE perf stat)
-        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        if self.perf_events:
+            if self.perf_paranoid <= 0:
+                # Full monitoring mode: per-CPU stats + hardware counters
+                pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e {self.perf_events} -A -a -o {perf_stats_file} {pts_base_cmd}'
+                perf_mode = "Full (per-CPU + HW counters)"
+            else:
+                # Limited mode: aggregated events only (no -A -a)
+                pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
+                perf_mode = "Limited (aggregated events only)"
+        else:
+            # No perf monitoring
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
+            perf_mode = "Disabled (perf unavailable)"
+        
+        print(f"[INFO] Perf monitoring mode: {perf_mode}")
 
         print(f"  [INFO] {cpu_info}")
         print(f"\n{'>'*80}")
@@ -727,11 +818,23 @@ class PgbenchRunner:
 
         for num_threads in self.thread_list:
             result_name = f"{self.benchmark}-{num_threads}threads"
-
-            # Check if result exists
+            
+            # Check if result exists, try both with dots (standard) and without dots (PTS sanitized)
             result_dir = pts_results_dir / result_name
-            if not result_dir.exists():
-                print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
+            result_dir_nodots = pts_results_dir / result_name.replace('.', '')
+            
+            target_result_dir = None
+            target_result_name = None
+            
+            if result_dir.exists():
+                target_result_dir = result_dir
+                target_result_name = result_name
+            elif result_dir_nodots.exists():
+                target_result_dir = result_dir_nodots
+                target_result_name = result_name.replace('.', '')
+            
+            if not target_result_dir:
+                print(f"[WARN] Result not found for {num_threads} threads: {result_name}")
                 continue
 
             print(f"\n[INFO] Exporting results for {num_threads} thread(s)...")
@@ -740,13 +843,13 @@ class PgbenchRunner:
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{result_name}.csv"
+                home_csv = Path.home() / f"{target_result_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
@@ -757,13 +860,13 @@ class PgbenchRunner:
             json_output = self.results_dir / f"{num_threads}-thread.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                ['phoronix-test-suite', 'result-file-to-json', target_result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{result_name}.json"
+                home_json = Path.home() / f"{target_result_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")

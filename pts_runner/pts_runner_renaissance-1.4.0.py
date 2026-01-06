@@ -198,6 +198,18 @@ class RenaissanceRunner:
         # Quick mode for development
         self.quick_mode = quick_mode
 
+        # Detect environment for logging
+        self.is_wsl_env = self.is_wsl()
+        if self.is_wsl_env:
+            print("  [INFO] Running on WSL environment")
+
+        # Feature Detection: Check if perf is actually functional
+        self.perf_events = self.get_perf_events()
+        if self.perf_events:
+            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
+        else:
+            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
         # Check and setup perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
 
@@ -242,6 +254,71 @@ class RenaissanceRunner:
             pass
             
         return "Unknown_OS"
+
+    def is_wsl(self):
+        """
+        Detect if running in WSL environment (for logging purposes only).
+
+        Returns:
+            bool: True if running in WSL, False otherwise
+        """
+        try:
+            if not os.path.exists('/proc/version'):
+                return False
+            with open('/proc/version', 'r') as f:
+                content = f.read().lower()
+                return 'microsoft' in content or 'wsl' in content
+        except Exception:
+            return False
+
+    def get_perf_events(self):
+        """
+        Determine available perf events by testing actual command execution.
+        Tests in this order:
+        1. Hardware + Software events (cycles, instructions, etc.)
+        2. Software-only events (cpu-clock, task-clock, etc.)
+        3. None (perf not available)
+
+        Returns:
+            str: Comma-separated list of available perf events, or None if perf unavailable
+        """
+        perf_path = shutil.which("perf")
+        if not perf_path:
+            print("  [INFO] perf command not found")
+            return None
+
+        # Test 1: Try hardware + software events
+        hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {hw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            # Check if output contains error about unsupported events
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return hw_events
+
+        # Test 2: Try software-only events
+        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_cmd = f"perf stat -e {sw_events} -- sleep 0.01"
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            combined_output = result.stderr + result.stdout
+            if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
+                return sw_events
+
+        # Test 3: perf unavailable
+        print("  [WARN] perf events not available")
+        return None
 
     def check_and_setup_perf_permissions(self):
         """
@@ -479,18 +556,25 @@ class RenaissanceRunner:
 
                     # Match CPU-specific lines
                     # Format: "CPU<n>   <value>   <event>"
-                    match = re.match(r'CPU(\d+)\s+([0-9,]+)\s+(\S+)', line)
+                    # Example: "CPU0                123,456      cycles"
+                    # Example: "CPU0           123.45 msec      task-clock"
+                    match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+?)\s+([a-zA-Z0-9\-_]+)', line)
                     if match:
                         cpu_num = int(match.group(1))
-                        value_str = match.group(2).replace(',', '')
+                        value_str = match.group(2).strip()
                         event = match.group(3)
 
                         # Only process CPUs in our cpu_list
                         if cpu_num not in cpu_ids:
                             continue
 
+                        if '<not supported>' in value_str:
+                            continue
+
                         try:
-                            value = float(value_str)
+                            # Remove units like "msec" if present (e.g. "123.45 msec" -> "123.45")
+                            value_clean = value_str.split()[0]
+                            value = float(value_clean.replace(',', ''))
                         except ValueError:
                             print(f"  [WARN] Failed to parse value '{value_str}' for CPU{cpu_num} {event}")
                             continue
@@ -798,13 +882,13 @@ class RenaissanceRunner:
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{result_name}.csv"
+                home_csv = Path.home() / f"{target_result_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
@@ -815,13 +899,13 @@ class RenaissanceRunner:
             json_output = self.results_dir / f"{num_threads}-thread.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                ['phoronix-test-suite', 'result-file-to-json', target_result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{result_name}.json"
+                home_json = Path.home() / f"{target_result_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")
