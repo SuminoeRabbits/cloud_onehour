@@ -393,7 +393,7 @@ def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_f
     with open(perf_stats_file, 'r') as f:
         for line in f:
             # Match: "CPU0  123,456  cycles" or "CPU0  <not supported>  cycles"
-            match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+?)\s+([a-zA-Z0-9\-_]+)', line)
+            match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+)\s+([a-zA-Z0-9\-_]+)', line)
             if match:
                 cpu_num = int(match.group(1))
                 value_str = match.group(2).strip()

@@ -422,7 +422,7 @@ class SysbenchRunner:
                     # Format: "CPU<n>   <value>   <event>"
                     # Example: "CPU0                123,456      cycles"
                     # Example: "CPU0           123.45 msec      task-clock"
-                    match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+?)\s+([a-zA-Z0-9\-_]+)', line)
+                    match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+)\s+([a-zA-Z0-9\-_]+)', line)
                     if match:
                         cpu_num = int(match.group(1))
                         value_str = match.group(2).strip()
