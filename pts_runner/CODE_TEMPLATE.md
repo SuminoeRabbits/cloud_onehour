@@ -254,7 +254,32 @@ class BenchmarkRunner:
 
         return True
 
-    # ... (clean_pts_cache, install_benchmark methods) ...
+    def install_benchmark(self):
+        """Install the benchmark with optimized large file downloads."""
+        print(f"\\n{'='*80}")
+        print(f">>> Installing benchmark: {self.benchmark_full}")
+        print(f"{'='*80}")
+
+        # CRITICAL: Pre-download large files (>96MB) with aria2c for speed
+        # This step MUST be done BEFORE phoronix-test-suite batch-install
+        print(f"\\n>>> Checking for large files to pre-seed...")
+        downloader = PreSeedDownloader()
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
+
+        # Install benchmark
+        install_cmd = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 phoronix-test-suite batch-install {self.benchmark_full}'
+        print(f"\\n>>> Installing benchmark...")
+        print(f"  [EXEC] {install_cmd}")
+
+        result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"\\n[ERROR] Benchmark installation failed")
+            print(result.stdout)
+            print(result.stderr)
+            sys.exit(1)
+
+        print(f"\\n[OK] Benchmark installed successfully")
 
     def run(self):
         """Main execution flow."""

@@ -46,7 +46,7 @@ class PreSeedDownloader:
     def is_aria2_available(self):
         return self.aria2_available
 
-    def download_from_xml(self, benchmark_name, threshold_mb=256):
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
         """
         Parse downloads.xml for the benchmark and download large files.
         
@@ -210,6 +210,47 @@ class BuildLLVMRunner:
         # Check and setup perf permissions
         self.perf_paranoid = self.check_and_setup_perf_permissions()
 
+        # Detect architecture for LLVM target optimization
+        self.arch = self.detect_architecture()
+        self.llvm_target = self.get_llvm_target()
+
+    def detect_architecture(self):
+        """
+        Detect system architecture.
+
+        Returns:
+            str: Architecture name (x86_64, aarch64, etc.)
+        """
+        import platform
+        arch = platform.machine().lower()
+        print(f"  [INFO] Detected architecture: {arch}")
+        return arch
+
+    def get_llvm_target(self):
+        """
+        Get LLVM target architecture based on system architecture.
+
+        Returns:
+            str: LLVM target name (X86, AArch64, etc.)
+        """
+        arch_map = {
+            'x86_64': 'X86',
+            'amd64': 'X86',
+            'i386': 'X86',
+            'i686': 'X86',
+            'aarch64': 'AArch64',
+            'arm64': 'AArch64',
+            'armv8': 'AArch64',
+        }
+
+        llvm_target = arch_map.get(self.arch, 'all')
+        print(f"  [INFO] LLVM target for build optimization: {llvm_target}")
+
+        if llvm_target == 'all':
+            print(f"  [WARN] Unknown architecture '{self.arch}', building all targets (slower)")
+
+        return llvm_target
+
     def get_os_name(self):
         """
         Get OS name and version formatted as <Distro>_<Version>.
@@ -330,6 +371,39 @@ class BuildLLVMRunner:
         """Convert env dict to space-separated string for shell command."""
         return ' '.join([f'{k}={v}' for k, v in env_dict.items()]) + ' ' if env_dict else ''
 
+    def get_llvm_cmake_opts(self):
+        """
+        Build LLVM cmake extra options for build-time optimization.
+
+        These options reduce cmake configuration and build time by:
+        - Disabling documentation generation
+        - Disabling examples
+        - Building only the target architecture
+
+        Returns:
+            str: Space-separated cmake options
+        """
+        opts = []
+
+        # Disable documentation and examples (saves cmake time and disk space)
+        opts.append('-DLLVM_INCLUDE_EXAMPLES=OFF')
+        opts.append('-DLLVM_INCLUDE_DOCS=OFF')
+        opts.append('-DLLVM_ENABLE_DOXYGEN=OFF')
+        opts.append('-DLLVM_ENABLE_SPHINX=OFF')
+
+        # Build tools are required for the benchmark
+        opts.append('-DLLVM_BUILD_TOOLS=ON')
+
+        # Build only the target architecture (major time saver)
+        # X86 for x86_64/amd64, AArch64 for ARM64
+        if self.llvm_target != 'all':
+            opts.append(f'-DLLVM_TARGETS_TO_BUILD="{self.llvm_target}"')
+            print(f"  [OPTIMIZATION] Building only {self.llvm_target} target (skipping other architectures)")
+        else:
+            print(f"  [INFO] Building all targets (architecture detection failed)")
+
+        return ' '.join(opts)
+
     def clean_pts_cache(self):
         """Clean PTS installed tests for fresh installation."""
         print(">>> Cleaning PTS cache...")
@@ -387,7 +461,7 @@ class BuildLLVMRunner:
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
         print(f"\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
-        downloader.download_from_xml(self.benchmark_full, threshold_mb=256)
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -407,15 +481,19 @@ class BuildLLVMRunner:
         # Use batch-install to suppress prompts
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
         nproc = os.cpu_count() or 1
-        
+
         # [Fix] Enforce Ninja usage if available
         builder_env_dict = self.get_builder_env()
         if builder_env_dict:
             print(f"  [INFO] Enforcing builder environment: {builder_env_dict}")
-            
+
         builder_env_str = self._env_dict_to_str(builder_env_dict)
-        
-        install_cmd = f'{builder_env_str}MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+
+        # Build LLVM cmake extra options for optimization
+        llvm_cmake_opts = self.get_llvm_cmake_opts()
+        print(f"  [INFO] LLVM CMake extra options: {llvm_cmake_opts}")
+
+        install_cmd = f'{builder_env_str}LLVM_CMAKE_EXTRA_OPTS="{llvm_cmake_opts}" MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")

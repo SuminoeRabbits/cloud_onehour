@@ -28,6 +28,139 @@ import sys
 from pathlib import Path
 
 
+class PreSeedDownloader:
+    """
+    Utility to pre-download large test files into Phoronix Test Suite cache
+    using faster downloaders (aria2c) if available.
+    """
+    def __init__(self, cache_dir=None):
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+        else:
+            self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+
+        self.aria2_available = shutil.which("aria2c") is not None
+
+    def is_aria2_available(self):
+        return self.aria2_available
+
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
+        """
+        Parse downloads.xml for the benchmark and download large files.
+
+        Args:
+            benchmark_name: Full benchmark name (e.g., "pts/compress-xz-1.1.0")
+            threshold_mb: Size threshold in MB to trigger aria2c (default: 96MB)
+        """
+        if not self.aria2_available:
+            return False
+
+        # Locate downloads.xml
+        profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
+
+        if not profile_path.exists():
+            return False
+
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(profile_path)
+            root = tree.getroot()
+
+            downloads_node = root.find('Downloads')
+            if downloads_node is None:
+                return False
+
+            for package in downloads_node.findall('Package'):
+                url_node = package.find('URL')
+                filename_node = package.find('FileName')
+                filesize_node = package.find('FileSize')
+
+                if url_node is None or filename_node is None:
+                    continue
+
+                url = url_node.text.strip()
+                filename = filename_node.text.strip()
+
+                # Determine size
+                size_bytes = -1
+                if filesize_node is not None and filesize_node.text:
+                    try:
+                        size_bytes = int(filesize_node.text.strip())
+                    except ValueError:
+                        pass
+
+                # If size not in XML, try to get it from network
+                if size_bytes <= 0:
+                    size_bytes = self.get_remote_file_size(url)
+
+                # Check threshold
+                if size_bytes > 0:
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb >= threshold_mb:
+                        print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
+                        self.ensure_file(url, filename)
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to parse downloads.xml: {e}")
+            return False
+
+        return True
+
+    def get_remote_file_size(self, url):
+        """
+        Get remote file size in bytes using curl.
+        Returns -1 if size cannot be determined.
+        """
+        try:
+            cmd = ['curl', '-s', '-I', '-L', url]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                return -1
+
+            for line in result.stdout.splitlines():
+                if line.lower().startswith('content-length:'):
+                    try:
+                        size_str = line.split(':')[1].strip()
+                        return int(size_str)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+        return -1
+
+    def ensure_file(self, url, filename):
+        """
+        Directly download file using aria2c.
+        """
+        target_path = self.cache_dir / filename
+
+        if target_path.exists():
+            print(f"  [CACHE] File found: {filename}")
+            return True
+
+        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            "aria2c", "-x", "16", "-s", "16",
+            "-d", str(self.cache_dir),
+            "-o", filename,
+            url
+        ]
+
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"  [OK] Download completed: {filename}")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            if target_path.exists():
+                target_path.unlink()
+            return False
+
+
 class CompressXzRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
@@ -224,6 +357,11 @@ class CompressXzRunner:
         Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
+
+        # Pre-download large files with aria2c for speed
+        print(f"\n>>> Checking for large files to pre-seed...")
+        downloader = PreSeedDownloader()
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         # Remove existing installation first
         print(f"  [INFO] Removing existing installation...")

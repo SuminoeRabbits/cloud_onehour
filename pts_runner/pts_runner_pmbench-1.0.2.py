@@ -45,7 +45,7 @@ class PreSeedDownloader:
     def is_aria2_available(self):
         return self.aria2_available
 
-    def download_from_xml(self, benchmark_name, threshold_mb=256):
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
         """
         Parse downloads.xml for the benchmark and download large files.
         
@@ -313,7 +313,7 @@ class PmbenchRunner:
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
         print(f"\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
-        downloader.download_from_xml(self.benchmark_full, threshold_mb=256)
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
 
         print(f"\n>>> Installing {self.benchmark_full}...")

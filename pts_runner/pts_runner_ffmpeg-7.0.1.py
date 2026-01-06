@@ -32,6 +32,139 @@ import sys
 from pathlib import Path
 
 
+class PreSeedDownloader:
+    """
+    Utility to pre-download large test files into Phoronix Test Suite cache
+    using faster downloaders (aria2c) if available.
+    """
+    def __init__(self, cache_dir=None):
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+        else:
+            self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+
+        self.aria2_available = shutil.which("aria2c") is not None
+
+    def is_aria2_available(self):
+        return self.aria2_available
+
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
+        """
+        Parse downloads.xml for the benchmark and download large files.
+
+        Args:
+            benchmark_name: Full benchmark name (e.g., "pts/ffmpeg-7.0.1")
+            threshold_mb: Size threshold in MB to trigger aria2c (default: 96MB)
+        """
+        if not self.aria2_available:
+            return False
+
+        # Locate downloads.xml
+        profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
+
+        if not profile_path.exists():
+            return False
+
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(profile_path)
+            root = tree.getroot()
+
+            downloads_node = root.find('Downloads')
+            if downloads_node is None:
+                return False
+
+            for package in downloads_node.findall('Package'):
+                url_node = package.find('URL')
+                filename_node = package.find('FileName')
+                filesize_node = package.find('FileSize')
+
+                if url_node is None or filename_node is None:
+                    continue
+
+                url = url_node.text.strip()
+                filename = filename_node.text.strip()
+
+                # Determine size
+                size_bytes = -1
+                if filesize_node is not None and filesize_node.text:
+                    try:
+                        size_bytes = int(filesize_node.text.strip())
+                    except ValueError:
+                        pass
+
+                # If size not in XML, try to get it from network
+                if size_bytes <= 0:
+                    size_bytes = self.get_remote_file_size(url)
+
+                # Check threshold
+                if size_bytes > 0:
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb >= threshold_mb:
+                        print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
+                        self.ensure_file(url, filename)
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to parse downloads.xml: {e}")
+            return False
+
+        return True
+
+    def get_remote_file_size(self, url):
+        """
+        Get remote file size in bytes using curl.
+        Returns -1 if size cannot be determined.
+        """
+        try:
+            cmd = ['curl', '-s', '-I', '-L', url]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                return -1
+
+            for line in result.stdout.splitlines():
+                if line.lower().startswith('content-length:'):
+                    try:
+                        size_str = line.split(':')[1].strip()
+                        return int(size_str)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+        return -1
+
+    def ensure_file(self, url, filename):
+        """
+        Directly download file using aria2c.
+        """
+        target_path = self.cache_dir / filename
+
+        if target_path.exists():
+            print(f"  [CACHE] File found: {filename}")
+            return True
+
+        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            "aria2c", "-x", "16", "-s", "16",
+            "-d", str(self.cache_dir),
+            "-o", filename,
+            url
+        ]
+
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"  [OK] Download completed: {filename}")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            if target_path.exists():
+                target_path.unlink()
+            return False
+
+
 class FFmpegRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
@@ -207,6 +340,51 @@ class FFmpegRunner:
 
         return ','.join(cpu_list)
 
+    def get_ffmpeg_configure_opts(self):
+        """
+        Build FFmpeg configure extra options for build-time optimization.
+
+        These options reduce build time by:
+        - Disabling unnecessary codecs (VP8, VP9, AV1, etc.)
+        - Disabling unnecessary protocols (HTTP, RTMP, HLS, etc.)
+        - Disabling unnecessary filters
+        - Keeping only x264/x265 encoders and minimal decoders
+
+        Returns:
+            str: Space-separated configure options
+        """
+        opts = []
+
+        # Minimal build: disable everything then enable only what's needed
+        opts.append('--disable-everything')
+
+        # Enable x264/x265 encoders (required for benchmark)
+        opts.append('--enable-encoder=libx264,libx265')
+
+        # Enable decoders needed for PSNR calculation
+        opts.append('--enable-decoder=h264,hevc')
+
+        # Enable muxers/demuxers for MP4 and Matroska containers
+        opts.append('--enable-muxer=mp4,matroska')
+        opts.append('--enable-demuxer=mov,matroska')
+
+        # Enable file protocol (required)
+        opts.append('--enable-protocol=file')
+
+        # Enable minimal filters (scale for resizing, null for passthrough)
+        opts.append('--enable-filter=null,scale,psnr')
+
+        # Enable parsers for H.264/HEVC
+        opts.append('--enable-parser=h264,hevc')
+
+        # Enable bsf (bitstream filters) that might be needed
+        opts.append('--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb')
+
+        print(f"  [OPTIMIZATION] Minimal FFmpeg build - only x264/x265 encoders")
+        print(f"  [INFO] Skipping 100+ unnecessary codecs and protocols")
+
+        return ' '.join(opts)
+
     def fix_x264_checksum(self):
         """
         Fix x264 checksum in downloads.xml due to upstream changes.
@@ -272,18 +450,23 @@ class FFmpegRunner:
         Note: FFmpeg supports runtime thread configuration via -threads option.
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         """
-        print(f"\n>>> Installing {self.benchmark_full}...")
-
         # Ensure test profile exists (download if needed) so we can patch it
         print(f"  [INFO] Ensuring test profile exists...")
         subprocess.run(
             ['phoronix-test-suite', 'info', self.benchmark_full],
-            stdout=subprocess.DEVNULL, 
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
 
         # Pre-apply x264 checksum fix to avoid double installation time
         self.fix_x264_checksum()
+
+        # Pre-download large files (vbench is 875MB) with aria2c for speed
+        print(f"\n>>> Checking for large files to pre-seed...")
+        downloader = PreSeedDownloader()
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
+
+        print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Remove existing installation first
         print(f"  [INFO] Removing existing installation...")
@@ -297,12 +480,17 @@ class FFmpegRunner:
 
         # Build install command
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+
+        # Get FFmpeg configure optimization options
+        ffmpeg_configure_opts = self.get_ffmpeg_configure_opts()
+        print(f"  [INFO] FFmpeg configure extra options: {ffmpeg_configure_opts[:100]}...")
+
+        install_cmd = f'FFMPEG_CONFIGURE_EXTRA_OPTS="{ffmpeg_configure_opts}" MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging
         print(f"\n{'>'*80}")
         print(f"[PTS INSTALL COMMAND]")
-        print(f"  {install_cmd}")
+        print(f"  {install_cmd[:200]}...")
         print(f"{'<'*80}\n")
 
         # Execute install command (attempt 1)

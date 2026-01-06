@@ -86,7 +86,7 @@ class PreSeedDownloader:
                 print(f"  [ERROR] Download failed for {filename}")
                 # Don't exit, let PTS try its own download method as fallback
 
-    def download_from_xml(self, benchmark_name, threshold_mb=256):
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
         """
         Parse downloads.xml for the benchmark and download files larger than threshold.
         
@@ -351,7 +351,7 @@ class CoreMarkRunner:
 
         # Pre-seed large downloads if any (generic check)
         downloader = PreSeedDownloader()
-        downloader.download_from_xml(self.benchmark_full, threshold_mb=256)
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         # Remove existing installation first
         print(f"  [INFO] Removing existing installation...")
