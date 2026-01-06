@@ -1,8 +1,18 @@
-## コード構造テンプレート
+# コード構造テンプレート
 
 新しいpts_runner_*.pyを作成する際は、以下のテンプレートを参考にしてください。
 
-### スクリプトヘッダ (Docstring)
+## 目次
+1. [スクリプトヘッダ](#スクリプトヘッダ-docstring)
+2. [ユーティリティクラス](#ユーティリティクラス-preseeddownloader)
+3. [必須メソッド](#必須メソッド)
+4. [環境適応型メソッド (WSL/Cloud対応)](#環境適応型メソッド-wslcloud対応)
+5. [トラブルシューティングパターン](#トラブルシューティングパターン)
+6. [参考実装](#参考実装)
+
+---
+
+## スクリプトヘッダ (Docstring)
 
 スクリプトの冒頭には、対象ベンチマークの詳細情報を `phoronix-test-suite info pts/<benchmark>` コマンドから取得して記載してください。
 これにより、依存関係やテスト特性（マルチスレッド対応など）が明確になります。
@@ -27,7 +37,9 @@ Test Characteristics:
 """
 ```
 
-### ユーティリティクラス (PreSeedDownloader)
+---
+
+## ユーティリティクラス (PreSeedDownloader)
 
 大規模ファイルのダウンロードを高速化するための汎用クラスです。`aria2c` が利用可能な場合に高速ダウンロードを行い、PTSのキャッシュに配置します。
 
@@ -42,7 +54,7 @@ class PreSeedDownloader:
             self.cache_dir = Path(cache_dir)
         else:
             self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
-        
+
         self.aria2_available = shutil.which("aria2c") is not None
 
     def is_aria2_available(self):
@@ -57,33 +69,32 @@ class PreSeedDownloader:
 
         profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
         if not profile_path.exists():
-            print(f"  [WARN] downloads.xml not found at {profile_path}")
             return False
-            
+
         try:
             import xml.etree.ElementTree as ET
             tree = ET.parse(profile_path)
             root = tree.getroot()
             downloads_node = root.find('Downloads')
-            
+
             if downloads_node is None:
                 return False
-                
+
             for package in downloads_node.findall('Package'):
                 url = package.find('URL').text.strip()
                 filename = package.find('FileName').text.strip()
                 filesize_node = package.find('FileSize')
-                
+
                 size_bytes = -1
                 if filesize_node is not None and filesize_node.text:
                     try:
                         size_bytes = int(filesize_node.text.strip())
                     except ValueError:
                         pass
-                
+
                 if size_bytes <= 0:
                     size_bytes = self.get_remote_file_size(url)
-                    
+
                 if size_bytes > 0:
                     size_mb = size_bytes / (1024 * 1024)
                     if size_mb >= threshold_mb:
@@ -95,7 +106,6 @@ class PreSeedDownloader:
         return True
 
     def get_remote_file_size(self, url):
-        # (Implementation of curl -I logic)
         try:
             cmd = ['curl', '-s', '-I', '-L', url]
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -119,8 +129,13 @@ class PreSeedDownloader:
         return True
 ```
 
-### 必須メソッド
+---
 
+## 必須メソッド
+
+### クラス初期化 (`__init__`)
+
+**重要**: WSL/Cloud環境対応のため、perf機能検知を含みます。
 
 ```python
 class BenchmarkRunner:
@@ -129,280 +144,431 @@ class BenchmarkRunner:
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
         self.os_name = self.get_os_name()
-        
+
         # Thread list setup
         if threads_arg is None:
             self.thread_list = list(range(1, self.vcpu_count + 1))
         else:
             n = min(threads_arg, self.vcpu_count)
             self.thread_list = [n]
-        
+
         # Quick mode for development
         self.quick_mode = quick_mode
-        
-        # Check perf permissions
+
+        # Check perf permissions (standard Linux check)
         self.perf_paranoid = self.check_and_setup_perf_permissions()
-    
-    def check_and_setup_perf_permissions(self):
-        """Check and adjust perf_event_paranoid setting."""
-        # 実装は既存のpts_runner_build-llvm-1.6.0.pyを参照
-        pass
 
-    def get_os_name(self):
-        """
-        Get OS name and version formatted as <Distro>_<Version>.
-        Example: Ubuntu_22_04
-        """
-        try:
-            # Try lsb_release first as it's standard on Ubuntu
-            import subprocess
-            cmd = "lsb_release -d -s"
-            result = subprocess.run(cmd.split(), capture_output=True, text=True)
-            if result.returncode == 0:
-                description = result.stdout.strip() # e.g. "Ubuntu 22.04.4 LTS"
-                # Extract "Ubuntu" and "22.04"
-                parts = description.split()
-                if len(parts) >= 2:
-                    distro = parts[0]
-                    version = parts[1]
-                    # Handle version with dots
-                    version = version.replace('.', '_')
-                    return f"{distro}_{version}"
-        except Exception:
-            pass
-            
-        # Fallback to /etc/os-release
-        try:
-            with open('/etc/os-release', 'r') as f:
-                lines = f.readlines()
-            info = {}
-            for line in lines:
-                if '=' in line:
-                    k, v = line.strip().split('=', 1)
-                    info[k] = v.strip('"')
-            
-            if 'NAME' in info and 'VERSION_ID' in info:
-                distro = info['NAME'].split()[0] # "Ubuntu"
-                version = info['VERSION_ID'].replace('.', '_')
-                return f"{distro}_{version}"
-        except Exception:
-            pass
-            
-        return "Unknown_OS"
-    
-    def get_cpu_affinity_list(self, n):
-        """Generate CPU affinity list for HyperThreading optimization."""
-        half = self.vcpu_count // 2
-        cpu_list = []
-        
-        if n <= half:
-            cpu_list = [str(i * 2) for i in range(n)]
+        # Detect environment for logging
+        self.is_wsl_env = self.is_wsl()
+        if self.is_wsl_env:
+            print("  [INFO] Running on WSL environment")
+
+        # Feature Detection: Check if perf is actually functional
+        self.perf_events = self.get_perf_events()
+        if self.perf_events:
+            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
         else:
-            cpu_list = [str(i * 2) for i in range(half)]
-            logical_count = n - half
-            cpu_list.extend([str(i * 2 + 1) for i in range(logical_count)])
-        
-        return ','.join(cpu_list)
-    
-    def run_benchmark(self, num_threads):
-        """Run benchmark with specified thread count."""
-        # 1. Setup environment variables
-        # Quick mode: FORCE_TIMES_TO_RUN=1 for development (60-70% time reduction)
-        quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        
-        # LINUX_PERF=1: Enable PTS's built-in perf stat module (System Monitor)
-        perf_env = 'LINUX_PERF=1 '
-        
-        batch_env = f'{quick_env}{perf_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
-        
-        # 2. Build PTS command
-        if num_threads >= self.vcpu_count:
-            cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
-            pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
-        else:
-            cpu_list = self.get_cpu_affinity_list(num_threads)
-            pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
-        
-        # 3. Construct Final Command
-        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
-        
-        # 4. Record CPU frequency BEFORE benchmark
-        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
-        command = cmd_template.format(file=self.results_dir / f"{num_threads}-thread_freq_start.txt")
-        subprocess.run(['bash', '-c', command], capture_output=True, text=True)
-        
-        # 5. Execute PTS command
-        print(f"  [EXEC] {pts_cmd}")
-        # Using run() here for simplicity in template, but Popen() with streaming is generic best practice
-        result = subprocess.run(['bash', '-c', pts_cmd])
-        returncode = result.returncode
-        
-        # 6. Record CPU frequency AFTER benchmark
-        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\\\n", $4 * 1000}}\' > {file}'
-        command = cmd_template.format(file=self.results_dir / f"{num_threads}-thread_freq_end.txt")
-        subprocess.run(['bash', '-c', command], capture_output=True, text=True)
-        
-        if returncode != 0:
-            print(f"\\n[ERROR] Benchmark failed with return code {returncode}")
-            # Generate error log
-            err_file = self.results_dir / f"{num_threads}-thread.err"
-            with open(err_file, 'w') as f:
-                f.write(f"Benchmark failed with return code {returncode}\\n")
-                f.write(f"Command: {pts_cmd}\\n")
-            print(f"     Error log: {err_file}")
-            return False
-
-        return True
-
-    def install_benchmark(self):
-        """Install the benchmark with optimized large file downloads."""
-        print(f"\\n{'='*80}")
-        print(f">>> Installing benchmark: {self.benchmark_full}")
-        print(f"{'='*80}")
-
-        # CRITICAL: Pre-download large files (>96MB) with aria2c for speed
-        # This step MUST be done BEFORE phoronix-test-suite batch-install
-        print(f"\\n>>> Checking for large files to pre-seed...")
-        downloader = PreSeedDownloader()
-        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
-
-        # Install benchmark
-        install_cmd = f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 phoronix-test-suite batch-install {self.benchmark_full}'
-        print(f"\\n>>> Installing benchmark...")
-        print(f"  [EXEC] {install_cmd}")
-
-        result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
-
-        if result.returncode != 0:
-            print(f"\\n[ERROR] Benchmark installation failed")
-            print(result.stdout)
-            print(result.stderr)
-            sys.exit(1)
-
-        print(f"\\n[OK] Benchmark installed successfully")
-
-    def run(self):
-        """Main execution flow."""
-        print(f"\\n{'#'*80}")
-        print(f"# PTS Runner: {self.benchmark_full}")
-        print(f"# Machine: {self.machine_name}")
-        # ...
-        print(f"{'#'*80}")
-
-        # Clean results directory
-        if self.results_dir.exists():
-            shutil.rmtree(self.results_dir)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
-
-        self.clean_pts_cache()
-        self.install_benchmark()
-
-        failed = []
-        for num_threads in self.thread_list:
-            if not self.run_benchmark(num_threads):
-                failed.append(num_threads)
-
-        self.export_results()
-        self.generate_summary()
-
-        print(f"\\n{'='*80}")
-        print(f">>> Benchmark run completed")
-        if failed:
-            print(f">>> Failed thread counts: {failed}")
-        print(f">>> Results directory: {self.results_dir}")
-        print(f"{'='*80}")
-
-        return len(failed) == 0
-
-    def export_results(self):
-        """Export benchmark results to CSV and JSON formats."""
-        print(f"\\n{'='*80}")
-        print(f">>> Exporting benchmark results")
-        print(f"{'='*80}")
-
-        pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
-
-        for num_threads in self.thread_list:
-            result_name = f"{self.benchmark}-{num_threads}threads"
-
-            # Check if result exists
-            result_dir = pts_results_dir / result_name
-            if not result_dir.exists():
-                print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
-                continue
-
-            print(f"\\n[INFO] Exporting results for {num_threads} thread(s)...")
-
-            # Export to CSV
-            csv_output = self.results_dir / f"{num_threads}-thread.csv"
-            print(f"  [EXPORT] CSV: {csv_output}")
-            result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{result_name}.csv"
-                if home_csv.exists():
-                    shutil.move(str(home_csv), str(csv_output))
-                    print(f"  [OK] Saved: {csv_output}")
-            else:
-                print(f"  [WARN] CSV export failed: {result.stderr}")
-
-            # Export to JSON
-            json_output = self.results_dir / f"{num_threads}-thread.json"
-            print(f"  [EXPORT] JSON: {json_output}")
-            result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{result_name}.json"
-                if home_json.exists():
-                    shutil.move(str(home_json), str(json_output))
-                    print(f"  [OK] Saved: {json_output}")
-            else:
-                print(f"  [WARN] JSON export failed: {result.stderr}")
-
-        print(f"\\n[OK] Export completed")
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Benchmark Runner'
-    )
-    
-    parser.add_argument(
-        'threads',
-        nargs='?',
-        type=int,
-        help='Number of threads (optional, omit for scaling mode)'
-    )
-    
-    parser.add_argument(
-        '--quick',
-        action='store_true',
-        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
-    )
-    
-    args = parser.parse_args()
-    
-    if args.quick:
-        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
-        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
-    
-    # Run benchmark
-    runner = BenchmarkRunner(args.threads, quick_mode=args.quick)
-    success = runner.run()
-    
-    sys.exit(0 if success else 1)
+            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 ```
 
-### 参考実装
+### 基本メソッド
+
+```python
+def get_os_name(self):
+    """
+    Get OS name and version formatted as <Distro>_<Version>.
+    Example: Ubuntu_22_04
+    """
+    try:
+        # Try lsb_release first
+        cmd = "lsb_release -d -s"
+        result = subprocess.run(cmd.split(), capture_output=True, text=True)
+        if result.returncode == 0:
+            description = result.stdout.strip()
+            parts = description.split()
+            if len(parts) >= 2:
+                distro = parts[0]
+                version = parts[1].replace('.', '_')
+                return f"{distro}_{version}"
+    except Exception:
+        pass
+
+    # Fallback to /etc/os-release
+    try:
+        with open('/etc/os-release', 'r') as f:
+            lines = f.readlines()
+        info = {}
+        for line in lines:
+            if '=' in line:
+                k, v = line.strip().split('=', 1)
+                info[k] = v.strip('"')
+
+        if 'NAME' in info and 'VERSION_ID' in info:
+            distro = info['NAME'].split()[0]
+            version = info['VERSION_ID'].replace('.', '_')
+            return f"{distro}_{version}"
+    except Exception:
+        pass
+
+    return "Unknown_OS"
+
+def get_cpu_affinity_list(self, n):
+    """Generate CPU affinity list for HyperThreading optimization."""
+    half = self.vcpu_count // 2
+    cpu_list = []
+
+    if n <= half:
+        cpu_list = [str(i * 2) for i in range(n)]
+    else:
+        cpu_list = [str(i * 2) for i in range(half)]
+        logical_count = n - half
+        cpu_list.extend([str(i * 2 + 1) for i in range(logical_count)])
+
+    return ','.join(cpu_list)
+```
+
+---
+
+## 環境適応型メソッド (WSL/Cloud対応)
+
+### 環境検知
+
+```python
+def is_wsl(self):
+    """
+    Detect if running in WSL environment (for logging purposes only).
+    """
+    try:
+        if not os.path.exists('/proc/version'):
+            return False
+        with open('/proc/version', 'r') as f:
+            content = f.read().lower()
+            return 'microsoft' in content or 'wsl' in content
+    except Exception:
+        return False
+```
+
+### Perf機能検知（3段階フォールバック）
+
+```python
+def get_perf_events(self):
+    """
+    Determine available perf events by testing actual command execution.
+
+    Tests in this order:
+    1. Hardware + Software events (cycles, instructions, etc.)
+    2. Software-only events (cpu-clock, task-clock, etc.)
+    3. None (perf not available)
+
+    Returns:
+        str: Comma-separated perf event list, or None if unavailable
+    """
+    import shutil
+
+    # 1. Check if perf command exists in PATH
+    perf_path = shutil.which("perf")
+    if not perf_path:
+        print("  [INFO] perf command not found in PATH")
+        return None
+
+    # 2. Test Hardware + Software events (Preferred for Native Linux)
+    hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
+    test_cmd = f"{perf_path} stat -e {hw_events} sleep 0.01 2>&1"
+
+    try:
+        result = subprocess.run(
+            ['bash', '-c', test_cmd],
+            capture_output=True,
+            text=True,
+            timeout=3
+        )
+
+        output = result.stdout + result.stderr
+
+        # Check if all events are supported
+        if result.returncode == 0 and '<not supported>' not in output:
+            print(f"  [OK] Hardware PMU available: {hw_events}")
+            return hw_events
+
+        # 3. Test Software-only events (Fallback for Cloud/VM/Standard WSL)
+        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
+        test_sw_cmd = f"{perf_path} stat -e {sw_events} sleep 0.01 2>&1"
+        result_sw = subprocess.run(
+            ['bash', '-c', test_sw_cmd],
+            capture_output=True,
+            text=True,
+            timeout=3
+        )
+
+        if result_sw.returncode == 0:
+            print(f"  [INFO] Hardware PMU not available. Using software events: {sw_events}")
+            return sw_events
+
+    except subprocess.TimeoutExpired:
+        print("  [WARN] perf test timed out")
+    except Exception as e:
+        print(f"  [DEBUG] perf test execution failed: {e}")
+
+    print("  [INFO] perf command exists but is not functional (permission or kernel issue)")
+    return None
+```
+
+### Perf統計パース（完全版）
+
+詳細な実装は`pts_runner_stream-1.3.4.py`の`parse_perf_stats_and_freq()`メソッド(307-489行)を参照。
+
+**簡略版**:
+```python
+def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
+    """
+    Parse perf stat output and CPU frequency files.
+    Handles both hardware and software-only perf events gracefully.
+    """
+    # If perf monitoring was disabled, return minimal info
+    if not self.perf_events or not perf_stats_file.exists():
+        return {
+            'note': 'perf monitoring not available',
+            'cpu_list': cpu_list
+        }
+
+    cpu_ids = [int(c.strip()) for c in cpu_list.split(',')]
+    per_cpu_metrics = {cpu_id: {} for cpu_id in cpu_ids}
+
+    # Parse perf stat output with flexible regex
+    with open(perf_stats_file, 'r') as f:
+        for line in f:
+            # Match: "CPU0  123,456  cycles" or "CPU0  <not supported>  cycles"
+            match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+?)\s+([a-zA-Z0-9\-_]+)', line)
+            if match:
+                cpu_num = int(match.group(1))
+                value_str = match.group(2).strip()
+                event = match.group(3)
+
+                if cpu_num in per_cpu_metrics and '<not supported>' not in value_str:
+                    try:
+                        value = float(value_str.replace(',', ''))
+                        per_cpu_metrics[cpu_num][event] = value
+                    except ValueError:
+                        continue
+
+    # Calculate metrics (IPC, frequency, utilization)
+    # 詳細な実装はpts_runner_stream-1.3.4.pyを参照
+
+    return {'per_cpu_metrics': per_cpu_metrics, 'cpu_list': cpu_list}
+```
+
+### 環境適応型run_benchmark
+
+```python
+def run_benchmark(self, num_threads):
+    """Run benchmark with conditional perf monitoring."""
+    # ... (ファイルパスとコマンド構築)
+
+    # Construct Final Command with conditional perf
+    if self.perf_events:
+        # Perf available - check if we can use per-CPU breakdown
+        if self.perf_paranoid <= 0:
+            # Full monitoring mode with per-CPU metrics
+            perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
+            print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
+        else:
+            # Limited mode without per-CPU breakdown
+            perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
+            print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+
+        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
+    else:
+        # Perf unavailable
+        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
+        print(f"  [INFO] Running without perf")
+
+    # Execute benchmark...
+```
+
+---
+
+## トラブルシューティングパターン
+
+### ドット除去問題への対応
+
+**問題**: PTSは結果ディレクトリ名からドット(`.`)を削除する
+**例**: `stream-1.3.4-4threads` → `stream-134-4threads`
+
+```python
+def export_results(self):
+    """Export benchmark results to CSV and JSON formats."""
+    pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
+
+    for num_threads in self.thread_list:
+        result_name = f"{self.benchmark}-{num_threads}threads"
+
+        # CRITICAL: PTS removes dots from directory names
+        result_dir_name = result_name.replace('.', '')
+        result_dir = pts_results_dir / result_dir_name
+
+        if not result_dir.exists():
+            print(f"[WARN] Result not found: {result_dir}")
+            print(f"[INFO] Expected: {result_name}, actual: {result_dir_name}")
+            continue
+
+        print(f"[DEBUG] result_name: {result_name}, result_dir_name: {result_dir_name}")
+
+        # Export to CSV - Use result_dir_name (dots removed)
+        csv_output = self.results_dir / f"{num_threads}-thread.csv"
+        subprocess.run(['phoronix-test-suite', 'result-file-to-csv', result_dir_name], ...)
+        home_csv = Path.home() / f"{result_dir_name}.csv"  # Also use result_dir_name here
+
+        # Export to JSON - Use result_dir_name (dots removed)
+        json_output = self.results_dir / f"{num_threads}-thread.json"
+        subprocess.run(['phoronix-test-suite', 'result-file-to-json', result_dir_name], ...)
+        home_json = Path.home() / f"{result_dir_name}.json"  # Also use result_dir_name here
+```
+
+### コンパイラ互換性パッチ
+
+**問題**: GCC-14でOpenSSLのインラインアセンブリがコンパイルエラー
+**解決策**: install.shを動的にパッチして`no-asm`オプションを追加
+
+```python
+def patch_install_script(self):
+    """
+    Patch the install.sh script to add compiler compatibility fixes.
+
+    Example: Add no-asm to OpenSSL build options for GCC-14 compatibility
+    """
+    install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+
+    if not install_sh_path.exists():
+        print(f"  [WARN] install.sh not found at {install_sh_path}")
+        return False
+
+    print(f"  [INFO] Patching install.sh for compiler compatibility...")
+
+    try:
+        with open(install_sh_path, 'r') as f:
+            content = f.read()
+
+        # Check if already patched (冪等性確保)
+        if 'GCC-14 compatibility' in content or 'no-asm' in content:
+            print(f"  [OK] install.sh already patched")
+            return True
+
+        # Patch example for Apache/wrk OpenSSL issue
+        patch_line = '# GCC-14 compatibility: Add no-asm to OpenSSL build options\n'
+        patch_line += 'sed -i \'s/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/\' Makefile\n'
+
+        # Insert patch after 'cd wrk-4.2.0'
+        if 'cd wrk-4.2.0' in content:
+            patched_content = content.replace(
+                'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES',
+                f'cd wrk-4.2.0\n{patch_line}make -j $NUM_CPU_CORES'
+            )
+
+            with open(install_sh_path, 'w') as f:
+                f.write(patched_content)
+
+            print(f"  [OK] install.sh patched successfully")
+            return True
+        else:
+            print(f"  [WARN] Could not find patch location in install.sh")
+            return False
+
+    except Exception as e:
+        print(f"  [ERROR] Failed to patch install.sh: {e}")
+        return False
+```
+
+**使用方法**（install_benchmarkメソッド内）:
+```python
+def install_benchmark(self):
+    """Install benchmark with compiler compatibility patches."""
+    # Remove existing installation
+    remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
+    subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Patch install.sh if needed
+    self.patch_install_script()
+
+    # Build install command
+    nproc = os.cpu_count() or 1
+    install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+
+    # Execute
+    result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  [ERROR] Installation failed")
+        sys.exit(1)
+
+    print(f"  [OK] Installation completed and verified")
+```
+
+---
+
+## 参考実装
 
 完全な実装例は以下を参照:
-- `pts_runner_coremark-1.0.1.py` - --quickフラグ実装済み（最新）
-- `pts_runner_build-llvm-1.6.0.py` - 最も完全で正しい実装
-- `pts_runner_apache-3.0.0.py` - Single-threaded benchmarkの例
+
+### 最新のベストプラクティス
+- **`pts_runner_coremark-1.0.1.py`** - `--quick`フラグ実装、最新パターン
+- **`pts_runner_stream-1.3.4.py`** - ドット除去対応、完全な`parse_perf_stats`実装
+- **`pts_runner_apache-3.0.0.py`** - `patch_install_script`実装、シングルスレッド対応
+
+### 機能別参考
+- **Perf権限チェック**: `pts_runner_build-llvm-1.6.0.py` - 最も完全な実装
+- **PreSeedDownloader**: `pts_runner_x265-1.5.0.py` - 大規模ファイル対応
+- **マルチスレッド最適化**: `pts_runner_build-gcc-1.5.0.py` - CPU affinity設定
+
+---
+
+## テスト要件チェックリスト
+
+新規スクリプト作成後、以下の環境でテストすること:
+
+### 環境テスト
+- [ ] Native Linux環境（perf HWイベント有効）
+- [ ] WSL環境（perf導入済み）
+- [ ] WSL環境（perf未導入）
+- [ ] Cloud VM環境（SW events only）
+
+### 機能テスト
+- [ ] `--quick`フラグで正常動作
+- [ ] ドット付きベンチマーク名でexport成功
+- [ ] summary.json生成成功
+- [ ] perf無効時もエラーなく完走
+- [ ] コンパイラパッチの冪等性確認
+
+### 出力ファイル確認
+- [ ] `{n}-thread.log`
+- [ ] `{n}-thread.csv`
+- [ ] `{n}-thread.json`
+- [ ] `{n}-thread_perf_summary.json`
+- [ ] `summary.log`
+- [ ] `summary.json`
+- [ ] `stdout.log`
+
+---
+
+## 実装の優先順位
+
+1. **基本構造** - `__init__`, `run`, `install_benchmark`
+2. **環境適応** - `is_wsl()`, `get_perf_events()`
+3. **ベンチマーク実行** - `run_benchmark()`
+4. **結果エクスポート** - `export_results()` (ドット除去対応)
+5. **サマリ生成** - `generate_summary()`
+6. **トラブルシューティング** - `patch_install_script()` (必要な場合のみ)
+
+---
+
+## よくある問題と解決策
+
+### Q1: WSLでperfが動かない
+**A**: `get_perf_events()`が自動的にSWイベントにフォールバックします。perfなしでもベンチマークは実行可能です。
+
+### Q2: summary.jsonが生成されない
+**A**: `export_results()`でドット除去対応を確認してください。`result_dir_name = result_name.replace('.', '')`
+
+### Q3: GCC-14でコンパイルエラー
+**A**: `patch_install_script()`を実装し、`install_benchmark()`内で呼び出してください。
+
+### Q4: perf_event_paranoidエラー
+**A**: `get_perf_events()`の動作テストで自動的に判定されます。`-A -a`フラグは`perf_paranoid <= 0`の場合のみ使用されます。
