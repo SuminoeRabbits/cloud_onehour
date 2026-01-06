@@ -179,8 +179,9 @@ class Dashboard:
                 # Compact Status
                 raw_stat = data['status']
                 stat_map = {
-                    'RUNNING': 'RUN ', 'COMPLETED': 'DONE', 'TERMINATED': 'TERM', 
-                    'PENDING': 'WAIT', 'ERROR': 'ERR '
+                    'RUNNING': 'RUN ', 'COMPLETED': 'DONE', 'TERMINATED': 'TERM',
+                    'PENDING': 'WAIT', 'ERROR': 'ERR ', 'TERM_TIMEOUT': 'T/O ',
+                    'TERM_FAILED': 'TFAL'
                 }
                 compact_stat = stat_map.get(raw_stat, raw_stat[:4])
                 status_str = f"{data['color']}{compact_stat}{self.ENDC}"
@@ -218,7 +219,7 @@ class Dashboard:
                      lines.append(f"{item_str}")
 
                 # 3. Current Step Row (Indented)
-                if raw_stat not in ['COMPLETED', 'TERMINATED']:
+                if raw_stat not in ['COMPLETED', 'TERMINATED', 'TERM_TIMEOUT', 'TERM_FAILED']:
                     step_elapsed = datetime.now() - data.get('step_start', datetime.now())
                     step_time_str = str(step_elapsed).split('.')[0]
                     # Format: "  [>>] W1: name... [05:22]"
@@ -1605,17 +1606,80 @@ def process_instance(cloud, inst, config, key_path, log_dir):
             progress(instance_name, "Terminating", logger)
             logger.info(f"Terminating instance {name}...")
 
-            if cloud == 'aws' and region:
-                run_cmd(f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}", logger=logger)
-            elif cloud == 'gcp' and project and zone:
-                run_cmd(f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet", logger=logger)
-            elif cloud == 'oci' and compartment_id:
-                # TODO: Implement OCI instance termination
-                logger.warn("OCI instance termination not yet implemented")
-                # run_cmd(f"oci compute instance terminate --instance-id {instance_id} --force", logger=logger)
+            # Termination timeout and retry configuration
+            termination_timeout = 600  # 10 minutes (increased from default)
+            max_retries = 3
 
-            logger.info(f"Instance {name} terminated")
-            DASHBOARD.update(instance_name, status="TERMINATED")
+            for attempt in range(max_retries):
+                try:
+                    if cloud == 'aws' and region:
+                        run_cmd(
+                            f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}",
+                            timeout=termination_timeout,
+                            logger=logger
+                        )
+                    elif cloud == 'gcp' and project and zone:
+                        run_cmd(
+                            f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet",
+                            timeout=termination_timeout,
+                            logger=logger
+                        )
+                    elif cloud == 'oci' and compartment_id:
+                        # TODO: Implement OCI instance termination
+                        logger.warn("OCI instance termination not yet implemented")
+                        # run_cmd(f"oci compute instance terminate --instance-id {instance_id} --force", timeout=termination_timeout, logger=logger)
+
+                    logger.info(f"Instance {name} terminated successfully")
+                    DASHBOARD.update(instance_name, status="TERMINATED")
+                    break  # Success, exit retry loop
+
+                except subprocess.TimeoutExpired:
+                    if attempt < max_retries - 1:
+                        logger.warn(f"Termination timeout (attempt {attempt+1}/{max_retries}), retrying in 30s...")
+                        time.sleep(30)
+                        continue
+                    else:
+                        logger.error(f"Termination failed after {max_retries} attempts due to timeout")
+                        logger.warn(f"Instance {name} ({instance_id}) may still be running - please verify manually")
+
+                        # Provide manual cleanup command based on cloud provider
+                        if cloud == 'gcp':
+                            cleanup_cmd = f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet"
+                        elif cloud == 'aws':
+                            cleanup_cmd = f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}"
+                        elif cloud == 'oci':
+                            cleanup_cmd = f"oci compute instance terminate --instance-id {instance_id} --force"
+                        else:
+                            cleanup_cmd = "Unknown cloud provider"
+
+                        logger.warn(f"Manual cleanup: {cleanup_cmd}")
+                        DASHBOARD.update(instance_name, status="TERM_TIMEOUT", step="Termination timed out", color=DASHBOARD.WARNING)
+                        DASHBOARD.add_history(instance_name, "Termination", termination_timeout * max_retries, "TIMEOUT")
+                        break
+
+                except Exception as term_error:
+                    if attempt < max_retries - 1:
+                        logger.warn(f"Termination error (attempt {attempt+1}/{max_retries}): {term_error}, retrying in 30s...")
+                        time.sleep(30)
+                        continue
+                    else:
+                        logger.error(f"Termination failed after {max_retries} attempts: {term_error}")
+                        logger.warn(f"Instance {name} ({instance_id}) may still be running - please verify manually")
+
+                        # Provide manual cleanup command
+                        if cloud == 'gcp':
+                            cleanup_cmd = f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet"
+                        elif cloud == 'aws':
+                            cleanup_cmd = f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}"
+                        elif cloud == 'oci':
+                            cleanup_cmd = f"oci compute instance terminate --instance-id {instance_id} --force"
+                        else:
+                            cleanup_cmd = "Unknown cloud provider"
+
+                        logger.warn(f"Manual cleanup: {cleanup_cmd}")
+                        DASHBOARD.update(instance_name, status="TERM_FAILED", step="Termination failed", color=DASHBOARD.FAIL)
+                        DASHBOARD.add_history(instance_name, "Termination", 0, "ERROR")
+                        break
 
             # Unregister from active instances tracking
             unregister_instance(instance_id)
