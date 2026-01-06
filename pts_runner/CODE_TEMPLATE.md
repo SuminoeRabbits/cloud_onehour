@@ -81,51 +81,106 @@ class PreSeedDownloader:
                 return False
 
             for package in downloads_node.findall('Package'):
-                url = package.find('URL').text.strip()
-                filename = package.find('FileName').text.strip()
+                url_node = package.find('URL')
+                filename_node = package.find('FileName')
                 filesize_node = package.find('FileSize')
 
+                if url_node is None or filename_node is None:
+                    continue
+
+                # Handle comma-separated URLs
+                urls = [u.strip() for u in url_node.text.split(',')]
+                url = urls[0] if urls else None
+                filename = filename_node.text.strip()
+                
+                if not url:
+                    continue
+
+                # Determine size
                 size_bytes = -1
                 if filesize_node is not None and filesize_node.text:
                     try:
                         size_bytes = int(filesize_node.text.strip())
                     except ValueError:
                         pass
-
+                
+                # If size not in XML, try to get it from network (fallback)
                 if size_bytes <= 0:
                     size_bytes = self.get_remote_file_size(url)
-
+                    
+                # Check threshold
                 if size_bytes > 0:
                     size_mb = size_bytes / (1024 * 1024)
                     if size_mb >= threshold_mb:
                         print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
-                        self.ensure_file(url, filename)
+                        # Pass all URLs to ensure_file for fallback support
+                        self.ensure_file(urls, filename)
         except Exception as e:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
             return False
         return True
 
     def get_remote_file_size(self, url):
+        """
+        Get remote file size in bytes using curl.
+        Returns -1 if size cannot be determined.
+        """
         try:
+            # -s: Silent, -I: Header only, -L: Follow redirects
             cmd = ['curl', '-s', '-I', '-L', url]
             result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(f"  [WARN] Failed to get headers for {url}")
+                return -1
+                
+            # Parse Content-Length
+            # Look for "content-length: 12345" (case insensitive)
             for line in result.stdout.splitlines():
                 if line.lower().startswith('content-length:'):
-                    return int(line.split(':')[1].strip())
-        except Exception:
-            pass
+                    try:
+                        size_str = line.split(':')[1].strip()
+                        return int(size_str)
+                    except ValueError:
+                        pass
+        except Exception as e:
+            print(f"  [WARN] Error checking size: {e}")
+            
         return -1
 
-    def ensure_file(self, url, filename):
+    def ensure_file(self, urls, filename):
+        """
+        Directly download file using aria2c (assumes size check passed).
+        Args:
+            urls: List of URLs or single URL string
+            filename: Target filename
+        """
         target_path = self.cache_dir / filename
+        
+        # Check if file exists in cache
         if target_path.exists():
             print(f"  [CACHE] File found: {filename}")
             return True
 
-        print(f"  [ARIA2] Downloading {filename}...")
+        if isinstance(urls, str):
+            urls = [urls]
+
+        # Need to download
+        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        cmd = ["aria2c", "-x", "16", "-s", "16", "-d", str(self.cache_dir), "-o", filename, url]
-        subprocess.run(cmd, check=True)
+        
+        # aria2c command - pass all URLs as separate arguments
+        cmd = [
+            "aria2c", "-x", "16", "-s", "16", 
+            "-d", str(self.cache_dir), 
+            "-o", filename
+        ] + urls
+        
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"  [ERROR] aria2c download failed for {filename}: {e}")
+            return False
         return True
 ```
 

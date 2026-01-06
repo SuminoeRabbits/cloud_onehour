@@ -83,9 +83,14 @@ class PreSeedDownloader:
                 if url_node is None or filename_node is None:
                     continue
                     
-                url = url_node.text.strip()
+                # Handle comma-separated URLs
+                urls = [u.strip() for u in url_node.text.split(',')]
+                url = urls[0] if urls else None
                 filename = filename_node.text.strip()
                 
+                if not url:
+                    continue
+
                 # Determine size
                 size_bytes = -1
                 if filesize_node is not None and filesize_node.text:
@@ -103,7 +108,8 @@ class PreSeedDownloader:
                     size_mb = size_bytes / (1024 * 1024)
                     if size_mb >= threshold_mb:
                         print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
-                        self.ensure_file(url, filename)
+                        # Pass all URLs to ensure_file for fallback support
+                        self.ensure_file(urls, filename)
 
         except Exception as e:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
@@ -137,9 +143,12 @@ class PreSeedDownloader:
             
         return -1
 
-    def ensure_file(self, url, filename):
+    def ensure_file(self, urls, filename):
         """
         Directly download file using aria2c (assumes size check passed).
+        Args:
+            urls: List of URLs or single URL string
+            filename: Target filename
         """
         target_path = self.cache_dir / filename
         
@@ -148,17 +157,19 @@ class PreSeedDownloader:
             print(f"  [CACHE] File found: {filename}")
             return True
 
+        if isinstance(urls, str):
+            urls = [urls]
+
         # Need to download
         print(f"  [ARIA2] Downloading {filename} with 16 connections...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # aria2c command
+        # aria2c command - pass all URLs as separate arguments
         cmd = [
             "aria2c", "-x", "16", "-s", "16", 
             "-d", str(self.cache_dir), 
-            "-o", filename,
-            url
-        ]
+            "-o", filename
+        ] + urls
         
         try:
             subprocess.run(cmd, check=True)
