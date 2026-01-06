@@ -57,6 +57,9 @@
 # --split-3rd: 実行コマンドを総数の1/5に分割し、3番目の1/5のみを生成・実行します。
 # --split-4th: 実行コマンドを総数の1/5に分割し、4番目の1/5のみを生成・実行します。
 # --split-5th: 実行コマンドを総数の1/5に分割し、5番目の1/5のみを生成・実行します。
+# --regression: このオプションが付いた場合 "exe_time_v8cpu"値により "--quick"を上書きします。
+# 　　　　　　　　もし　"exe_time_v8cpu"値が15.25以上の場合は 必ず実行オプションに"--quick"を追加します。
+#                もし"exe_time_v8cpu"値が15.25未満の場合は 必ず実行オプションに"--quick"を追加しません。   
 # 
 # 例外処理：
 # - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
@@ -100,17 +103,15 @@ def get_cpu_count():
     return os.cpu_count() or 1
 
 
-def generate_test_commands(test_suite, max_threads=None, quick_mode=False):
+def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False):
     """
     Generate test commands from test_suite.json.
 
     Args:
         test_suite: Parsed test_suite.json content
-        max_threads: If specified, override thread count to this value (except for single-threaded tests)
+        max_threads: If specified, override thread count to this value (except for single_threaded tests)
         quick_mode: If True, append --quick to all commands
-
-    Returns:
-        list: List of command strings to execute
+        regression_mode: If True, override quick_mode based on exe_time_v8cpu value
     """
     commands = []
     nproc = get_cpu_count()
@@ -142,7 +143,7 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False):
 
             testname = test_id[4:]  # Remove "pts/" prefix
 
-            # Determine <number> argument based on thread configuration
+            # Determine -number- argument based on thread configuration
             th_fix_in_compile = test_config.get("THFix_in_compile", False)
             th_change_at_runtime = test_config.get("THChange_at_runtime", False)
 
@@ -161,7 +162,7 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False):
                     print(f"  [INFO] {testname}: Single thread mode, using 1 thread")
 
             # Apply --max override if specified
-            # Override to 288 for all cases except single-threaded (number_arg="1")
+            # Override to 288 for all cases except single_threaded (number_arg="1")
             if max_threads is not None:
                 if number_arg == "1":
                     # Single-threaded: keep as 1
@@ -190,8 +191,25 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False):
             else:
                 cmd = f"{runner_script} {number_arg}"
             
-            # Append --quick flag if quick mode enabled
-            if quick_mode:
+            # Determine if --quick should be appended
+            use_quick = quick_mode
+            
+            if regression_mode:
+                # Override quick_mode based on exe_time_v8cpu
+                try:
+                    exe_time = float(test_config.get("exe_time_v8cpu", "0.0"))
+                except ValueError:
+                    exe_time = 0.0
+                
+                if exe_time >= 15.25:
+                    use_quick = True
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 15.25 -> Enforcing --quick")
+                else:
+                    use_quick = False
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} < 15.25 -> Disabling --quick")
+
+            # Append --quick flag if enabled
+            if use_quick:
                 cmd = f"{cmd} --quick"
 
             commands.append(cmd)
@@ -367,6 +385,12 @@ Examples:
         help='Execute only the last 1/5 of tests (for splitting long runs)'
     )
 
+    parser.add_argument(
+        '--regression',
+        action='store_true',
+        help='Regression mode: overrides --quick based on exe_time_v8cpu value (>=15.25 adds --quick)'
+    )
+
     # Exception handling: Ignore invalid options and continue execution
     try:
         args = parser.parse_args()
@@ -387,7 +411,8 @@ Examples:
                 split_2nd=False,
                 split_3rd=False,
                 split_4th=False,
-                split_5th=False
+                split_5th=False,
+                regression=False
             )
         else:
             # Normal exit (--help was called)
@@ -414,7 +439,13 @@ Examples:
     test_suite = load_test_suite(args.suite)
 
     # Generate commands
-    commands = generate_test_commands(test_suite, max_threads=max_threads, quick_mode=args.quick)
+    # Generate commands
+    commands = generate_test_commands(
+        test_suite, 
+        max_threads=max_threads, 
+        quick_mode=args.quick,
+        regression_mode=args.regression
+    )
 
     # Apply split filter if requested
     split_flags = [args.split_1st, args.split_2nd, args.split_3rd, args.split_4th, args.split_5th]

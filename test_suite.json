@@ -10,7 +10,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument"
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "4.0"
                 }
             }
         },
@@ -23,7 +24,8 @@
                     "THChange_at_runtime": false,
                     "TH_scaling": "N/A",
                     "sve2_support": "unknown",
-                    "notes": "Thread count fixed at compile via -DMULTITHREAD=$NUM_CPU_CORES. # of thread is decided by compile."
+                    "notes": "Thread count fixed at compile via -DMULTITHREAD=$NUM_CPU_CORES. # of thread is decided by compile.",
+                    "exe_time_v8cpu": "1.0"
                 }
             }
         },
@@ -36,7 +38,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
-                    "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation"
+                    "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation",
+                    "exe_time_v8cpu": "50.0"
                 },
                 "pts/build-llvm-1.6.0": {
                     "enabled": true,
@@ -44,7 +47,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
-                    "notes": "Uses cmake --build . -- -j $NUM_CPU_CORES"
+                    "notes": "Uses cmake --build . -- -j $NUM_CPU_CORES",
+                    "exe_time_v8cpu": "50.0"
                 },
                 "pts/build-gcc-1.5.0": {
                     "enabled": true,
@@ -52,7 +56,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
-                    "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation"
+                    "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation",
+                    "exe_time_v8cpu": "50.0"
                 }
             }
         },
@@ -65,7 +70,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "7-Zip benchmark uses -mmt=$NUM_CPU_CORES for thread control (custom install.sh). Default auto-detects all threads without this option."
+                    "notes": "7-Zip benchmark uses -mmt=$NUM_CPU_CORES for thread control (custom install.sh). Default auto-detects all threads without this option.",
+                    "exe_time_v8cpu": "1.0"
                 },
                 "pts/compress-zstd-1.6.0": {
                     "enabled": true,
@@ -73,7 +79,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument"
+                    "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "10.5"
                 },
                 "pts/compress-xz-1.1.0": {
                     "enabled": true,
@@ -81,7 +88,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument"
+                    "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "2.0"
                 }
             }
         },
@@ -94,7 +102,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
-                    "notes": "Uses -multi $NUM_CPU_CORES runtime CLI argument"
+                    "notes": "Uses -multi $NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "50.0"
                 },
                 "pts/nginx-3.0.1": {
                     "enabled": true,
@@ -102,7 +111,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "wrk uses -t $NUM_CPU_CORES for client threads. nginx worker_processes is commented out in install.sh and should be enabled with 'worker_processes auto;' for server-side scaling"
+                    "notes": "wrk uses -t $NUM_CPU_CORES for client threads. nginx worker_processes is commented out in install.sh and should be enabled with 'worker_processes auto;' for server-side scaling",
+                    "exe_time_v8cpu": "15.5"
                 }
             }
         },
@@ -115,7 +125,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "jvm-internal",
                     "sve2_support": true,
-                    "notes": "JVM manages threading internally; different workloads have different parallelism. SVE2 is supported after OpenJDK9."
+                    "notes": "JVM manages threading internally; different workloads have different parallelism. SVE2 is supported after OpenJDK9.",
+                    "exe_time_v8cpu": "15.5"
                 },
                 "pts/java-jmh-1.0.1": {
                     "enabled": true,
@@ -123,7 +134,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "jmh:-t max",
                     "sve2_support": true,
-                    "notes": "JMH uses -t max to utilize all available threads. SVE2 is supported after OpenJDK9."
+                    "notes": "JMH uses -t max to utilize all available threads. SVE2 is supported after OpenJDK9.",
+                    "exe_time_v8cpu": "10.5"
                 }
             }
         },
@@ -136,7 +148,8 @@
                     "THChange_at_runtime": false,
                     "TH_scaling": "single-threaded",
                     "sve2_support": false,
-                    "notes": "Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test. GCC-14 compatible (OpenSSL built with no-asm option via modified install.sh)."
+                    "notes": "Uses wrk for load testing; Apache itself doesn't scale with vCPUs in this test. GCC-14 compatible (OpenSSL built with no-asm option via modified install.sh).",
+                    "exe_time_v8cpu": "50.0"
                 },
                 "pts/spark-1.0.1": {
                     "enabled": true,
@@ -144,7 +157,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "spark-internal (auto-detect, configurable via spark-defaults.conf)",
                     "sve2_support": false,
-                    "notes": "Need to downgrade JDK17. Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)"
+                    "notes": "Need to downgrade JDK17. Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)",
+                    "exe_time_v8cpu": "50.0"
                 }
             }
         },
@@ -157,7 +171,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
-                    "notes": "Uses -threads $NUM_CPU_CORES runtime option for video encoding. run.sh must be updated to scale."
+                    "notes": "Uses -threads $NUM_CPU_CORES runtime option for video encoding. run.sh must be updated to scale.",
+                    "exe_time_v8cpu": "50.0"
                 },
                 "pts/x265-1.5.0": {
                     "enabled": true,
@@ -165,7 +180,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
-                    "notes": "x265 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them"
+                    "notes": "x265 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them",
+                    "exe_time_v8cpu": "10.5"
                 }
             }
         },
@@ -178,7 +194,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "PostgreSQL pgbench uses -j $NUM_CPU_CORES for worker threads (already implemented in install.sh). Client count controlled via -c option in test settings"
+                    "notes": "PostgreSQL pgbench uses -j $NUM_CPU_CORES for worker threads (already implemented in install.sh). Client count controlled via -c option in test settings",
+                    "exe_time_v8cpu": "50.0"
                 },
                 "pts/redis-1.3.1": {
                     "enabled": true,
@@ -186,7 +203,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "redis-benchmark:--threads",
                     "sve2_support": false,
-                    "notes": "redis-benchmark needs --threads $NUM_CPU_CORES option added to install.sh. Redis server supports I/O threading (v6.0+) via io-threads config. Client connections via -c option (already set to 50)"
+                    "notes": "redis-benchmark needs --threads $NUM_CPU_CORES option added to install.sh. Redis server supports I/O threading (v6.0+) via io-threads config. Client connections via -c option (already set to 50)",
+                    "exe_time_v8cpu": "4.0"
                 }
             }
         },
@@ -199,7 +217,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:OMP_NUM_THREADS",
                     "sve2_support": false,
-                    "notes": "Uses OpenMP with OMP_NUM_THREADS=$NUM_CPU_CORES. Need to set -fopenmp at build, export OMP_NUM_THREADS=`nproc`"
+                    "notes": "Uses OpenMP with OMP_NUM_THREADS=$NUM_CPU_CORES. Need to set -fopenmp at build, export OMP_NUM_THREADS=`nproc`",
+                    "exe_time_v8cpu": "1.0"
                 },
                 "pts/tinymembench-1.0.2": {
                     "enabled": true,
@@ -207,7 +226,8 @@
                     "THChange_at_runtime": false,
                     "TH_scaling": "single-threaded",
                     "sve2_support": false,
-                    "notes": "Memory bandwidth test; single-threaded by design. No need to support SIMD. Single thread only."
+                    "notes": "Memory bandwidth test; single-threaded by design. No need to support SIMD. Single thread only.",
+                    "exe_time_v8cpu": "6.5"
                 },
                 "pts/pmbench-1.0.2": {
                     "enabled": true,
@@ -215,7 +235,8 @@
                     "THChange_at_runtime": true,
                     "TH_scaling": "test-option:-j",
                     "sve2_support": false,
-                    "notes": "Thread count controlled via -j option in test settings (1/2/4/8/16/32). Need to revisit."
+                    "notes": "Thread count controlled via -j option in test settings (1/2/4/8/16/32). Need to revisit.",
+                    "exe_time_v8cpu": "50.0"
                 }
             }
         }
