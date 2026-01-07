@@ -882,13 +882,13 @@ class RenaissanceRunner:
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{target_result_name}.csv"
+                home_csv = Path.home() / f"{result_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
@@ -899,13 +899,13 @@ class RenaissanceRunner:
             json_output = self.results_dir / f"{num_threads}-thread.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', target_result_name],
+                ['phoronix-test-suite', 'result-file-to-json', result_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{target_result_name}.json"
+                home_json = Path.home() / f"{result_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")
