@@ -19,4 +19,8 @@ set -euo pipefail
 # build others
 ./setup_init.sh
 
+# setup rust
+./setup_rust.sh
+
+
 
