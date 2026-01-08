@@ -31,7 +31,7 @@ from pathlib import Path
 class OpensslRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
-        Initialize 7-Zip compression benchmark runner.
+        Initialize OpenSSL benchmark runner.
 
         Args:
             threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
@@ -40,7 +40,8 @@ class OpensslRunner:
         self.benchmark = "openssl-3.6.0"
         self.benchmark_full = f"pts/{self.benchmark}"
         self.test_category = "Cryptography and TLS"
-        # Replace spaces with underscores in test_category for directory name
+        # IMPORTANT: Category contains spaces - convert to underscores for directory name
+        # "Cryptography and TLS" → "Cryptography_and_TLS"
         self.test_category_dir = self.test_category.replace(" ", "_")
 
         # System info
@@ -294,11 +295,16 @@ class OpensslRunner:
         """
         Install openssl-3.6.0 with GCC-14 native compilation.
 
-        Note: Unlike coremark, 7-Zip does NOT need reinstallation for each thread count
-        because it supports runtime thread configuration via -mmt argument.
+        OpenSSL Installation Characteristics (differs from CoreMark):
+        - THFix_in_compile=false: Thread count NOT fixed at compile time
+        - Single installation serves all thread counts (efficient)
+        - NUM_CPU_CORES is NOT set during build (only at runtime)
+        - Thread control: via NUM_CPU_CORES environment variable at runtime
+        - OpenSSL speed uses -multi $NUM_CPU_CORES option internally
 
-        Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
-        Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
+        Contrast with CoreMark:
+        - CoreMark: THFix_in_compile=true, requires reinstall per thread count
+        - OpenSSL: THFix_in_compile=false, one install for all thread counts
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -313,11 +319,11 @@ class OpensslRunner:
         )
 
         # Build install command with environment variables
-        # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
-        # Thread control is done at runtime, not compile time
-        # Use batch-install to suppress prompts
-        # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
-        # Note: Using -O2 (7-Zip default) instead of -O3 to reduce optimization issues
+        # CRITICAL: NUM_CPU_CORES is NOT set here (THFix_in_compile=false)
+        #   - OpenSSL: Thread count controlled at runtime via NUM_CPU_CORES
+        #   - CoreMark: Thread count fixed at compile time (NUM_CPU_CORES required)
+        # MAKEFLAGS: Parallelize compilation itself with -j$(nproc)
+        # batch-install: Suppress all interactive prompts
         nproc = os.cpu_count() or 1
         install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
 
@@ -586,10 +592,14 @@ class OpensslRunner:
         # If N < vCPU: use taskset with CPU affinity
 
         # Environment variables to suppress all prompts
+        # CRITICAL: NUM_CPU_CORES must come first (OpenSSL runtime thread control)
         # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
+        #   - Standard: TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads
+        #   - OpenSSL special case: Could use 'openssl' instead of {self.benchmark}
+        #     to avoid PTS dot removal (openssl-3.6.0 → openssl-360)
+        #     Currently using {self.benchmark} for consistency with CODE_TEMPLATE
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
-        # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         batch_env = f'{quick_env}NUM_CPU_CORES={num_threads} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
@@ -742,7 +752,6 @@ class OpensslRunner:
         for num_threads in self.thread_list:
             result_name = f"{self.benchmark}-{num_threads}threads"
 
-            # PTS removes dots from directory names
             result_dir_name = result_name.replace('.', '')
             result_dir = pts_results_dir / result_dir_name
 
@@ -826,7 +835,7 @@ class OpensslRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"7-Zip Compression Benchmark Summary\n")
+            f.write(f"OpenSSL Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -974,3 +983,72 @@ Examples:
 
 if __name__ == "__main__":
     main()
+
+
+"""
+===================================================================================
+OpenSSL-Specific Implementation Notes
+===================================================================================
+
+This implementation differs from CODE_TEMPLATE.md in the following ways:
+
+1. Benchmark Configuration:
+   - self.benchmark = "openssl-3.6.0"
+   - self.test_category = "Cryptography and TLS" (contains spaces)
+   - test_category_dir auto-converts spaces to underscores: "Cryptography_and_TLS"
+
+2. Installation Method (THFix_in_compile=false):
+   - NUM_CPU_CORES is NOT set during installation
+   - Single installation serves all thread counts (efficient)
+   - Thread count controlled at runtime via NUM_CPU_CORES environment variable
+   - OpenSSL speed uses -multi $NUM_CPU_CORES option internally
+
+   Contrast with CoreMark (THFix_in_compile=true):
+   - CoreMark requires NUM_CPU_CORES at compile time
+   - CoreMark needs reinstallation for each thread count
+   - OpenSSL is more efficient with one-time installation
+
+3. TEST_RESULTS_NAME Naming Strategy:
+   - Current: Uses {self.benchmark}-{num_threads}threads (standard)
+   - Alternative: Could use 'openssl-{num_threads}threads' (hardcoded)
+
+   Why hardcoding might be considered:
+   - PTS removes dots from directory names
+   - openssl-3.6.0-4threads → openssl-360-4threads (less readable)
+   - Hardcoding 'openssl' maintains readability
+   - This implementation follows CODE_TEMPLATE standard with {self.benchmark}
+
+4. Dot Removal Handling:
+   - result_name = f"{self.benchmark}-{num_threads}threads"
+   - result_dir_name = result_name.replace('.', '')
+   - Example: openssl-3.6.0 → openssl-360
+
+5. Runtime Thread Control:
+   - NUM_CPU_CORES={num_threads} must come first in environment variables
+   - OpenSSL speed command receives this via -multi option
+   - No compile-time thread configuration needed
+
+6. Summary Output:
+   - Title: "OpenSSL Benchmark Summary" (not generic)
+   - Category: "Cryptography and TLS" (space-containing category name)
+
+Comparison Table:
+┌────────────────────┬──────────────────────┬─────────────────────────────┐
+│ Item               │ CODE_TEMPLATE        │ OpenSSL-Specific            │
+├────────────────────┼──────────────────────┼─────────────────────────────┤
+│ Installation       │ Varies by benchmark  │ Single install (efficient)  │
+│ NUM_CPU_CORES      │ May need at compile  │ Runtime only                │
+│ TEST_RESULTS_NAME  │ {self.benchmark}     │ {self.benchmark} (standard) │
+│                    │ recommended          │ or 'openssl' (alternative)  │
+│ Category Name      │ No spaces assumed    │ "Cryptography and TLS"      │
+│ Thread Control     │ Benchmark-dependent  │ Runtime via NUM_CPU_CORES   │
+│ Reinstall per N    │ If THFix=true        │ No (THFix=false)            │
+└────────────────────┴──────────────────────┴─────────────────────────────┘
+
+This implementation prioritizes:
+- Efficiency: Single installation for all thread counts
+- Standards compliance: Using {self.benchmark} in TEST_RESULTS_NAME
+- Flexibility: Runtime thread configuration
+- Clarity: Explicit documentation of OpenSSL-specific behavior
+===================================================================================
+"""
