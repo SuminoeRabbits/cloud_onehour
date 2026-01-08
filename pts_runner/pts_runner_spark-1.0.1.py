@@ -844,7 +844,7 @@ class SparkRunner:
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         
-        batch_env = f'{quick_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=spark-{num_threads}threads TEST_RESULTS_IDENTIFIER=spark-{num_threads}threads'
+        batch_env = f'{quick_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
@@ -954,8 +954,11 @@ class SparkRunner:
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"spark-{num_threads}threads"
-            result_dir = pts_results_dir / result_name
+            result_name = f"{self.benchmark}-{num_threads}threads"
+
+            # CRITICAL: PTS removes dots from directory names
+            result_dir_name = result_name.replace('.', '')
+            result_dir = pts_results_dir / result_dir_name
             if not result_dir.exists():
                 print(f"[WARN] Result not found for {num_threads} threads")
                 continue
@@ -965,12 +968,12 @@ class SparkRunner:
             # Export to CSV
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                home_csv = Path.home() / f"{result_name}.csv"
+                home_csv = Path.home() / f"{result_dir_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
@@ -978,12 +981,12 @@ class SparkRunner:
             # Export to JSON
             json_output = self.results_dir / f"{num_threads}-thread.json"
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                home_json = Path.home() / f"{result_name}.json"
+                home_json = Path.home() / f"{result_dir_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")

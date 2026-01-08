@@ -718,7 +718,7 @@ class CoreMarkRunner:
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # FORCE_TIMES_TO_RUN: quick mode for development (run once instead of 3+ times)
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=coremark-{num_threads}threads TEST_RESULTS_IDENTIFIER=coremark-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed

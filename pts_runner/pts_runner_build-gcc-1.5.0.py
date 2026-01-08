@@ -560,7 +560,7 @@ class BuildGccRunner:
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-gcc-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-gcc-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
@@ -690,7 +690,7 @@ class BuildGccRunner:
             result_name = f"build-gcc-{num_threads}threads"
 
             # PTS removes dots from directory names, so "build-gcc-1.5.0" becomes "build-gcc-150"
-            # However, for this benchmark, the name is manually set via TEST_RESULTS_NAME=build-gcc-{n}threads
+            # However, for this benchmark, the name is manually set via TEST_RESULTS_NAME={self.benchmark}-{n}threads
             # So the directory name should match result_name exactly, BUT let's be safe and check both.
             
             result_dir = pts_results_dir / result_name

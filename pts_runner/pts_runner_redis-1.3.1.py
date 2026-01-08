@@ -248,6 +248,20 @@ class RedisRunner:
 
         return "Unknown_OS"
 
+    def get_cpu_affinity_list(self, n):
+        """Generate CPU affinity list for HyperThreading optimization."""
+        half = self.vcpu_count // 2
+        cpu_list = []
+
+        if n <= half:
+            cpu_list = [str(i * 2) for i in range(n)]
+        else:
+            cpu_list = [str(i * 2) for i in range(half)]
+            logical_count = n - half
+            cpu_list.extend([str(i * 2 + 1) for i in range(logical_count)])
+
+        return ','.join(cpu_list)
+
     def is_wsl(self):
         """
         Detect if running in WSL environment (for logging purposes only).

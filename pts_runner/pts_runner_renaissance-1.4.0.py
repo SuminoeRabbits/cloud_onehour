@@ -731,7 +731,7 @@ class RenaissanceRunner:
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=renaissance-{num_threads}threads TEST_RESULTS_IDENTIFIER=renaissance-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
@@ -868,10 +868,11 @@ class RenaissanceRunner:
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"renaissance-{num_threads}threads"
+            result_name = f"{self.benchmark}-{num_threads}threads"
 
-            # Check if result exists
-            result_dir = pts_results_dir / result_name
+            # CRITICAL: PTS removes dots from directory names
+            result_dir_name = result_name.replace('.', '')
+            result_dir = pts_results_dir / result_dir_name
             if not result_dir.exists():
                 print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
                 continue
@@ -882,13 +883,13 @@ class RenaissanceRunner:
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_name],
+                ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.csv, move it to our results directory
-                home_csv = Path.home() / f"{result_name}.csv"
+                home_csv = Path.home() / f"{result_dir_name}.csv"
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
@@ -899,13 +900,13 @@ class RenaissanceRunner:
             json_output = self.results_dir / f"{num_threads}-thread.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_name],
+                ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
                 # PTS saves to ~/result_name.json, move it to our results directory
-                home_json = Path.home() / f"{result_name}.json"
+                home_json = Path.home() / f"{result_dir_name}.json"
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")

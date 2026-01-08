@@ -655,7 +655,7 @@ class BuildLLVMRunner:
         builder_env_dict = self.get_builder_env()
         builder_env_str = self._env_dict_to_str(builder_env_dict)
             
-        batch_env = f'{quick_env}{builder_env_str}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=build-llvm-{num_threads}threads TEST_RESULTS_IDENTIFIER=build-llvm-{num_threads}threads'
+        batch_env = f'{quick_env}{builder_env_str}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed

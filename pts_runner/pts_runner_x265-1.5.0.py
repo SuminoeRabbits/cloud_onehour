@@ -677,7 +677,7 @@ class X265Runner:
         # Note: x265 auto-detects, so we don't pass NUM_CPU_CORES
         # Instead, we use taskset to limit visible CPUs
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME=x265-{num_threads}threads TEST_RESULTS_IDENTIFIER=x265-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
         # Always use taskset for x265 to control CPU visibility
         # x265 will auto-detect the CPUs available in the taskset mask
