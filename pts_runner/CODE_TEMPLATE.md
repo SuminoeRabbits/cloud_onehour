@@ -195,6 +195,12 @@ class PreSeedDownloader:
 ```python
 class BenchmarkRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
+        # Benchmark configuration (MUST SET THESE)
+        self.benchmark = "benchmark-x.y.z"  # Example: "stream-1.3.4", "nginx-3.0.1"
+        self.benchmark_full = f"pts/{self.benchmark}"
+        self.test_category = "Category Name"  # Example: "Memory", "Cryptography and TLS"
+        self.test_category_dir = self.test_category.replace(" ", "_")
+
         # System info
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
@@ -206,6 +212,11 @@ class BenchmarkRunner:
         else:
             n = min(threads_arg, self.vcpu_count)
             self.thread_list = [n]
+
+        # Results directory
+        self.script_dir = Path(__file__).parent.resolve()
+        self.project_root = self.script_dir.parent
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         # Quick mode for development
         self.quick_mode = quick_mode
@@ -416,10 +427,34 @@ def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_f
 
 ### 環境適応型run_benchmark
 
+**必須実装**: TEST_RESULTS_NAMEには必ず `{self.benchmark}` を使用（ハードコード禁止）
+
 ```python
 def run_benchmark(self, num_threads):
     """Run benchmark with conditional perf monitoring."""
-    # ... (ファイルパスとコマンド構築)
+    # Create output directory
+    self.results_dir.mkdir(parents=True, exist_ok=True)
+    log_file = self.results_dir / f"{num_threads}-thread.log"
+    stdout_log = self.results_dir / "stdout.log"
+    
+    # Define file paths for perf stats and frequency monitoring
+    perf_stats_file = self.results_dir / f"{num_threads}-thread_perf_stats.txt"
+    freq_start_file = self.results_dir / f"{num_threads}-thread_freq_start.txt"
+    freq_end_file = self.results_dir / f"{num_threads}-thread_freq_end.txt"
+    perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
+
+    # Build PTS base command (taskset if needed)
+    if num_threads >= self.vcpu_count:
+        cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
+        pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
+    else:
+        cpu_list = self.get_cpu_affinity_list(num_threads)
+        pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+
+    # Environment variables for batch mode execution
+    # MUST USE {self.benchmark} - DO NOT HARDCODE BENCHMARK NAME
+    quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+    batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
 
     # Construct Final Command with conditional perf
     if self.perf_events:
@@ -439,7 +474,58 @@ def run_benchmark(self, num_threads):
         pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
         print(f"  [INFO] Running without perf")
 
-    # Execute benchmark...
+    # Record CPU frequency before benchmark
+    print(f"[INFO] Recording CPU frequency before benchmark...")
+    cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
+    command = cmd_template.format(file=freq_start_file)
+    subprocess.run(['bash', '-c', command], capture_output=True, text=True)
+
+    # Execute benchmark with real-time output streaming
+    with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
+        stdout_f.write(f"\n{'='*80}\n")
+        stdout_f.write(f"[PTS BENCHMARK COMMAND - {num_threads} thread(s)]\n")
+        stdout_f.write(f"{pts_cmd}\n")
+        stdout_f.write(f"{'='*80}\n\n")
+        stdout_f.flush()
+
+        process = subprocess.Popen(
+            ['bash', '-c', pts_cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+
+        for line in process.stdout:
+            print(line, end='')
+            log_f.write(line)
+            stdout_f.write(line)
+            log_f.flush()
+            stdout_f.flush()
+
+        process.wait()
+        returncode = process.returncode
+
+    # Record CPU frequency after benchmark
+    command = cmd_template.format(file=freq_end_file)
+    subprocess.run(['bash', '-c', command], capture_output=True, text=True)
+
+    if returncode == 0:
+        print(f"\n[OK] Benchmark completed successfully")
+        # Parse perf stats if available
+        if self.perf_events and perf_stats_file.exists():
+            try:
+                perf_summary = self.parse_perf_stats_and_freq(
+                    perf_stats_file, freq_start_file, freq_end_file, cpu_list
+                )
+                with open(perf_summary_file, 'w') as f:
+                    json.dump(perf_summary, f, indent=2)
+            except Exception as e:
+                print(f"  [ERROR] Failed to parse perf stats: {e}")
+        return True
+    else:
+        print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+        return False
 ```
 
 ---
@@ -472,13 +558,99 @@ def export_results(self):
 
         # Export to CSV - Use result_dir_name (dots removed)
         csv_output = self.results_dir / f"{num_threads}-thread.csv"
-        subprocess.run(['phoronix-test-suite', 'result-file-to-csv', result_dir_name], ...)
-        home_csv = Path.home() / f"{result_dir_name}.csv"  # Also use result_dir_name here
+        print(f"  [EXPORT] CSV: {csv_output}")
+        result = subprocess.run(
+            ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            home_csv = Path.home() / f"{result_dir_name}.csv"
+            if home_csv.exists():
+                shutil.move(str(home_csv), str(csv_output))
+                print(f"  [OK] Saved: {csv_output}")
+        else:
+            print(f"  [WARN] CSV export failed: {result.stderr}")
 
         # Export to JSON - Use result_dir_name (dots removed)
         json_output = self.results_dir / f"{num_threads}-thread.json"
-        subprocess.run(['phoronix-test-suite', 'result-file-to-json', result_dir_name], ...)
-        home_json = Path.home() / f"{result_dir_name}.json"  # Also use result_dir_name here
+        print(f"  [EXPORT] JSON: {json_output}")
+        result = subprocess.run(
+            ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            home_json = Path.home() / f"{result_dir_name}.json"
+            if home_json.exists():
+                shutil.move(str(home_json), str(json_output))
+                print(f"  [OK] Saved: {json_output}")
+        else:
+            print(f"  [WARN] JSON export failed: {result.stderr}")
+
+    print(f"\n[OK] Export completed")
+
+def generate_summary(self):
+    """Generate summary.log and summary.json from all thread results."""
+    print(f"\n{'='*80}")
+    print(f">>> Generating summary")
+    print(f"{'='*80}")
+
+    summary_log = self.results_dir / "summary.log"
+    summary_json_file = self.results_dir / "summary.json"
+
+    # Collect results from all JSON files
+    all_results = []
+    for num_threads in self.thread_list:
+        json_file = self.results_dir / f"{num_threads}-thread.json"
+        if json_file.exists():
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+                for result_id, result in data.get('results', {}).items():
+                    for system_id, system_result in result.get('results', {}).items():
+                        all_results.append({
+                            'threads': num_threads,
+                            'value': system_result.get('value'),
+                            'raw_values': system_result.get('raw_values', []),
+                            'test_name': result.get('title'),
+                            'description': result.get('description'),
+                            'unit': result.get('scale')
+                        })
+
+    if not all_results:
+        print("[WARN] No results found for summary generation")
+        return
+
+    # Generate summary.log (human-readable)
+    with open(summary_log, 'w') as f:
+        f.write("="*80 + "\n")
+        f.write(f"Benchmark Summary\n")
+        f.write(f"Machine: {self.machine_name}\n")
+        f.write(f"Test Category: {self.test_category}\n")
+        f.write("="*80 + "\n\n")
+
+        for result in all_results:
+            f.write(f"Threads: {result['threads']}\n")
+            f.write(f"  Test: {result['test_name']}\n")
+            f.write(f"  Description: {result['description']}\n")
+            val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
+            f.write(f"  Average: {val_str} {result['unit']}\n\n")
+
+    print(f"[OK] Summary log saved: {summary_log}")
+
+    # Generate summary.json (AI-friendly format)
+    summary_data = {
+        "benchmark": self.benchmark,
+        "test_category": self.test_category,
+        "machine": self.machine_name,
+        "vcpu_count": self.vcpu_count,
+        "results": all_results
+    }
+
+    with open(summary_json_file, 'w') as f:
+        json.dump(summary_data, f, indent=2)
+
+    print(f"[OK] Summary JSON saved: {summary_json_file}")
 ```
 
 ### コンパイラ互換性パッチ
@@ -589,6 +761,7 @@ def install_benchmark(self):
 
 ### 機能テスト
 - [ ] `--quick`フラグで正常動作
+- [ ] TEST_RESULTS_NAMEに `{self.benchmark}` を使用しているか確認
 - [ ] ドット付きベンチマーク名でexport成功
 - [ ] summary.json生成成功
 - [ ] perf無効時もエラーなく完走
@@ -618,11 +791,13 @@ def install_benchmark(self):
 
 ## よくある問題と解決策
 
-### Q1: WSLでperfが動かない
-**A**: `get_perf_events()`が自動的にSWイベントにフォールバックします。perfなしでもベンチマークは実行可能です。
+### Q1: summary.jsonが生成されない
+**A**: 以下を確認:
+1. TEST_RESULTS_NAMEに `{self.benchmark}` を使用しているか
+2. export_results()でドット除去対応: `result_dir_name = result_name.replace('.', '')`
 
-### Q2: summary.jsonが生成されない
-**A**: `export_results()`でドット除去対応を確認してください。`result_dir_name = result_name.replace('.', '')`
+### Q2: WSLでperfが動かない
+**A**: `get_perf_events()`が自動的にSWイベントにフォールバックします。perfなしでもベンチマークは実行可能です。
 
 ### Q3: GCC-14でコンパイルエラー
 **A**: `patch_install_script()`を実装し、`install_benchmark()`内で呼び出してください。
