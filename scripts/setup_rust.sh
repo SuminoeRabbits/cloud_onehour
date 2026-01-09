@@ -424,18 +424,6 @@ cainfo = "${ACTIVE_CA_BUNDLE}"
 [net]
 # Use git CLI for fetching instead of libgit2 (better certificate handling)
 git-fetch-with-cli = true
-        if ! grep -q "CARGO_HTTP_CHECK_REVOKE" "${CARGO_ENV}"; then
-            log "Adding Cargo environment variables to ${CARGO_ENV}"
-            cat >> "${CARGO_ENV}" << EOF
-
-# Cargo configuration for PTS benchmarks (added by setup_rust.sh)
-export CARGO_HTTP_CHECK_REVOKE=false
-export CARGO_NET_GIT_FETCH_WITH_CLI=true
-export CARGO_BUILD_JOBS="${cargo_jobs}"
-export RUSTFLAGS="-C target-cpu=native"
-export CURL_CA_BUNDLE="${ACTIVE_CA_BUNDLE}"
-export SSL_CERT_FILE="${ACTIVE_CA_BUNDLE}"
-EOF
 
 [term]
 # Colored output
