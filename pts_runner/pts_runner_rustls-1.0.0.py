@@ -327,6 +327,47 @@ class RustlsRunner:
 
         print("  [OK] PTS cache cleaned")
 
+    def patch_install_script(self):
+        """
+        Patch install.sh to fix PTS upstream bug.
+
+        Issue: Original install.sh ends with 'chmod +x rustls > \' (incomplete line)
+        Fix: Replace with 'chmod +x rustls'
+        """
+        install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+
+        if not install_sh_path.exists():
+            print(f"  [WARN] install.sh not found at {install_sh_path}")
+            return False
+
+        try:
+            with open(install_sh_path, 'r') as f:
+                content = f.read()
+
+            # Check if patch is needed
+            if content.strip().endswith('chmod +x rustls > \\'):
+                print(f"  [INFO] Patching install.sh to fix upstream bug...")
+                # Fix the broken last line
+                content = content.rstrip('> \\\n')
+                if not content.endswith('chmod +x rustls'):
+                    content = content + '\nchmod +x rustls'
+
+                with open(install_sh_path, 'w') as f:
+                    f.write(content + '\n')
+
+                print(f"  [OK] install.sh patched successfully")
+                return True
+            elif 'chmod +x rustls' in content and not content.strip().endswith('> \\'):
+                print(f"  [OK] install.sh already patched or correct")
+                return True
+            else:
+                print(f"  [WARN] Unexpected install.sh format, may need manual review")
+                return False
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch install.sh: {e}")
+            return False
+
     def install_benchmark(self):
         """
         Install rustls-1.0.0 with native compilation.
@@ -346,6 +387,9 @@ class RustlsRunner:
             stderr=subprocess.DEVNULL,
             env=self.base_env
         )
+
+        # Patch install.sh for PTS upstream bug
+        self.patch_install_script()
 
         # Build install command with environment variables
         # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
