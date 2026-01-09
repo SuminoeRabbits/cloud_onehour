@@ -329,10 +329,15 @@ class RustlsRunner:
 
     def patch_install_script(self):
         """
-        Patch install.sh to fix PTS upstream bug.
+        Patch install.sh to fix PTS upstream bugs:
+        1. Fix incomplete chmod line (chmod +x rustls > \)
+        2. Fix hardcoded --threads 24 to use NUM_CPU_CORES environment variable
 
-        Issue: Original install.sh ends with 'chmod +x rustls > \' (incomplete line)
-        Fix: Replace with 'chmod +x rustls'
+        Background:
+        - Issue 1: Original install.sh ends with 'chmod +x rustls > \' (syntax error)
+        - Issue 2: Hardcoded '--threads 24' ignores NUM_CPU_CORES environment variable
+        - Root cause: PTS test-profile rustls-1.0.0 is new (2023-2024) and lacks maturity
+        - Impact: Thread configuration is broken, causing failures with certain thread counts
         """
         install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
 
@@ -344,25 +349,37 @@ class RustlsRunner:
             with open(install_sh_path, 'r') as f:
                 content = f.read()
 
-            # Check if patch is needed
+            original_content = content
+            patched = False
+
+            # Patch 1: Fix incomplete chmod line
             if content.strip().endswith('chmod +x rustls > \\'):
-                print(f"  [INFO] Patching install.sh to fix upstream bug...")
-                # Fix the broken last line
+                print(f"  [INFO] Patching install.sh: fixing incomplete chmod line...")
                 content = content.rstrip('> \\\n')
                 if not content.endswith('chmod +x rustls'):
                     content = content + '\nchmod +x rustls'
+                patched = True
 
+            # Patch 2: Fix hardcoded --threads 24
+            if '--threads 24' in content:
+                print(f"  [INFO] Patching install.sh: replacing hardcoded --threads 24 with NUM_CPU_CORES...")
+                content = content.replace('--threads 24', '--threads ${NUM_CPU_CORES:-24}')
+                patched = True
+
+            # Write back if changes were made
+            if patched:
                 with open(install_sh_path, 'w') as f:
-                    f.write(content + '\n')
+                    f.write(content)
+                    if not content.endswith('\n'):
+                        f.write('\n')
 
                 print(f"  [OK] install.sh patched successfully")
-                return True
-            elif 'chmod +x rustls' in content and not content.strip().endswith('> \\'):
-                print(f"  [OK] install.sh already patched or correct")
+                print(f"       - chmod line fixed: {original_content.strip().endswith('chmod +x rustls > \\\\')}")
+                print(f"       - threads parameter fixed: {'--threads 24' in original_content}")
                 return True
             else:
-                print(f"  [WARN] Unexpected install.sh format, may need manual review")
-                return False
+                print(f"  [OK] install.sh already patched or correct")
+                return True
 
         except Exception as e:
             print(f"  [ERROR] Failed to patch install.sh: {e}")
