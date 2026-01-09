@@ -410,29 +410,64 @@ class PgbenchRunner:
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
-        result = subprocess.run(
+        # Execute install command with real-time output streaming
+        print(f"  Running installation...")
+        process = subprocess.Popen(
             ['bash', '-c', install_cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+
+        install_output = []
+        for line in process.stdout:
+            print(line, end='')
+            install_output.append(line)
+
+        process.wait()
+        returncode = process.returncode
+
+        # Check for installation failure
+        install_failed = False
+        full_output = ''.join(install_output)
+
+        if returncode != 0:
+            install_failed = True
+        elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
+            install_failed = True
+        elif 'ERROR' in full_output or 'FAILED' in full_output:
+            install_failed = True
+
+        if install_failed:
+            print(f"\n  [ERROR] Installation failed with return code {returncode}")
+            print(f"  [INFO] Check output above for details")
+            sys.exit(1)
+
+        # Verify installation by checking if directory exists
+        pts_home = Path.home() / '.phoronix-test-suite'
+        installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
+
+        if not installed_dir.exists():
+            print(f"  [ERROR] Installation verification failed")
+            print(f"  [ERROR] Expected directory not found: {installed_dir}")
+            print(f"  [INFO] Installation may have failed silently")
+            print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+            sys.exit(1)
+
+        # Check if test is recognized by PTS
+        verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
+        verify_result = subprocess.run(
+            ['bash', '-c', verify_cmd],
             capture_output=True,
             text=True
         )
 
-        install_failed = False
-        if result.returncode != 0:
-            install_failed = True
-        elif result.stdout and ('Checksum Failed' in result.stdout or 'Downloading of needed test files failed' in result.stdout):
-            install_failed = True
-        elif result.stderr and ('Checksum Failed' in result.stderr or 'failed' in result.stderr.lower() and 'install' in result.stderr.lower()):
-            install_failed = True
+        if verify_result.returncode != 0:
+            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
+            print(f"  [INFO] But installation directory exists, continuing...")
 
-        if install_failed:
-            print(f"  [ERROR] Installation failed")
-            if result.stdout:
-                print(f"  [ERROR] stdout: {result.stdout[-500:]}")
-            if result.stderr:
-                print(f"  [ERROR] stderr: {result.stderr[-500:]}")
-            sys.exit(1)
-
-        print(f"  [OK] Installation completed and verified")
+        print(f"  [OK] Installation completed and verified: {installed_dir}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""

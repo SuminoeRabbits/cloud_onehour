@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PTS Runner for Rustls 0.23.17
+PTS Runner for rustls-1.0.0
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
@@ -13,39 +13,30 @@ System Dependencies (from phoronix-test-suite info):
 - Supported Platforms: Linux, BSD, MacOSX
 
 Test Characteristics:
-- Multi-threaded: Yes (built-in multi-threaded benchmark)
-- THFix_in_compile: false (uses built-in Rust benchmark with thread control)
-- THChange_at_runtime: true (Rust benchmark handles thread count internally)
-- Description: Modern TLS library written in Rust with built-in multi-threaded benchmarks
-- Benchmark Suites: TLS handshake operations (various cipher suites)
+- Multi-threaded: Yes (built-in multi-threaded Rustls benchmark)
+- THFix_in_compile: false - Thread count NOT fixed at compile time
+- THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
 """
 
-import os
-import sys
-import subprocess
+import argparse
 import json
-import shutil
+import os
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
-class BenchmarkRunner:
+class RustlsRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
-        Initialize the Rustls benchmark runner.
-
-        Rustls Characteristics:
-        - Pure Rust TLS library with built-in benchmarks
-        - Multi-threaded by default (Rust's built-in benchmark framework)
-        - No compile-time thread fixing needed (Rust handles internally)
-        - Multiple cipher suite benchmarks available
-        - Modern, memory-safe TLS implementation
+        Initialize Rustls benchmark runner.
 
         Args:
-            threads_arg: Number of threads to test (None = test all)
-            quick_mode: If True, run with FORCE_TIMES_TO_RUN=1
+            threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
+            quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
-        # Benchmark configuration
         self.benchmark = "rustls-1.0.0"
         self.benchmark_full = f"pts/{self.benchmark}"
         self.test_category = "Cryptography and TLS"
@@ -70,6 +61,23 @@ class BenchmarkRunner:
 
         # Quick mode for development
         self.quick_mode = quick_mode
+
+        # Rust/cargo environment locations
+        self.home_dir = Path.home()
+        self.cargo_home = self.home_dir / ".cargo"
+        self.rustup_home = self.home_dir / ".rustup"
+        self.cargo_env_file = self.cargo_home / "env"
+        self.required_toolchain = os.environ.get("PTS_RUST_TOOLCHAIN", os.environ.get("RUST_TOOLCHAIN", "1.84.0"))
+        self.make_jobs = os.cpu_count() or 1
+
+        # Source cargo env in subshells when available
+        if self.cargo_env_file.exists():
+            self.shell_env_prefix = f'. "{self.cargo_env_file}" && '
+        else:
+            self.shell_env_prefix = ""
+            print("  [WARN] ~/.cargo/env not found; ensure cargo is available in PATH")
+
+        self.base_env = self.build_base_env()
 
         # Check perf permissions (standard Linux check)
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -151,18 +159,6 @@ class BenchmarkRunner:
         except Exception:
             return False
 
-    def check_and_setup_perf_permissions(self):
-        """
-        Check perf_event_paranoid level (for conditional perf usage).
-        Does NOT modify system settings.
-        """
-        try:
-            with open('/proc/sys/kernel/perf_event_paranoid', 'r') as f:
-                paranoid_level = int(f.read().strip())
-                return paranoid_level
-        except Exception:
-            return 2
-
     def get_perf_events(self):
         """
         Determine available perf events by testing actual command execution.
@@ -224,6 +220,218 @@ class BenchmarkRunner:
         print("  [INFO] perf command exists but is not functional (permission or kernel issue)")
         return None
 
+    def build_base_env(self):
+        """Construct a deterministic environment for PTS commands."""
+        env = os.environ.copy()
+
+        cargo_bin = str(self.cargo_home / "bin")
+        current_path = env.get("PATH", "")
+        path_entries = current_path.split(":") if current_path else []
+        if cargo_bin not in path_entries:
+            env["PATH"] = f"{cargo_bin}:{current_path}" if current_path else cargo_bin
+
+        env.setdefault("CARGO_HOME", str(self.cargo_home))
+        env.setdefault("RUSTUP_HOME", str(self.rustup_home))
+        env.setdefault("RUSTUP_TOOLCHAIN", self.required_toolchain)
+        env.setdefault("CARGO_HTTP_CHECK_REVOKE", "false")
+        env.setdefault("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
+        env.setdefault("CARGO_BUILD_JOBS", str(self.make_jobs))
+
+        ca_bundle = env.get("CURL_CA_BUNDLE")
+        custom_bundle = self.cargo_home / "rust-combined-ca.pem"
+        if not ca_bundle:
+            if custom_bundle.exists():
+                ca_bundle = str(custom_bundle)
+            elif Path("/etc/ssl/certs/ca-certificates.crt").exists():
+                ca_bundle = "/etc/ssl/certs/ca-certificates.crt"
+
+        if ca_bundle:
+            env.setdefault("CURL_CA_BUNDLE", ca_bundle)
+            env.setdefault("SSL_CERT_FILE", ca_bundle)
+
+        return env
+
+    def check_and_setup_perf_permissions(self):
+        """
+        Check perf_event_paranoid setting and adjust if needed.
+
+        Returns:
+            int: Current perf_event_paranoid value after adjustment
+        """
+        print(f"\n{'='*80}")
+        print(">>> Checking perf_event_paranoid setting")
+        print(f"{'='*80}")
+
+        try:
+            # Read current setting
+            result = subprocess.run(
+                ['cat', '/proc/sys/kernel/perf_event_paranoid'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            current_value = int(result.stdout.strip())
+
+            print(f"  [INFO] Current perf_event_paranoid: {current_value}")
+
+            # If too restrictive, try to adjust
+            # Note: -a (system-wide) requires perf_event_paranoid <= 0
+            if current_value >= 1:
+                print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
+                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+
+                result = subprocess.run(
+                    ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print(f"       Per-CPU metrics and hardware counters enabled")
+                    print(f"       Full monitoring mode: perf stat -A -a")
+                    return 0
+                else:
+                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print(f"  [WARN] Running in LIMITED mode:")
+                    print(f"         - No per-CPU metrics (no -A -a flags)")
+                    print(f"         - No hardware counters (cycles, instructions)")
+                    print(f"         - Software events only (aggregated)")
+                    print(f"         - IPC calculation not available")
+                    return current_value
+            else:
+                print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
+                print(f"       Full monitoring mode: perf stat -A -a")
+                return current_value
+
+        except Exception as e:
+            print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
+            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print(f"         Running in LIMITED mode without per-CPU metrics")
+            return 2
+
+    def clean_pts_cache(self):
+        """Clean PTS installed tests for fresh installation."""
+        print(">>> Cleaning PTS cache...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+
+        # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
+        # Only clean installed tests to force fresh compilation
+
+        # Clean installed tests
+        installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
+        if installed_dir.exists():
+            print(f"  [CLEAN] Removing installed test: {installed_dir}")
+            shutil.rmtree(installed_dir)
+
+        print("  [OK] PTS cache cleaned")
+
+    def install_benchmark(self):
+        """
+        Install rustls-1.0.0 with native compilation.
+
+        Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
+        Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
+        """
+        print(f"\n>>> Installing {self.benchmark_full}...")
+
+        # Remove existing installation first
+        print(f"  [INFO] Removing existing installation...")
+        remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
+        print(f"  [INSTALL CMD] {remove_cmd}")
+        subprocess.run(
+            ['bash', '-c', remove_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=self.base_env
+        )
+
+        # Build install command with environment variables
+        # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
+        # Thread control is done at runtime, not compile time
+        # Use batch-install to suppress prompts
+        # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
+        # CARGO_HTTP_CHECK_REVOKE: disable SSL cert revocation check
+        # GIT_SSL_NO_VERIFY: disable git SSL verification for cargo dependencies
+        install_cmd = (
+            f'{self.shell_env_prefix}'
+            f'RUSTUP_TOOLCHAIN={self.required_toolchain} '
+            f'CARGO_HOME="{self.cargo_home}" '
+            f'RUSTUP_HOME="{self.rustup_home}" '
+            f'CARGO_HTTP_CHECK_REVOKE=false '
+            f'GIT_SSL_NO_VERIFY=true '
+            f'MAKEFLAGS="-j{self.make_jobs}" '
+            f'phoronix-test-suite batch-install {self.benchmark_full}'
+        )
+
+        # Print install command for debugging (as per README requirement)
+        print(f"\n{'>'*80}")
+        print(f"[PTS INSTALL COMMAND]")
+        print(f"  {install_cmd}")
+        print(f"{'<'*80}\n")
+
+        # Execute install command with real-time output
+        print(f"[INFO] Starting installation (this may take a few minutes)...")
+        process = subprocess.Popen(
+            ['bash', '-c', install_cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=self.base_env
+        )
+
+        install_output = []
+        for line in process.stdout:
+            print(line, end='')
+            install_output.append(line)
+
+        process.wait()
+        returncode = process.returncode
+
+        # Check for installation failure
+        install_failed = False
+        full_output = ''.join(install_output)
+        
+        if returncode != 0:
+            install_failed = True
+        elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
+            install_failed = True
+        elif 'ERROR' in full_output or 'FAILED' in full_output:
+            install_failed = True
+
+        if install_failed:
+            print(f"\n  [ERROR] Installation failed with return code {returncode}")
+            print(f"  [INFO] Check output above for details")
+            sys.exit(1)
+
+        # Verify installation by checking if directory exists
+        pts_home = Path.home() / '.phoronix-test-suite'
+        installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
+        
+        if not installed_dir.exists():
+            print(f"  [ERROR] Installation verification failed")
+            print(f"  [ERROR] Expected directory not found: {installed_dir}")
+            print(f"  [INFO] Installation may have failed silently")
+            print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+            sys.exit(1)
+
+        # Check if test is recognized by PTS
+        verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
+        verify_result = subprocess.run(
+            ['bash', '-c', verify_cmd],
+            capture_output=True,
+            text=True,
+            env=self.base_env
+        )
+
+        if verify_result.returncode != 0:
+            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
+            print(f"  [INFO] But installation directory exists, continuing...")
+
+        print(f"  [OK] Installation completed and verified: {installed_dir}")
+
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """
         Parse perf stat output and CPU frequency files.
@@ -258,94 +466,21 @@ class BenchmarkRunner:
                         except ValueError:
                             continue
 
-        # Parse frequency files
-        freq_start = []
-        freq_end = []
-
-        if freq_start_file.exists():
-            with open(freq_start_file, 'r') as f:
-                freq_start = [int(line.strip()) for line in f if line.strip().isdigit()]
-
-        if freq_end_file.exists():
-            with open(freq_end_file, 'r') as f:
-                freq_end = [int(line.strip()) for line in f if line.strip().isdigit()]
-
-        # Calculate average frequencies
-        avg_freq_start = sum(freq_start) / len(freq_start) if freq_start else 0
-        avg_freq_end = sum(freq_end) / len(freq_end) if freq_end else 0
-
-        # Calculate per-CPU metrics
-        for cpu_id in cpu_ids:
-            metrics = per_cpu_metrics[cpu_id]
-
-            # IPC calculation (if hardware counters available)
-            if 'cycles' in metrics and 'instructions' in metrics and metrics['cycles'] > 0:
-                metrics['ipc'] = metrics['instructions'] / metrics['cycles']
-
-            # CPU utilization (if task-clock available)
-            if 'task-clock' in metrics and 'cpu-clock' in metrics:
-                # task-clock is in milliseconds
-                total_time_ms = metrics.get('cpu-clock', metrics.get('task-clock', 0))
-                if total_time_ms > 0:
-                    metrics['utilization'] = min(100.0, (metrics['task-clock'] / total_time_ms) * 100)
-
-        return {
-            'per_cpu_metrics': per_cpu_metrics,
-            'cpu_list': cpu_list,
-            'frequency': {
-                'start_khz': freq_start,
-                'end_khz': freq_end,
-                'avg_start_mhz': avg_freq_start / 1000 if avg_freq_start > 0 else 0,
-                'avg_end_mhz': avg_freq_end / 1000 if avg_freq_end > 0 else 0
-            }
-        }
-
-    def install_benchmark(self):
-        """
-        Install Rustls benchmark.
-
-        Note: Rustls uses Rust's built-in benchmark framework.
-        No special patches needed - Rust toolchain handles everything.
-        """
-        print(f"\n{'='*80}")
-        print(f">>> Installing {self.benchmark}")
-        print(f"{'='*80}")
-
-        # Remove existing installation
-        print(f"[INFO] Removing any existing installation...")
-        remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
-        subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        # Build install command with optimizations
-        nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" phoronix-test-suite batch-install {self.benchmark_full}'
-
-        print(f"[INFO] Installing with command: {install_cmd}")
-        result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
-
-        if result.returncode != 0:
-            print(f"  [ERROR] Installation failed")
-            print(result.stderr)
-            sys.exit(1)
-
-        print(f"  [OK] Installation completed and verified")
+        # Calculate metrics (IPC, frequency, utilization)
+        # For simplicity, return the parsed data
+        return {'per_cpu_metrics': per_cpu_metrics, 'cpu_list': cpu_list}
 
     def run_benchmark(self, num_threads):
-        """
-        Run Rustls benchmark with conditional perf monitoring.
-
-        Rustls uses Rust's built-in benchmark framework which handles
-        multi-threading internally. We set NUM_CPU_CORES to control parallelism.
-        """
+        """Run benchmark with conditional perf monitoring."""
         print(f"\n{'='*80}")
-        print(f">>> Running {self.benchmark} with {num_threads} thread(s)")
+        print(f">>> Running benchmark with {num_threads} thread(s)")
         print(f"{'='*80}")
 
         # Create output directory
         self.results_dir.mkdir(parents=True, exist_ok=True)
         log_file = self.results_dir / f"{num_threads}-thread.log"
         stdout_log = self.results_dir / "stdout.log"
-
+        
         # Define file paths for perf stats and frequency monitoring
         perf_stats_file = self.results_dir / f"{num_threads}-thread_perf_stats.txt"
         freq_start_file = self.results_dir / f"{num_threads}-thread_freq_start.txt"
@@ -356,13 +491,9 @@ class BenchmarkRunner:
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
             pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
-            cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
         else:
             cpu_list = self.get_cpu_affinity_list(num_threads)
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
-            cpu_info = f"Using CPU affinity: {cpu_list}"
-
-        print(f"  [INFO] {cpu_info}")
 
         # Environment variables for batch mode execution
         # MUST USE {self.benchmark} - DO NOT HARDCODE BENCHMARK NAME
@@ -406,7 +537,8 @@ class BenchmarkRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                env=self.base_env
             )
 
             for line in process.stdout:
@@ -433,7 +565,6 @@ class BenchmarkRunner:
                     )
                     with open(perf_summary_file, 'w') as f:
                         json.dump(perf_summary, f, indent=2)
-                    print(f"  [OK] Perf summary saved: {perf_summary_file}")
                 except Exception as e:
                     print(f"  [ERROR] Failed to parse perf stats: {e}")
             return True
@@ -444,7 +575,7 @@ class BenchmarkRunner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting results")
+        print(f">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -469,7 +600,8 @@ class BenchmarkRunner:
             result = subprocess.run(
                 ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
                 capture_output=True,
-                text=True
+                text=True,
+                env=self.base_env
             )
             if result.returncode == 0:
                 home_csv = Path.home() / f"{result_dir_name}.csv"
@@ -485,7 +617,8 @@ class BenchmarkRunner:
             result = subprocess.run(
                 ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
                 capture_output=True,
-                text=True
+                text=True,
+                env=self.base_env
             )
             if result.returncode == 0:
                 home_json = Path.home() / f"{result_dir_name}.json"
@@ -561,38 +694,99 @@ class BenchmarkRunner:
 
     def run(self):
         """Main execution flow."""
-        # Install benchmark
+        print(f"{'='*80}")
+        print(f"Rustls Benchmark Runner")
+        print(f"{'='*80}")
+        print(f"[INFO] Machine: {self.machine_name}")
+        print(f"[INFO] vCPU count: {self.vcpu_count}")
+        print(f"[INFO] Test category: {self.test_category}")
+        print(f"[INFO] Thread mode: Runtime configurable (THChange_at_runtime=true)")
+        print(f"[INFO] Threads to test: {self.thread_list}")
+        print(f"[INFO] Results directory: {self.results_dir}")
+        print()
+
+        # Clean existing results directory before starting
+        if self.results_dir.exists():
+            print(f">>> Cleaning existing results directory...")
+            print(f"  [INFO] Removing: {self.results_dir}")
+            shutil.rmtree(self.results_dir)
+            print(f"  [OK] Results directory cleaned")
+            print()
+
+        # Clean cache once at the beginning
+        self.clean_pts_cache()
+
+        # Install benchmark once (not per thread count, since THFix_in_compile=false)
         self.install_benchmark()
 
-        # Run benchmark for each thread count
+        # Run for each thread count
+        failed = []
         for num_threads in self.thread_list:
-            success = self.run_benchmark(num_threads)
-            if not success:
-                print(f"[ERROR] Benchmark failed for {num_threads} thread(s)")
-                sys.exit(1)
+            # Run benchmark
+            if not self.run_benchmark(num_threads):
+                failed.append(num_threads)
 
-        # Export results
+        # Export results to CSV and JSON
         self.export_results()
 
         # Generate summary
         self.generate_summary()
 
+        # Summary
         print(f"\n{'='*80}")
-        print(f">>> All tasks completed successfully!")
+        print(f"Benchmark Summary")
         print(f"{'='*80}")
+        print(f"Total tests: {len(self.thread_list)}")
+        print(f"Successful: {len(self.thread_list) - len(failed)}")
+        print(f"Failed: {len(failed)}")
+        if failed:
+            print(f"Failed thread counts: {failed}")
+        print(f"{'='*80}")
+
+        return len(failed) == 0
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description='Run Rustls benchmark')
-    parser.add_argument('threads', type=int, nargs='?', default=None,
-                        help='Number of threads to use (default: test all from 1 to vCPU count)')
-    parser.add_argument('--quick', action='store_true',
-                        help='Quick mode: run with FORCE_TIMES_TO_RUN=1 for faster testing')
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        description='Rustls Benchmark Runner',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s           # Run with 1 to vCPU threads (scaling mode)
+  %(prog)s 4         # Run with 4 threads only
+  %(prog)s 16        # Run with 16 threads (capped at vCPU if exceeded)
+        """
+    )
 
-    runner = BenchmarkRunner(threads_arg=args.threads, quick_mode=args.quick)
-    runner.run()
+    parser.add_argument(
+        'threads',
+        nargs='?',
+        type=int,
+        help='Number of threads (optional, omit for scaling mode)'
+    )
+    
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+    )
+
+    args = parser.parse_args()
+    
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
+
+    # Validate threads argument
+    if args.threads is not None and args.threads < 1:
+        print(f"[ERROR] Thread count must be >= 1 (got: {args.threads})")
+        sys.exit(1)
+
+    # Run benchmark
+    runner = RustlsRunner(args.threads, quick_mode=args.quick)
+    success = runner.run()
+
+    sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":

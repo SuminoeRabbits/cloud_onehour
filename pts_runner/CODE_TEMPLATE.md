@@ -722,14 +722,93 @@ def install_benchmark(self):
     nproc = os.cpu_count() or 1
     install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
-    # Execute
-    result = subprocess.run(['bash', '-c', install_cmd], capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"  [ERROR] Installation failed")
+    # Execute with real-time output streaming (RECOMMENDED)
+    print(f"  Running installation...")
+    process = subprocess.Popen(['bash', '-c', install_cmd], 
+                               stdout=subprocess.PIPE, 
+                               stderr=subprocess.STDOUT,
+                               text=True, 
+                               bufsize=1)
+    
+    install_output = []
+    for line in process.stdout:
+        print(line, end='')
+        install_output.append(line)
+    
+    process.wait()
+    
+    # Verify installation with dual check
+    pts_home = Path.home() / '.phoronix-test-suite'
+    install_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
+    
+    if not install_dir.exists():
+        print(f"  [ERROR] Installation failed: {install_dir} does not exist")
+        print(f"  [ERROR] Check output above for details")
         sys.exit(1)
-
+    
+    # Secondary check: PTS recognition
+    verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
+    result = subprocess.run(['bash', '-c', verify_cmd], capture_output=True, text=True)
+    if self.benchmark_full not in result.stdout:
+        print(f"  [WARN] {self.benchmark_full} may not be fully recognized by PTS")
+    
     print(f"  [OK] Installation completed and verified")
 ```
+
+---
+
+## インストール検証のベストプラクティス
+
+**重要**: 上記の実装例では、堅牢なインストール検証パターンを採用しています。
+
+### 従来の問題
+- `subprocess.run(capture_output=True)` → インストール中の出力が見えず、問題の診断が困難
+- `returncode`のみのチェック → PTSは失敗しても0を返すことがある
+- `phoronix-test-suite info`による検証 → テストプロファイルの存在のみチェック、実際のインストールは未確認
+
+### 推奨パターン（★★★★★）
+
+1. **リアルタイム出力ストリーミング**
+   ```python
+   process = subprocess.Popen(['bash', '-c', install_cmd], 
+                              stdout=subprocess.PIPE, 
+                              stderr=subprocess.STDOUT,
+                              text=True, bufsize=1)
+   for line in process.stdout:
+       print(line, end='')  # ユーザーに進捗を表示
+   ```
+   - メリット: 長時間のインストール中も進捗が見える、エラー発生時に即座に気付ける
+
+2. **ファイルシステム検証（Primary Check）**
+   ```python
+   install_dir = Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark
+   if not install_dir.exists():
+       print(f"  [ERROR] Installation failed: {install_dir} does not exist")
+       sys.exit(1)
+   ```
+   - メリット: 実際のインストール結果を直接確認、PTSコマンドの不確実性を回避
+
+3. **PTS認識確認（Secondary Check）**
+   ```python
+   verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
+   result = subprocess.run(['bash', '-c', verify_cmd], capture_output=True, text=True)
+   if self.benchmark_full not in result.stdout:
+       print(f"  [WARN] {self.benchmark_full} may not be fully recognized by PTS")
+   ```
+   - メリット: PTSとの統合問題を早期発見（警告レベル、致命的ではない）
+
+### 効果
+
+- **堅牢性**: ★★★★★ - 誤検知（false positive）を防止
+- **デバッグ性**: ★★★★★ - 問題発生時の原因特定が容易
+- **ユーザー体験**: ★★★★☆ - 進捗可視化で待ち時間の不安解消
+- **メンテナンス性**: ★★★★★ - トラブルシューティング時間を大幅削減
+
+### 後方互換性
+
+- 既存のrunnerスクリプトを壊すことはありません
+- 新規スクリプトから段階的に導入可能
+- 既存スクリプトの更新は任意（推奨ではあるが必須ではない）
 
 ---
 
