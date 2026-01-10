@@ -105,6 +105,7 @@ class ComplianceChecker:
 
         self.check_install_verification()
         self.check_argparse_setup()
+        self.check_batch_env_vars()
 
 
 
@@ -628,6 +629,20 @@ class ComplianceChecker:
             )
         else:
              self.warnings.append("⚠️  WARNING: Neither positional nor named 'threads' argument found in argparse setup")
+
+    def check_batch_env_vars(self):
+        """Check if batch environment variables include TEST_RESULTS_DESCRIPTION to suppress prompts"""
+        # Look for the batch_env definition line
+        # We want to ensure TEST_RESULTS_DESCRIPTION is present
+        batch_env_match = re.search(r"batch_env\s*=\s*f?['\"].*TEST_RESULTS_DESCRIPTION=", self.content)
+        
+        if batch_env_match:
+             self.passed.append("✅ Batch env includes TEST_RESULTS_DESCRIPTION (suppresses prompts)")
+        else:
+             self.warnings.append(
+                "⚠️  WARNING: batch_env missing TEST_RESULTS_DESCRIPTION\n"
+                "   This may cause interactive prompts. Add TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads"
+            )
 
     def print_results(self):
 

@@ -8,7 +8,7 @@ System Dependencies (from phoronix-test-suite info):
 - Estimated Install Time: 8 Seconds
 - Environment Size: 1500 MB
 - Download Size: 690.36 MB
-- Test Type: System
+- Test Type: AI
 - Supported Platforms: Linux
 
 Test Characteristics:
@@ -173,7 +173,7 @@ class TensorFlowLiteBenchmarkRunner:
         # Benchmark configuration
         self.benchmark = "tensorflow-lite-1.1.0"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "System"
+        self.test_category = "AI"
         self.test_category_dir = self.test_category.replace(" ", "_")
 
         # System info

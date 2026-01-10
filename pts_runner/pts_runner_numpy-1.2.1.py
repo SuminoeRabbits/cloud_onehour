@@ -8,7 +8,7 @@ System Dependencies (from phoronix-test-suite info):
 - Estimated Install Time: 11 Seconds
 - Environment Size: 12.4 MB
 - Download Size: 0.01 MB
-- Test Type: Processor
+- Test Type: AI
 - Supported Platforms: Linux, BSD, MacOSX
 
 Test Characteristics:
@@ -33,7 +33,7 @@ class NumpyBenchmarkRunner:
         # Benchmark configuration
         self.benchmark = "numpy-1.2.1"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "Processor"
+        self.test_category = "AI"
         self.test_category_dir = self.test_category.replace(" ", "_")
 
         # System info
