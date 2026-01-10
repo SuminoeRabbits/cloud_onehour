@@ -19,6 +19,7 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-7zip-1.12.0.py > /tmp/pts_runner_compress-7zip.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-zstd-1.6.0.py > /tmp/pts_runner_compress-zstd.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-xz-1.1.0.py > /tmp/pts_runner_compress-xz.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-lz4-1.10.0.py 1 > /tmp/pts_runner_compress-lz4.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_rustls-1.0.0.py --quick > /tmp/pts_runner_rustls.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_openssl-3.6.0.py --quick > /tmp/pts_runner_openssl.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_nginx-3.0.1.py --quick > /tmp/pts_runner_nginx.log 2>&1",
@@ -28,11 +29,11 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_spark-1.0.1.py --quick > /tmp/pts_runner_spark.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_ffmpeg-7.0.1.py --quick > /tmp/pts_runner_ffmpeg.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_x265-1.5.0.py > /tmp/pts_runner_x265.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_pgbench-1.11.1.py --quick > /tmp/pts_runner_pgbench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_redis-1.3.1.py > /tmp/pts_runner_redis.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_stream-1.3.4.py > /tmp/pts_runner_stream.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tinymembench-1.0.2.py 1 > /tmp/pts_runner_tinymembench.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_pmbench-1.0.2.py --quick > /tmp/pts_runner_pmbench.log 2>&1"
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_numpy-1.2.1.py --quick > /tmp/pts_runner_numpy.log 2>&1"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
