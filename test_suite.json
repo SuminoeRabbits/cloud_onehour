@@ -1,7 +1,30 @@
 {
     "_comment": "PTS benchmark test suite definitions",
     "test_category": {
-        "CPU IntFP": {
+        "Processor": {
+            "enabled": true,
+            "items": {
+                "pts/rustl-1.0.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "25.0"
+                },
+                "pts/coremark-1.0.1": {
+                    "enabled": true,
+                    "THFix_in_compile": true,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "N/A",
+                    "sve2_support": "unknown",
+                    "notes": "Thread count fixed at compile via -DMULTITHREAD=$NUM_CPU_CORES. # of thread is decided by compile.",
+                    "exe_time_v8cpu": "1.0"
+                }
+            }
+        },
+        "System": {
             "enabled": true,
             "items": {
                 "pts/sysbench-1.1.0": {
@@ -12,20 +35,6 @@
                     "sve2_support": false,
                     "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
                     "exe_time_v8cpu": "4.0"
-                }
-            }
-        },
-        "Pipeline Efficiency": {
-            "enabled": true,
-            "items": {
-                "pts/coremark-1.0.1": {
-                    "enabled": true,
-                    "THFix_in_compile": true,
-                    "THChange_at_runtime": false,
-                    "TH_scaling": "N/A",
-                    "sve2_support": "unknown",
-                    "notes": "Thread count fixed at compile via -DMULTITHREAD=$NUM_CPU_CORES. # of thread is decided by compile.",
-                    "exe_time_v8cpu": "1.0"
                 }
             }
         },
