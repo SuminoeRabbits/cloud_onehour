@@ -8,7 +8,8 @@
 3. [必須メソッド](#必須メソッド)
 4. [環境適応型メソッド (WSL/Cloud対応)](#環境適応型メソッド-wslcloud対応)
 5. [トラブルシューティングパターン](#トラブルシューティングパターン)
-6. [参考実装](#参考実装)
+6. [エントリーポイント (main関数)](#エントリーポイント-main関数)
+7. [参考実装](#参考実装)
 
 ---
 
@@ -811,7 +812,75 @@ def install_benchmark(self):
 - 既存スクリプトの更新は任意（推奨ではあるが必須ではない）
 
 ---
-
+ 
+## エントリーポイント (main関数)
+ 
+以下の `main()` 関数テンプレートを使用することで、引数解析の一貫性を保つことができます。
+ 
+**重要**: スレッド数の指定には、既存の `--threads` 名前付き引数に加え、利便性のために位置引数（Positional Argument）もサポートするようにしてください。
+ 
+```python
+def main():
+    parser = argparse.ArgumentParser(
+        description='<Benchmark Name> Runner',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s           # Run with 1 to vCPU threads (scaling mode)
+  %(prog)s 4         # Run with 4 threads only
+  %(prog)s 16        # Run with 16 threads (capped at vCPU if exceeded)
+  %(prog)s --quick   # Run in quick mode
+        """
+    )
+ 
+    # Positional argument for threads (Optional but Recommended)
+    parser.add_argument(
+        'threads_pos',
+        nargs='?',
+        type=int,
+        help='Number of threads (optional, omit for scaling mode)'
+    )
+    
+    # Named argument for threads (Legacy support & Explicit)
+    parser.add_argument(
+        '--threads',
+        type=int,
+        help='Run benchmark with specified number of threads only (1 to CPU count)'
+    )
+    
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+    )
+ 
+    args = parser.parse_args()
+    
+    # Resolve threads argument (prioritize --threads if both provided, though unlikely)
+    threads = args.threads if args.threads is not None else args.threads_pos
+ 
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
+ 
+    # Validate threads argument
+    if threads is not None and threads < 1:
+        print(f"[ERROR] Thread count must be >= 1 (got: {threads})")
+        sys.exit(1)
+ 
+    # Run benchmark
+    # MyBenchmarkRunnerは実際のクラス名に置き換えてください
+    runner = MyBenchmarkRunner(threads_arg=threads, quick_mode=args.quick)
+    success = runner.run()
+ 
+    sys.exit(0 if success else 1)
+ 
+if __name__ == "__main__":
+    main()
+```
+ 
+---
+ 
 ## 参考実装
 
 完全な実装例は以下を参照:

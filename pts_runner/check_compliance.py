@@ -104,6 +104,7 @@ class ComplianceChecker:
         self.check_perf_events_implementation()
 
         self.check_install_verification()
+        self.check_argparse_setup()
 
 
 
@@ -603,6 +604,30 @@ class ComplianceChecker:
             )
 
    
+
+    def check_argparse_setup(self):
+        """Check if argparse supports both positional and named thread arguments"""
+        # Check for named argument --threads
+        has_named_threads = re.search(r"add_argument\(\s*['\"]--threads['\"]", self.content)
+        
+        # Check for positional argument (threads or threads_pos)
+        # Matches: add_argument('threads' OR add_argument('threads_pos'
+        has_pos_threads = re.search(r"add_argument\(\s*['\"]threads(?:_pos)?['\"]", self.content)
+
+        if has_named_threads and has_pos_threads:
+            self.passed.append("✅ Argparse supports both positional and named thread arguments")
+        elif has_named_threads:
+             self.warnings.append(
+                "⚠️  WARNING: Argparse missing positional thread argument support\n"
+                "   Should add parser.add_argument('threads_pos', nargs='?', ...)"
+            )
+        elif has_pos_threads:
+            self.warnings.append(
+                "⚠️  WARNING: Argparse missing named --threads argument support\n"
+                "   Should add parser.add_argument('--threads', ...)"
+            )
+        else:
+             self.warnings.append("⚠️  WARNING: Neither positional nor named 'threads' argument found in argparse setup")
 
     def print_results(self):
 
