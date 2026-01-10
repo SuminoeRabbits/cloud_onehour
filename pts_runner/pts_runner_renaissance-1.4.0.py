@@ -492,8 +492,7 @@ class RenaissanceRunner:
             install_failed = True
 
         if install_failed:
-            print(f"
-  [ERROR] Installation failed with return code {returncode}")
+            print(f"  [ERROR] Installation failed with return code {returncode}")
             print(f"  [INFO] Check output above for details")
             sys.exit(1)
 

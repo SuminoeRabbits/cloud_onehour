@@ -374,8 +374,10 @@ class RustlsRunner:
                         f.write('\n')
 
                 print(f"  [OK] install.sh patched successfully")
-                print(f"       - chmod line fixed: {original_content.strip().endswith('chmod +x rustls > \\\\')}")
-                print(f"       - threads parameter fixed: {'--threads 24' in original_content}")
+                chmod_check = original_content.strip().endswith('chmod +x rustls > \\\\')
+                threads_check = '--threads 24' in original_content
+                print(f"       - chmod line fixed: {chmod_check}")
+                print(f"       - threads parameter fixed: {threads_check}")
                 return True
             else:
                 print(f"  [OK] install.sh already patched or correct")
