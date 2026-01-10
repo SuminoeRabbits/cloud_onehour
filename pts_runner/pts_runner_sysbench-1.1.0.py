@@ -41,7 +41,7 @@ class SysbenchRunner:
         """
         self.benchmark = "sysbench-1.1.0"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "CPU IntFP"
+        self.test_category = "System"
         # Replace spaces and slashes with underscores in test_category for directory name
         self.test_category_dir = self.test_category.replace(" ", "_").replace("/", "_")
 

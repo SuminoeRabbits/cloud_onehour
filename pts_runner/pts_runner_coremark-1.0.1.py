@@ -166,7 +166,7 @@ class CoreMarkRunner:
         """
         self.benchmark = "coremark-1.0.1"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "Pipeline Efficiency"
+        self.test_category = "Processor"
         # Replace spaces with underscores in test_category for directory name
         self.test_category_dir = self.test_category.replace(" ", "_")
 

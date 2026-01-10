@@ -89,6 +89,8 @@ class ComplianceChecker:
 
         self.check_dot_removal()
 
+        self.check_test_category_dir_safety()
+
 
 
         # Warning checks (should pass but not critical)
@@ -247,7 +249,90 @@ class ComplianceChecker:
 
             self.warnings.append("⚠️  WARNING: Dot removal not found (may fail for benchmarks with dots)")
 
-   
+
+
+    def check_test_category_dir_safety(self):
+
+        """
+        Check if test_category_dir is safely converted for directory usage.
+
+        Best practice: Replace spaces and special characters with underscores or hyphens.
+        Recommended: self.test_category_dir = self.test_category.replace(" ", "_")
+        """
+
+        # Check if test_category_dir assignment exists
+
+        pattern = r'self\.test_category_dir\s*=\s*(.+)'
+
+        match = re.search(pattern, self.content)
+
+
+
+        if not match:
+
+            self.errors.append("❌ CRITICAL: test_category_dir assignment not found")
+
+            return
+
+
+
+        assignment = match.group(1).strip()
+
+
+
+        # Check for common safe conversion patterns
+
+        safe_patterns = [
+
+            r'self\.test_category\.replace\(\s*["\'][ ]["\']\s*,\s*["\'][_-]["\']\s*\)',  # .replace(" ", "_") or .replace(" ", "-")
+
+            r're\.sub\(',  # Using regex substitution
+
+        ]
+
+
+
+        is_safe = any(re.search(p, assignment) for p in safe_patterns)
+
+
+
+        if is_safe:
+
+            # Verify it's converting spaces at minimum
+
+            if 'replace' in assignment and '" "' in assignment or "' '" in assignment:
+
+                self.passed.append("✅ test_category_dir safely converts spaces to directory-safe format")
+
+            elif 're.sub' in assignment:
+
+                self.passed.append("✅ test_category_dir uses regex for safe directory conversion")
+
+            else:
+
+                self.warnings.append(
+
+                    "⚠️  WARNING: test_category_dir conversion found but pattern unclear\n"
+
+                    f"   Found: {assignment}"
+
+                )
+
+        else:
+
+            self.errors.append(
+
+                f"❌ CRITICAL: test_category_dir may not be safely converting special characters\n"
+
+                f"   Found: {assignment}\n"
+
+                f"   Recommended: self.test_category_dir = self.test_category.replace(' ', '_')\n"
+
+                f"   This ensures safe directory names for categories like 'Memory Access'"
+
+            )
+
+
 
     def check_required_methods(self):
 
@@ -620,6 +705,8 @@ Critical Checks:
   - generate_summary() method exists
 
   - Dot removal implemented
+
+  - test_category_dir safely converts to directory-safe format
 
 
 

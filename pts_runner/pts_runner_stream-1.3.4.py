@@ -179,7 +179,7 @@ class StreamRunner:
         """
         self.benchmark = "stream-1.3.4"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "Memory"
+        self.test_category = "Memory Access"
         self.test_category_dir = self.test_category.replace(" ", "_")
 
         # System info
