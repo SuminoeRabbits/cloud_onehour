@@ -4,15 +4,6 @@
         "Processor": {
             "enabled": true,
             "items": {
-                "pts/rustl-1.0.0": {
-                    "enabled": true,
-                    "THFix_in_compile": false,
-                    "THChange_at_runtime": true,
-                    "TH_scaling": "env:NUM_CPU_CORES",
-                    "sve2_support": false,
-                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
-                    "exe_time_v8cpu": "25.0"
-                },
                 "pts/coremark-1.0.1": {
                     "enabled": true,
                     "THFix_in_compile": true,
@@ -105,6 +96,15 @@
         "Cryptography and TLS": {
             "enabled": true,
             "items": {
+                "pts/rustls-1.0.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "25.0"
+                },
                 "pts/openssl-3.6.0": {
                     "enabled": true,
                     "THFix_in_compile": false,
