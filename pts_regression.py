@@ -58,7 +58,8 @@
 # --split-4th: 実行コマンドを総数の1/5に分割し、4番目の1/5のみを生成・実行します。
 # --split-5th: 実行コマンドを総数の1/5に分割し、5番目の1/5のみを生成・実行します。
 # --regression: このオプションが付いた場合 "exe_time_v8cpu"値により "--quick"を上書きします。
-#                もし　"exe_time_v8cpu"値が120以上の場合は、実行しません、生成しません、表示されません。 
+#                もし　"exe_time_v8cpu"値が150以上の場合は、実行しません、生成しません、表示されません。 
+#                もし　"exe_time_v8cpu"値が100以上の場合は、必ず実行オプションに"--quick"と"--max"を追加します。 
 # 　　　　　　　　もし　"exe_time_v8cpu"値が15.25以上の場合は 必ず実行オプションに"--quick"を追加します。
 #                もし"exe_time_v8cpu"値が15.25未満の場合は 必ず実行オプションに"--quick"を追加しません。   
 # 
@@ -178,20 +179,6 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                     number_arg = str(max_threads)
                     print(f"  [INFO] --max override: {original_arg} -> {number_arg} threads")
 
-            # Build command
-            runner_script = f"./pts_runner/pts_runner_{testname}.py"
-
-            # Check if runner script exists (requirement #4)
-            runner_path = Path(runner_script)
-            if not runner_path.exists():
-                print(f"  [WARN] Runner script not found: {runner_script}")
-                print(f"  [INFO] Command will be generated anyway, but execution may fail")
-
-            if number_arg is None:
-                cmd = runner_script
-            else:
-                cmd = f"{runner_script} {number_arg}"
-            
             # Determine if --quick should be appended and if test should be skipped
             use_quick = quick_mode
             skip_test = False
@@ -203,10 +190,18 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                 except ValueError:
                     exe_time = 0.0
 
-                # Check if exe_time >= 120: skip this test entirely
-                if exe_time >= 120:
+                # Check if exe_time >= 150: skip this test entirely
+                if exe_time >= 150:
                     skip_test = True
-                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 120 -> Skipping test (too long)")
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 150 -> Skipping test (too long)")
+                elif exe_time >= 100:
+                    use_quick = True
+                    # Enforce --max (288 threads) unless single threaded
+                    if number_arg != "1":
+                        number_arg = "288"
+                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick and --max (288 threads)")
+                    else:
+                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick (single-threaded, ignoring max)")
                 elif exe_time >= 15.25:
                     use_quick = True
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 15.25 -> Enforcing --quick")
@@ -217,6 +212,20 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
             # Skip if regression mode marked it as too long
             if skip_test:
                 continue
+
+            # Build command
+            runner_script = f"./pts_runner/pts_runner_{testname}.py"
+
+             # Check if runner script exists (requirement #4)
+            runner_path = Path(runner_script)
+            if not runner_path.exists():
+                print(f"  [WARN] Runner script not found: {runner_script}")
+                print(f"  [INFO] Command will be generated anyway, but execution may fail")
+
+            if number_arg is None:
+                cmd = runner_script
+            else:
+                cmd = f"{runner_script} {number_arg}"
 
             # Append --quick flag if enabled
             if use_quick:
