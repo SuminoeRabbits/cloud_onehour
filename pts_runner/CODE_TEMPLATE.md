@@ -455,6 +455,16 @@ def run_benchmark(self, num_threads):
     # Environment variables for batch mode execution
     # MUST USE {self.benchmark} - DO NOT HARDCODE BENCHMARK NAME
     quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+    # Remove existing PTS result to avoid interactive prompts
+    # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+    sanitized_benchmark = self.benchmark.replace('.', '')
+    remove_cmds = [
+        f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+        f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+    ]
+    for cmd in remove_cmds:
+        subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
     # Construct Final Command with conditional perf

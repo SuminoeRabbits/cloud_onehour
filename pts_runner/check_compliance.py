@@ -106,6 +106,7 @@ class ComplianceChecker:
         self.check_install_verification()
         self.check_argparse_setup()
         self.check_batch_env_vars()
+        self.check_pts_result_cleanup()
 
 
 
@@ -642,6 +643,19 @@ class ComplianceChecker:
              self.warnings.append(
                 "⚠️  WARNING: batch_env missing TEST_RESULTS_DESCRIPTION\n"
                 "   This may cause interactive prompts. Add TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads"
+            )
+
+    def check_pts_result_cleanup(self):
+        """Check if PTS result cleanup logic is present to prevent interactive prompts"""
+        # Search for logic that removes existing results before running
+        has_cleanup_logic = re.search(r"phoronix-test-suite\s+remove-result", self.content)
+        
+        if has_cleanup_logic:
+            self.passed.append("✅ Automated PTS result cleanup logic detected")
+        else:
+            self.warnings.append(
+                "⚠️  WARNING: Automated PTS result cleanup logic missing\n"
+                "   Should execute 'phoronix-test-suite remove-result' before benchmark execution to prevent interactive prompts."
             )
 
     def print_results(self):
