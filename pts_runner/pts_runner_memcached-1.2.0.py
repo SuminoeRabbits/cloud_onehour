@@ -25,8 +25,12 @@ class MemcachedRunner:
         
         # System info
         self.vcpu_count = os.cpu_count() or 1
-        self.machine_name = os.uname().nodename
-        self.os_name = os.uname().sysname
+        self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
+        self.os_name = self.get_os_name()
+        
+        # Project structure
+        self.script_dir = Path(__file__).parent.resolve()
+        self.project_root = self.script_dir.parent
 
         # Thread configuration
         self.quick_mode = quick_mode
@@ -39,12 +43,54 @@ class MemcachedRunner:
             self.thread_list = self.get_scaling_thread_list()
 
         # Results directory
-        self.results_dir = Path(f"results/{self.test_category_dir}/{self.benchmark}")
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
         
         # Perf configuration
         self.perf_paranoid = self.check_and_setup_perf_permissions()
         # Default events for memory/cpu bound
         self.perf_events = self.check_perf_event_support()
+
+    def get_os_name(self):
+        """
+        Get OS name and version formatted as <Distro>_<Version>.
+        Example: Ubuntu_22_04
+        """
+        try:
+            # Try lsb_release first as it's standard on Ubuntu
+            import subprocess
+            cmd = "lsb_release -d -s"
+            result = subprocess.run(cmd.split(), capture_output=True, text=True)
+            if result.returncode == 0:
+                description = result.stdout.strip() # e.g. "Ubuntu 22.04.4 LTS"
+                # Extract "Ubuntu" and "22.04"
+                parts = description.split()
+                if len(parts) >= 2:
+                    distro = parts[0]
+                    version = parts[1]
+                    # Handle version with dots
+                    version = version.replace('.', '_')
+                    return f"{distro}_{version}"
+        except Exception:
+            pass
+            
+        # Fallback to /etc/os-release
+        try:
+            with open('/etc/os-release', 'r') as f:
+                lines = f.readlines()
+            info = {}
+            for line in lines:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    info[k] = v.strip('"')
+            
+            if 'NAME' in info and 'VERSION_ID' in info:
+                distro = info['NAME'].split()[0] # "Ubuntu"
+                version = info['VERSION_ID'].replace('.', '_')
+                return f"{distro}_{version}"
+        except Exception:
+            pass
+            
+        return "Unknown_OS"
 
     def get_scaling_thread_list(self):
         """Generate thread list for scaling test: 1, 4, ..., vCPU."""
