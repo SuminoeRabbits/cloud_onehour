@@ -149,6 +149,28 @@ class PreSeedDownloader:
             
         return -1
 
+    def ensure_upload_disabled(self):
+        """
+        Ensure that PTS results upload is disabled in user-config.xml.
+        This is a safety measure to prevent accidental data leaks.
+        """
+        config_path = Path.home() / ".phoronix-test-suite" / "user-config.xml"
+        if not config_path.exists():
+            return
+            
+        try:
+            with open(config_path, 'r') as f:
+                content = f.read()
+                
+            if '<UploadResults>TRUE</UploadResults>' in content:
+                print("  [WARN] UploadResults is TRUE in user-config.xml. Disabling...")
+                content = content.replace('<UploadResults>TRUE</UploadResults>', '<UploadResults>FALSE</UploadResults>')
+                with open(config_path, 'w') as f:
+                    f.write(content)
+                print("  [OK] UploadResults set to FALSE")
+        except Exception as e:
+            print(f"  [WARN] Failed to check/update user-config.xml: {e}")
+
     def ensure_file(self, urls, filename):
         """
         Directly download file using aria2c (assumes size check passed).
@@ -232,6 +254,9 @@ class BenchmarkRunner:
 
         # Feature Detection: Check if perf is actually functional
         self.perf_events = self.get_perf_events()
+
+        # Enforce safety
+        self.ensure_upload_disabled()
         if self.perf_events:
             print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
         else:
@@ -378,6 +403,65 @@ def get_perf_events(self):
 
     print("  [INFO] perf command exists but is not functional (permission or kernel issue)")
     return None
+
+def check_and_setup_perf_permissions(self):
+    """
+    Check perf_event_paranoid setting and adjust if needed.
+
+    Returns:
+        int: Current perf_event_paranoid value after adjustment
+    """
+    print(f"\\n{'='*80}")
+    print(">>> Checking perf_event_paranoid setting")
+    print(f"{'='*80}")
+
+    try:
+        # Read current setting
+        result = subprocess.run(
+            ['cat', '/proc/sys/kernel/perf_event_paranoid'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        current_value = int(result.stdout.strip())
+
+        print(f"  [INFO] Current perf_event_paranoid: {current_value}")
+
+        # If too restrictive, try to adjust
+        # Note: -a (system-wide) requires perf_event_paranoid <= 0
+        if current_value >= 1:
+            print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
+            print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+
+            result = subprocess.run(
+                ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                print(f"       Per-CPU metrics and hardware counters enabled")
+                print(f"       Full monitoring mode: perf stat -A -a")
+                return 0
+            else:
+                print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                print(f"  [WARN] Running in LIMITED mode:")
+                print(f"         - No per-CPU metrics (no -A -a flags)")
+                print(f"         - No hardware counters (cycles, instructions)")
+                print(f"         - Software events only (aggregated)")
+                print(f"         - IPC calculation not available")
+                return current_value
+        else:
+            print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
+            print(f"       Full monitoring mode: perf stat -A -a")
+            return current_value
+
+    except Exception as e:
+        print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
+        print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+        print(f"         Running in LIMITED mode without per-CPU metrics")
+        return 2
 ```
 
 ### Perf統計パース（完全版）

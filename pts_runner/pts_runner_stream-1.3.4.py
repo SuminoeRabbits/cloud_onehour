@@ -209,6 +209,8 @@ class StreamRunner:
 
         # Feature Detection: Check if perf is actually functional
         self.perf_events = self.get_perf_events()
+        # Enforce safety
+        self.ensure_upload_disabled()
         if self.perf_events:
             print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
         else:
@@ -355,6 +357,29 @@ class StreamRunner:
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
             return 2
+
+
+    def ensure_upload_disabled(self):
+        """
+        Ensure that PTS results upload is disabled in user-config.xml.
+        This is a safety measure to prevent accidental data leaks.
+        """
+        config_path = Path.home() / ".phoronix-test-suite" / "user-config.xml"
+        if not config_path.exists():
+            return
+            
+        try:
+            with open(config_path, 'r') as f:
+                content = f.read()
+                
+            if '<UploadResults>TRUE</UploadResults>' in content:
+                print("  [WARN] UploadResults is TRUE in user-config.xml. Disabling...")
+                content = content.replace('<UploadResults>TRUE</UploadResults>', '<UploadResults>FALSE</UploadResults>')
+                with open(config_path, 'w') as f:
+                    f.write(content)
+                print("  [OK] UploadResults set to FALSE")
+        except Exception as e:
+            print(f"  [WARN] Failed to check/update user-config.xml: {e}")
 
     def clean_pts_cache(self):
         """Clean PTS installed tests for fresh installation."""

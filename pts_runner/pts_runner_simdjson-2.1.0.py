@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+"""
+PTS Runner for simdjson-2.1.0
+
+System Dependencies (from phoronix-test-suite info):
+- Software Dependencies:
+  * None
+- Test Type: System
+- Supported Platforms: Linux, BSD, MacOSX
+
+Test Characteristics:
+- Multi-threaded: No
+- Honors CFLAGS/CXXFLAGS: Yes
+- Notable Instructions: N/A
+"""
 import os
 import sys
 import subprocess
@@ -30,7 +44,9 @@ class SimdJsonRunner:
         self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
         
         self.perf_paranoid = self.check_and_setup_perf_permissions()
-        self.perf_events = self.check_perf_event_support()
+        self.perf_events = self.get_perf_events()
+        # Enforce safety
+        self.ensure_upload_disabled()
 
     def get_os_name(self):
         """
@@ -74,25 +90,103 @@ class SimdJsonRunner:
             
         return "Unknown_OS"
 
-    def check_perf_event_support(self):
-        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations,page-faults"
+    def is_wsl(self):
+        """
+        Detect if running in WSL environment (for logging purposes only).
+        """
+        try:
+            if not os.path.exists('/proc/version'):
+                return False
+            with open('/proc/version', 'r') as f:
+                content = f.read().lower()
+                return 'microsoft' in content or 'wsl' in content
+        except Exception:
+            return False
+
+    def get_cpu_affinity_list(self, n):
+        """Generate CPU affinity list for HyperThreading optimization."""
+        half = os.cpu_count() // 2
+        cpu_list = []
+        if n <= half:
+            cpu_list = [str(i * 2) for i in range(n)]
+        else:
+            cpu_list = [str(i * 2) for i in range(half)]
+            logical_count = n - half
+            cpu_list.extend([str(i * 2 + 1) for i in range(logical_count)])
+        return ','.join(cpu_list)
+
+    def get_perf_events(self):
+        """
+        Determine available perf events by testing actual command execution.
+        """
+        perf_path = shutil.which("perf")
+        if not perf_path:
+            print("  [INFO] perf command not found")
+            return None
+
+        # Test HW+SW
         hw_events = "cycles,instructions,branches,branch-misses,cache-references,cache-misses"
-        
         test_cmd = f"perf stat -e {hw_events} -- sleep 0.01"
         result = subprocess.run(['bash', '-c', test_cmd], capture_output=True, text=True)
-        if result.returncode == 0 and 'not supported' not in (result.stderr + result.stdout).lower():
-            return f"{hw_events},{sw_events}"
-        return sw_events
+        if result.returncode == 0:
+            if 'not supported' not in (result.stdout + result.stderr):
+                return hw_events
+
+        # Test SW only
+        sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations,page-faults"
+        test_cmd = f"perf stat -e {sw_events} -- sleep 0.01"
+        result = subprocess.run(['bash', '-c', test_cmd], capture_output=True, text=True)
+        if result.returncode == 0:
+            if 'not supported' not in (result.stdout + result.stderr):
+                return sw_events
+                
+        print("  [WARN] perf events not available")
+        return None
 
     def check_and_setup_perf_permissions(self):
+        """Check and adjust perf_event_paranoid setting."""
         try:
-            result = subprocess.run(['cat', '/proc/sys/kernel/perf_event_paranoid'], capture_output=True, text=True)
-            if int(result.stdout.strip()) >= 1:
-                subprocess.run(['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'], capture_output=True)
-                return 0
-            return int(result.stdout.strip())
-        except:
+            result = subprocess.run(
+                ['cat', '/proc/sys/kernel/perf_event_paranoid'],
+                capture_output=True, text=True, check=True
+            )
+            current_value = int(result.stdout.strip())
+            
+            if current_value >= 1:
+                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                result = subprocess.run(
+                    ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    return 0
+                return current_value
+            return current_value
+        except Exception:
             return 2
+
+
+    def ensure_upload_disabled(self):
+        """
+        Ensure that PTS results upload is disabled in user-config.xml.
+        This is a safety measure to prevent accidental data leaks.
+        """
+        config_path = Path.home() / ".phoronix-test-suite" / "user-config.xml"
+        if not config_path.exists():
+            return
+            
+        try:
+            with open(config_path, 'r') as f:
+                content = f.read()
+                
+            if '<UploadResults>TRUE</UploadResults>' in content:
+                print("  [WARN] UploadResults is TRUE in user-config.xml. Disabling...")
+                content = content.replace('<UploadResults>TRUE</UploadResults>', '<UploadResults>FALSE</UploadResults>')
+                with open(config_path, 'w') as f:
+                    f.write(content)
+                print("  [OK] UploadResults set to FALSE")
+        except Exception as e:
+            print(f"  [WARN] Failed to check/update user-config.xml: {e}")
 
     def clean_pts_cache(self):
         print(">>> Cleaning PTS cache...")

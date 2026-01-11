@@ -105,8 +105,10 @@ class ComplianceChecker:
 
         self.check_install_verification()
         self.check_argparse_setup()
+        self.check_upload_safety()
         self.check_batch_env_vars()
-        self.check_pts_result_cleanup()
+        self.check_pts_cache_clean()
+        self.check_results_dir_structure()
 
 
 
@@ -351,6 +353,8 @@ class ComplianceChecker:
 
             'get_perf_events',
 
+            'check_and_setup_perf_permissions',
+
             'run_benchmark',
 
             'install_benchmark'
@@ -492,8 +496,11 @@ class ComplianceChecker:
 
 
         if not has_get_perf_events:
-
-            self.warnings.append("⚠️  WARNING: get_perf_events() method not found")
+            # Check for old method name
+            if re.search(r'def\s+check_perf_event_support\s*\(', self.content):
+                 self.warnings.append("⚠️  WARNING: Using deprecated method 'check_perf_event_support'. Please rename to 'get_perf_events' matching CODE_TEMPLATE.md")
+            else:
+                 self.warnings.append("⚠️  WARNING: get_perf_events() method not found")
 
             return
 
@@ -645,7 +652,18 @@ class ComplianceChecker:
                 "   This may cause interactive prompts. Add TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads"
             )
 
-    def check_pts_result_cleanup(self):
+    def check_upload_safety(self):
+        """
+        Check if ensure_upload_disabled method exists and is called.
+        """
+        if not re.search(r"def\s+ensure_upload_disabled\s*\(", self.content):
+            self.errors.append("❌ Missing ensure_upload_disabled() method to prevent accidental result uploads")
+        elif not re.search(r"self\.ensure_upload_disabled\(\)", self.content):
+             self.errors.append("❌ ensure_upload_disabled() method exists but is NOT called")
+        else:
+            self.passed.append("✅ Method ensure_upload_disabled() implemented and called")
+
+    def check_pts_cache_clean(self):
         """Check if PTS result cleanup logic is present to prevent interactive prompts"""
         # Search for logic that removes existing results before running
         has_cleanup_logic = re.search(r"phoronix-test-suite\s+remove-result", self.content)
@@ -656,6 +674,27 @@ class ComplianceChecker:
             self.warnings.append(
                 "⚠️  WARNING: Automated PTS result cleanup logic missing\n"
                 "   Should execute 'phoronix-test-suite remove-result' before benchmark execution to prevent interactive prompts."
+            )
+
+    def check_results_dir_structure(self):
+        """
+        Check if self.results_dir is constructed using the standard project structure.
+        Expected: self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
+        """
+        # Look for the results_dir assignment
+        # We handle variations in whitespace and line breaks
+        results_dir_pattern = r'self\.results_dir\s*=\s*self\.project_root\s*/\s*"results"\s*/\s*self\.machine_name\s*/\s*self\.os_name\s*/\s*self\.test_category_dir\s*/\s*self\.benchmark'
+        
+        # Also check for variations with single quotes
+        results_dir_pattern_sq = r"self\.results_dir\s*=\s*self\.project_root\s*/\s*'results'\s*/\s*self\.machine_name\s*/\s*self\.os_name\s*/\s*self\.test_category_dir\s*/\s*self\.benchmark"
+
+        if re.search(results_dir_pattern, self.content) or re.search(results_dir_pattern_sq, self.content):
+            self.passed.append("✅ standard results directory structure used")
+        else:
+             self.errors.append(
+                "❌ CRITICAL: Invalid results directory structure\n"
+                "   Expected: self.results_dir = self.project_root / \"results\" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark\n"
+                "   This ensures consistent log organization across machines and OS versions."
             )
 
     def print_results(self):
