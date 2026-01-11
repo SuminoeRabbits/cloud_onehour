@@ -59,9 +59,11 @@
 # --split-5th: 実行コマンドを総数の1/5に分割し、5番目の1/5のみを生成・実行します。
 # --regression: このオプションが付いた場合 "exe_time_v8cpu"値により "--quick"を上書きします。
 #                もし　"exe_time_v8cpu"値が150以上の場合は、実行しません、生成しません、表示されません。 
-#                もし　"exe_time_v8cpu"値が100以上の場合は、必ず実行オプションに"--quick"と"--max"を追加します。 
+#                もし　"exe_time_v8cpu"値が100以上の場合は、2通りの実行コマンドを生成します。
+# 　　　　　　　　　　　　１．"--quick"と"--max"を追加したもの。
+# 　　　　　　　　　　　　２． "--quick"と"4" を追加したもの。
 # 　　　　　　　　もし　"exe_time_v8cpu"値が15.25以上の場合は 必ず実行オプションに"--quick"を追加します。
-#                もし"exe_time_v8cpu"値が15.25未満の場合は 必ず実行オプションに"--quick"を追加しません。   
+#                もし"exe_time_v8cpu"値が15.25未満の場合は オプションに何もつけません。   
 # 
 # 例外処理：
 # - もし実行オプションが不正な場合は、それを無視して動作を続行する。  
@@ -179,8 +181,9 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                     number_arg = str(max_threads)
                     print(f"  [INFO] --max override: {original_arg} -> {number_arg} threads")
 
-            # Determine if --quick should be appended and if test should be skipped
-            use_quick = quick_mode
+            # Determine configurations to run
+            # Each config is a tuple: (thread_count_arg, use_quick_flag)
+            run_configs = []
             skip_test = False
 
             if regression_mode:
@@ -195,19 +198,26 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                     skip_test = True
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 150 -> Skipping test (too long)")
                 elif exe_time >= 100:
-                    use_quick = True
-                    # Enforce --max (288 threads) unless single threaded
-                    if number_arg != "1":
-                        number_arg = "288"
-                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick and --max (288 threads)")
+                    # Enforce --max (288 threads) and --quick, AND 4 threads and --quick
+                    if number_arg == "1":
+                        # Single threaded, just run as is with quick
+                         print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick (single-threaded)")
+                         run_configs.append(("1", True))
                     else:
-                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick (single-threaded, ignoring max)")
+                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing dual runs: --max (288) and 4 threads")
+                        # 1. Max (288) + Quick
+                        run_configs.append(("288", True))
+                        # 2. 4 + Quick
+                        run_configs.append(("4", True))
                 elif exe_time >= 15.25:
-                    use_quick = True
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 15.25 -> Enforcing --quick")
+                    run_configs.append((number_arg, True))
                 else:
-                    use_quick = False
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} < 15.25 -> Disabling --quick")
+                    run_configs.append((number_arg, False))
+            else:
+                # Normal mode
+                run_configs.append((number_arg, quick_mode))
 
             # Skip if regression mode marked it as too long
             if skip_test:
@@ -222,17 +232,18 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                 print(f"  [WARN] Runner script not found: {runner_script}")
                 print(f"  [INFO] Command will be generated anyway, but execution may fail")
 
-            if number_arg is None:
-                cmd = runner_script
-            else:
-                cmd = f"{runner_script} {number_arg}"
+            for t_arg, q_flag in run_configs:
+                if t_arg is None:
+                    cmd = runner_script
+                else:
+                    cmd = f"{runner_script} {t_arg}"
 
-            # Append --quick flag if enabled
-            if use_quick:
-                cmd = f"{cmd} --quick"
+                # Append --quick flag if enabled
+                if q_flag:
+                    cmd = f"{cmd} --quick"
 
-            commands.append(cmd)
-            print(f"  [OK] Generated command: {cmd}")
+                commands.append(cmd)
+                print(f"  [OK] Generated command: {cmd}")
 
     return commands
 

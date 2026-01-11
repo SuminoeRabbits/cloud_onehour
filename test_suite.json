@@ -48,7 +48,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
                     "notes": "Uses cmake --build . -- -j $NUM_CPU_CORES",
-                    "exe_time_v8cpu": "80.0"
+                    "exe_time_v8cpu": "140.0"
                 },
                 "pts/build-gcc-1.5.0": {
                     "enabled": true,
@@ -57,7 +57,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": "unknown",
                     "notes": "Uses make -j $NUM_CPU_CORES for parallel compilation",
-                    "exe_time_v8cpu": "100.0"
+                    "exe_time_v8cpu": "140.0"
                 }
             }
         },
@@ -112,7 +112,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
                     "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
-                    "exe_time_v8cpu": "100.0"
+                    "exe_time_v8cpu": "110.0"
                 },
                 "pts/openssl-3.6.0": {
                     "enabled": true,
@@ -121,7 +121,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "Uses -multi $NUM_CPU_CORES runtime CLI argument",
-                    "exe_time_v8cpu": "100.0"
+                    "exe_time_v8cpu": "110.0"
                 },
                 "pts/nginx-3.0.1": {
                     "enabled": true,
@@ -130,7 +130,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
                     "notes": "wrk uses -t $NUM_CPU_CORES for client threads. nginx worker_processes is commented out in install.sh and should be enabled with 'worker_processes auto;' for server-side scaling",
-                    "exe_time_v8cpu": "60.0"
+                    "exe_time_v8cpu": "110.0"
                 }
             }
         },
@@ -190,7 +190,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "Uses -threads $NUM_CPU_CORES runtime option for video encoding. run.sh must be updated to scale.",
-                    "exe_time_v8cpu": "100.0"
+                    "exe_time_v8cpu": "110.0"
                 },
                 "pts/x265-1.5.0": {
                     "enabled": true,
