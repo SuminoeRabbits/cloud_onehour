@@ -778,7 +778,17 @@ class ApacheRunner:
         # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        # Remove existing PTS result to avoid interactive prompts
+        # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        remove_cmds = [
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+        ]
+        for cmd in remove_cmds:
+            subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         # Single-threaded: use CPU 0 only with taskset
         cpu_list = '0'
@@ -1123,44 +1133,39 @@ class ApacheRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Apache Web Server Benchmark Runner (Single-threaded)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Note: Apache is a single-threaded benchmark that uses wrk for load testing.
-Thread count arguments are ignored; always runs with 1 thread.
-
-Examples:
-  %(prog)s           # Run with 1 thread (single-threaded)
-  %(prog)s 4         # Also runs with 1 thread (argument ignored)
-        """
+        description="Apache Web Server Benchmark Runner (Single-threaded)",
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
-        'threads',
+        'threads_pos',
         nargs='?',
         type=int,
-        help='Thread count (ignored; benchmark is always single-threaded)'
+        help='Number of threads (optional, omit for scaling mode)'
     )
-    
+
+    parser.add_argument(
+        '--threads',
+        type=int,
+        help='Run benchmark with specified number of threads only (1 to CPU count)'
+    )
+
     parser.add_argument(
         '--quick',
         action='store_true',
-        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+        help='Quick mode: Run each test only once (for development/testing)'
     )
 
     args = parser.parse_args()
-    
+
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
         print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
-    # Validate threads argument (though it's ignored for this single-threaded benchmark)
-    if args.threads is not None and args.threads < 1:
-        print(f"[ERROR] Thread count must be >= 1 (got: {args.threads})")
-        sys.exit(1)
+    # Resolve threads argument (prioritize --threads if both provided)
+    threads = args.threads if args.threads is not None else args.threads_pos
 
-    # Run benchmark (always with 1 thread)
-    runner = ApacheRunner(args.threads, quick_mode=args.quick)
+    runner = ApacheRunner(threads_arg=threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)

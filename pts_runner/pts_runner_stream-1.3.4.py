@@ -550,6 +550,17 @@ class StreamRunner:
         print(f">>> Running {self.benchmark_full} with {num_threads} thread(s)")
         print(f"{'='*80}")
 
+        
+        # Remove existing PTS result to prevent interactive prompts
+        # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        remove_cmds = [
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+        ]
+        for cmd in remove_cmds:
+            subprocess.run(cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         thread_dir = self.results_dir / f"{num_threads}-thread"
         thread_dir.mkdir(parents=True, exist_ok=True)
 
@@ -563,7 +574,7 @@ class StreamRunner:
 
         # Setup environment variables
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         # Build PTS command
         if num_threads >= self.vcpu_count:
@@ -867,20 +878,27 @@ class StreamRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Stream 2013-01-17 Memory Benchmark Runner'
+        description="Stream 2013-01-17 Memory Benchmark Runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
-        'threads',
+        'threads_pos',
         nargs='?',
         type=int,
         help='Number of threads (optional, omit for scaling mode)'
     )
 
     parser.add_argument(
+        '--threads',
+        type=int,
+        help='Run benchmark with specified number of threads only (1 to CPU count)'
+    )
+
+    parser.add_argument(
         '--quick',
         action='store_true',
-        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+        help='Quick mode: Run each test only once (for development/testing)'
     )
 
     args = parser.parse_args()
@@ -889,7 +907,10 @@ def main():
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
         print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
-    runner = StreamRunner(args.threads, quick_mode=args.quick)
+    # Resolve threads argument (prioritize --threads if both provided)
+    threads = args.threads if args.threads is not None else args.threads_pos
+
+    runner = StreamRunner(threads_arg=threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)

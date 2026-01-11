@@ -265,6 +265,16 @@ class NumpyBenchmarkRunner:
 
         # Environment variables for batch mode execution
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+        # Remove existing PTS result to avoid interactive prompts
+        # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        remove_cmds = [
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+        ]
+        for cmd in remove_cmds:
+            subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         # Construct Final Command with conditional perf
@@ -539,16 +549,9 @@ class NumpyBenchmarkRunner:
 def main():
     parser = argparse.ArgumentParser(
         description="Run numpy-1.2.1 benchmark",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  %(prog)s           # Run with 1 to vCPU threads (scaling mode)
-  %(prog)s 4         # Run with 4 threads only
-  %(prog)s 16        # Run with 16 threads (capped at vCPU if exceeded)
-  %(prog)s --quick   # Run in quick mode
-        """
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     parser.add_argument(
         'threads_pos',
         nargs='?',
@@ -561,23 +564,26 @@ Examples:
         type=int,
         help='Run benchmark with specified number of threads only (1 to CPU count)'
     )
+
     parser.add_argument(
         '--quick',
         action='store_true',
         help='Quick mode: Run each test only once (for development/testing)'
     )
+
     args = parser.parse_args()
+
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
 
-    # Validate threads argument
-    if threads is not None and threads < 1:
-        print(f"[ERROR] Thread count must be >= 1 (got: {threads})")
-        sys.exit(1)
-
     runner = NumpyBenchmarkRunner(threads_arg=threads, quick_mode=args.quick)
-    runner.run()
+    success = runner.run()
+
+    sys.exit(0 if success else 1)
 
 
 if __name__ == '__main__':

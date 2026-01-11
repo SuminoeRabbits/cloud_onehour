@@ -702,7 +702,17 @@ class X265Runner:
         # Note: x265 auto-detects, so we don't pass NUM_CPU_CORES
         # Instead, we use taskset to limit visible CPUs
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        # Remove existing PTS result to avoid interactive prompts
+        # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        remove_cmds = [
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+        ]
+        for cmd in remove_cmds:
+            subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         # Always use taskset for x265 to control CPU visibility
         # x265 will auto-detect the CPUs available in the taskset mask
@@ -967,32 +977,39 @@ class X265Runner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='x265 1.5.0 Benchmark Runner'
+        description="x265 1.5.0 Benchmark Runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
-        'threads',
+        'threads_pos',
         nargs='?',
         type=int,
         help='Number of threads (optional, omit for scaling mode)'
     )
 
     parser.add_argument(
+        '--threads',
+        type=int,
+        help='Run benchmark with specified number of threads only (1 to CPU count)'
+    )
+
+    parser.add_argument(
         '--quick',
         action='store_true',
-        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+        help='Quick mode: Run each test only once (for development/testing)'
     )
 
     args = parser.parse_args()
 
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
-    if args.threads is not None and args.threads < 1:
-        print(f"[ERROR] Thread count must be >= 1")
-        sys.exit(1)
+    # Resolve threads argument (prioritize --threads if both provided)
+    threads = args.threads if args.threads is not None else args.threads_pos
 
-    runner = X265Runner(args.threads, quick_mode=args.quick)
+    runner = X265Runner(threads_arg=threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)

@@ -560,6 +560,17 @@ class PgbenchRunner:
         print(f">>> Running {self.benchmark_full} with {num_threads} thread(s)")
         print(f"{'='*80}")
 
+        
+        # Remove existing PTS result to prevent interactive prompts
+        # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        remove_cmds = [
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+        ]
+        for cmd in remove_cmds:
+            subprocess.run(cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         thread_dir = self.results_dir / f"{num_threads}-thread"
         thread_dir.mkdir(parents=True, exist_ok=True)
 
@@ -573,7 +584,7 @@ class PgbenchRunner:
 
         # Setup environment variables
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         # Build PTS command
         if num_threads >= self.vcpu_count:
@@ -815,13 +826,42 @@ class PgbenchRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=f"Run {__doc__.splitlines()[1]}")
-    parser.add_argument('threads', nargs='?', type=int, help='Number of threads (optional)')
-    parser.add_argument('--quick', action='store_true', help='Run in quick mode (1 run)')
+    parser = argparse.ArgumentParser(
+        description="Benchmark Runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        'threads_pos',
+        nargs='?',
+        type=int,
+        help='Number of threads (optional, omit for scaling mode)'
+    )
+
+    parser.add_argument(
+        '--threads',
+        type=int,
+        help='Run benchmark with specified number of threads only (1 to CPU count)'
+    )
+
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: Run each test only once (for development/testing)'
+    )
+
     args = parser.parse_args()
 
-    runner = PgbenchRunner(threads_arg=args.threads, quick_mode=args.quick)
+    if args.quick:
+        print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
+        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
+
+    # Resolve threads argument (prioritize --threads if both provided)
+    threads = args.threads if args.threads is not None else args.threads_pos
+
+    runner = PgbenchRunner(threads_arg=threads, quick_mode=args.quick)
     success = runner.run()
+
     sys.exit(0 if success else 1)
 
 

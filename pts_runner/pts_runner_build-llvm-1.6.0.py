@@ -673,7 +673,26 @@ class BuildLLVMRunner:
         builder_env_dict = self.get_builder_env()
         builder_env_str = self._env_dict_to_str(builder_env_dict)
             
-        batch_env = f'{quick_env}{builder_env_str}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads'
+        # Remove existing PTS result to avoid interactive prompts
+            
+        # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
+            
+        sanitized_benchmark = self.benchmark.replace('.', '')
+            
+        remove_cmds = [
+            
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+            
+        ]
+            
+        for cmd in remove_cmds:
+            
+            subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            
+        batch_env = f'{quick_env}{builder_env_str}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
@@ -992,42 +1011,39 @@ class BuildLLVMRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Build LLVM 1.6.0 Benchmark Runner',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  %(prog)s           # Run with 1 to vCPU threads (scaling mode)
-  %(prog)s 4         # Run with 4 threads only
-  %(prog)s 16        # Run with 16 threads (capped at vCPU if exceeded)
-        """
+        description="Build LLVM 1.6.0 Benchmark Runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
-        'threads',
+        'threads_pos',
         nargs='?',
         type=int,
         help='Number of threads (optional, omit for scaling mode)'
     )
-    
+
+    parser.add_argument(
+        '--threads',
+        type=int,
+        help='Run benchmark with specified number of threads only (1 to CPU count)'
+    )
+
     parser.add_argument(
         '--quick',
         action='store_true',
-        help='Quick mode: run tests once (FORCE_TIMES_TO_RUN=1) for development'
+        help='Quick mode: Run each test only once (for development/testing)'
     )
 
     args = parser.parse_args()
-    
+
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
         print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
-    # Validate threads argument
-    if args.threads is not None and args.threads < 1:
-        print(f"[ERROR] Thread count must be >= 1 (got: {args.threads})")
-        sys.exit(1)
+    # Resolve threads argument (prioritize --threads if both provided)
+    threads = args.threads if args.threads is not None else args.threads_pos
 
-    # Run benchmark
-    runner = BuildLLVMRunner(args.threads, quick_mode=args.quick)
+    runner = BuildLLVMRunner(threads_arg=threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)
