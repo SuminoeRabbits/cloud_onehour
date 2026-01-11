@@ -12,6 +12,15 @@
                     "sve2_support": "unknown",
                     "notes": "Thread count fixed at compile via -DMULTITHREAD=$NUM_CPU_CORES. # of thread is decided by compile.",
                     "exe_time_v8cpu": "1.0"
+                },
+                "pts/simdjson-2.1.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "Single-threaded",
+                    "sve2_support": true,
+                    "notes": "N/A - single-threaded benchmark only",
+                    "exe_time_v8cpu": "10.0"
                 }
             }
         },
@@ -177,6 +186,15 @@
                     "sve2_support": false,
                     "notes": "Need to downgrade JDK17. Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)",
                     "exe_time_v8cpu": "17.0"
+                },
+                "pts/phpbench-1.1.6": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "Single-threaded",
+                    "sve2_support": false,
+                    "notes": "N/A - single-threaded benchmark only",
+                    "exe_time_v8cpu": "2.0"
                 }
             }
         },
@@ -255,6 +273,15 @@
                     "sve2_support": false,
                     "notes": "Thread count controlled via -j option in test settings (1/2/4/8/16/32). Need to revisit.",
                     "exe_time_v8cpu": "300.0"
+                },
+                "pts/memcached-1.2.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "linear by memcached scaling.",
+                    "sve2_support": true,
+                    "notes": "Uses -threads $NUM_CPU_CORES runtime option.",
+                    "exe_time_v8cpu": "20.0"
                 }
             }
         },
@@ -268,7 +295,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "Uses -threads $NUM_CPU_CORES runtime option.",
-                    "exe_time_v8cpu": "10.1"
+                    "exe_time_v8cpu": "10.0"
                 },
                 "pts/numpy-1.2.1": {
                     "enabled": true,
