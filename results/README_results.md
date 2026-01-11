@@ -4,28 +4,42 @@
 
 # Directory and structure
 まず`${PROJECT_ROOT}`に対して
-`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>/files`
+`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>/<files>`
 というディレクトリ構造になっている。今後の命名規則として下記の通りにする。
 "machinename"=<machinename>
 "os"=<os>
 "testcategory"=<testcategory>
 "benchmark"=<benchmark>
+"files"=<files>
 
 # TOC
 <ここにTOCを記載してほしい>。
 
 # File details
+本件は`Phoronix Test Suite v10.8.4`をベースラインのインフラとして利用しプログラムを実行、結果をまとめて表示している。ここでは主に<files>の詳細について記載する。
 
 ## Common rule
-データを読むうえで共通の概念を説明する。
+データを読むうえで<files>内で利用されている共通の概念を説明する。
 
-### Number of threads in hardware and Thread count in benchmark
-ベンチマークで利用するスレッド数は`<N>`で表される。
-ベンチマークが走るハードウェアの持っているスレッド数`nproc`は`vCPU`として表される。
+### Number of threads in hardware and Thread count in <benchmark>
+`<benchmark>`で利用するスレッド数は`<N>`で表され、ハードウェア資源の持っているスレッド数は`vCPU`として表される。`<benchmark>`毎に下記の3通りが出現することに注意。
+ - `<N>=vCPU` : `<N>`は固定。マルチスレッド化によるスケールアウトの恩恵のみを想定している。
+ - `<N>=1` : `<N>`は固定。マルチスレッド化が十分にされておらず、1スレッドでのスケールアップを想定している。
+ - `<N>={1,2,3...,vCPU}`: 利用する`<N>`を1から`vCPU`まで増やすことで、スケールアップ、スケールアウトの両方に対応している。
 
-### CPU affinity 
-ベンチマークで利用されるＣＰＵアフィニティの順序はamd64系のHyperThread機能を考慮して、`{0,2,4,6....,1,3,5,7..[vCPU-1]}`である。
-例えば`vCPU=4`, `<N>=3のベンチマーク設定で利用されるCPUアフィニティは`{0,1,2}`となる。`<N>=vCPU`の場合はすべてのCPUアフィニティを利用していることになる。このようなCPUアフィニティの分散は`vCPU=physical CPU`であるプロセッサでは意味がないが、両方で対応できるようにこのような仕様にしている。
+### relaionship between CPU affinity and <N>-Thread in <benchmark> 
+<benchmark>で利用されるスレッド数`<N>`に対して実際に利用されるＣＰＵアフィニティの順序はamd64系のHyperThread機能を考慮して、`{0,2,4,6....,1,3,5,7..[vCPU-1]}`と設定している。
+例えば`vCPU=4`, `<N>=2`では利用されるCPUアフィニティは`{0,2}`となる。CPUアフィニティはLinux標準コマンドである`taskset`で指定される。なお`<N>=vCPU`の場合はすべてのCPUアフィニティを利用していることになるので`taskset`は適応しない。
+このようなCPUアフィニティの分散は`arm64`系プロセッサにおいて`vCPU=physical CPU`である場合は意味がをなさないが、両方のISAで対応できるようにこのような仕様にしている。
+
+### How to distingush <N> in <files>?
+スレッド数`<N>`で実行された`<benchmark>`の情報は`<files>`中の`<N>-thead...`で始まるファイル名で保存されている。
+
+### in one <benchmark>
+
+### summary file in <files>
+`<benchmark>`が正常終了している場合のみ`<files>`中に`summary.json`,`summary.log`が生成される。この2ファイルはフォーマットの違いだけであり内容に違いはない。
+
 
 ## perf_stat output
 ここでは独自拡張したOSの`perf stat`の出力ファイルを説明する。
