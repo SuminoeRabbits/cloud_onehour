@@ -296,6 +296,13 @@ echo "Setting up batch-mode configuration for automated testing..."
 # Y - Run all test options
 printf "Y\nN\nN\nN\nN\nN\nY\n" | "$LAUNCHER" batch-setup
 
+# Force disable UploadResults to prevent accidental uploads
+USER_CONFIG="$HOME/.phoronix-test-suite/user-config.xml"
+if [ -f "$USER_CONFIG" ]; then
+    echo "Enforcing UploadResults=FALSE in user-config.xml..."
+    sed -i 's|<UploadResults>TRUE</UploadResults>|<UploadResults>FALSE</UploadResults>|g' "$USER_CONFIG"
+fi
+
 echo "[OK] Batch mode configured"
 echo ""
 
