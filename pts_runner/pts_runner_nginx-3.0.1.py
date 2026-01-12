@@ -393,16 +393,16 @@ sed -i 's/CFLAGS  += -std=c99/CFLAGS  += -std=gnu99/' Makefile
 sed -i '/^OPENSSL_OPTS = /a\\OPENSSL_CFLAGS = -std=gnu89 -Wno-error -O2 -march=native' Makefile
 
 # Patch 3: Modify OpenSSL build rule to use OPENSSL_CFLAGS
-# The ./config line - need to escape quotes within the shell -c command
-# Use 4 backslashes: Python->Bash->Sed->Makefile
+# The ./config line - uses $(SHELL) -c so needs escaped quotes
 sed -i 's|./config $(OPENSSL_OPTS)|CC=$${CC:-gcc-14} CFLAGS=\\\\"$(OPENSSL_CFLAGS)\\\\" ./config $(OPENSSL_OPTS)|' Makefile
 
-# The "make depend" line
-sed -i 's|@$(MAKE) -C $< depend|@$(MAKE) -C $< CC=$${CC:-gcc-14} CFLAGS=\\\\"$(OPENSSL_CFLAGS)\\\\" depend|' Makefile
+# The "make depend" and "make" lines - direct make calls
+# CRITICAL: Need quotes around the whole CFLAGS assignment to prevent make from parsing flags as options
+sed -i 's|@$(MAKE) -C $< depend|@$(MAKE) -C $< CC=$${CC:-gcc-14} "CFLAGS=$(OPENSSL_CFLAGS)" depend|' Makefile
 
 # The "make" line (but not "make install_sw")
 # Match the line that has just "@$(MAKE) -C $<" followed by newline (before install_sw line)
-sed -i '/depend/,/install_sw/{s|@$(MAKE) -C $<$|@$(MAKE) -C $< CC=$${CC:-gcc-14} CFLAGS=\\\\"$(OPENSSL_CFLAGS)\\\\"|;}' Makefile
+sed -i '/depend/,/install_sw/{s|@$(MAKE) -C $<$|@$(MAKE) -C $< CC=$${CC:-gcc-14} "CFLAGS=$(OPENSSL_CFLAGS)"|;}' Makefile
 
 echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
 # === End of GCC-14 compatibility patch ===
@@ -445,11 +445,21 @@ echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
-        # STEP 1: Patch install.sh BEFORE running batch-install
+        # STEP 1: Force PTS to download test profile first
+        # This ensures install.sh exists before we try to patch it
+        print(f"\n  [INFO] Downloading test profile...")
+        download_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+        subprocess.run(
+            ['bash', '-c', download_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        # STEP 2: Patch install.sh BEFORE running batch-install
         # This allows install.sh to patch wrk's Makefile before building
         self.patch_install_sh_for_gcc14()
 
-        # STEP 2: Remove existing installation
+        # STEP 3: Remove existing installation
         print(f"\n  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
