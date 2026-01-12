@@ -21,10 +21,14 @@ Test Characteristics:
 
 GCC-14 Compatibility Fix:
 - Problem: wrk-4.2.0 bundles OpenSSL 1.1.1i which has inline assembly syntax incompatible with GCC-14
-- Solution: Patch OpenSSL build to use -std=gnu89 flag for GCC-14 compatibility
-- Implementation: fix_wrk_for_gcc14() method patches Makefile and rebuilds wrk with bundled OpenSSL 1.1.1i
-- Result: wrk is statically linked with OpenSSL 1.1.1i, ensuring consistent benchmark results across environments
-- Verification: strings wrk | grep "OpenSSL 1.1.1i" confirms bundled version is used
+- Solution: Patch PTS install.sh BEFORE batch-install to modify wrk's Makefile for GCC-14 compatibility
+- Implementation: patch_install_sh_for_gcc14() patches install.sh to:
+  * Change wrk CFLAGS from -std=c99 to -std=gnu99
+  * Add OPENSSL_CFLAGS="-std=gnu89 -Wno-error -O2 -march=native" for OpenSSL build
+  * Modify OpenSSL build commands to use OPENSSL_CFLAGS
+  * Use $(nproc) instead of $NUM_CPU_CORES for compilation parallelism
+- Result: wrk is statically linked with OpenSSL 1.1.1i built with GCC-14 compatible flags
+- Timing: install.sh is patched BEFORE batch-install, so wrk builds correctly on first attempt
 
 Architecture Support:
 - Automatic detection: uname -m detects x86_64, amd64, arm64, aarch64, etc.
@@ -332,6 +336,103 @@ class NginxRunner:
 
         return ','.join(cpu_list)
 
+    def patch_install_sh_for_gcc14(self):
+        """
+        Patch PTS install.sh to fix wrk Makefile before building.
+
+        This patches the install.sh script to modify wrk's Makefile
+        for GCC-14 compatibility BEFORE make is executed.
+
+        The patch:
+        1. Changes wrk CFLAGS from -std=c99 to -std=gnu99
+        2. Adds OPENSSL_CFLAGS with -std=gnu89 for OpenSSL 1.1.1i compatibility
+        3. Modifies OpenSSL build commands to use OPENSSL_CFLAGS
+        4. Uses $(nproc) instead of $NUM_CPU_CORES for compilation parallelism
+        """
+        print(f"\n>>> Patching install.sh for GCC-14 compatibility...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+        install_sh = pts_home / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+
+        if not install_sh.exists():
+            print(f"  [WARN] install.sh not found: {install_sh}")
+            print(f"  [INFO] Path: {install_sh}")
+            return
+
+        print(f"  [INFO] Reading install.sh: {install_sh}")
+
+        # Read original install.sh
+        with open(install_sh, 'r') as f:
+            content = f.read()
+
+        # Check if already patched
+        if 'GCC-14 compatibility patch' in content:
+            print(f"  [INFO] install.sh already patched, skipping")
+            return
+
+        # Backup original
+        backup = install_sh.parent / 'install.sh.original'
+        if not backup.exists():
+            shutil.copy(install_sh, backup)
+            print(f"  [INFO] Backed up original: {backup}")
+
+        # Create the patch to insert before "make -j $NUM_CPU_CORES"
+        # This will be inserted after "cd wrk-4.2.0"
+        patch_code = '''
+# === GCC-14 compatibility patch for wrk's bundled OpenSSL 1.1.1i ===
+# Patch wrk Makefile to use GCC-14 compatible flags for OpenSSL build
+
+# Patch 1: Fix wrk CFLAGS (c99 -> gnu99 for better compatibility)
+sed -i 's/CFLAGS  += -std=c99/CFLAGS  += -std=gnu99/' Makefile
+
+# Patch 2: Add OPENSSL_CFLAGS variable with GCC-14 compatible flags
+# -std=gnu89: Allow old-style inline assembly syntax in OpenSSL 1.1.1i
+# -Wno-error: Don't treat warnings as errors
+# -O2: Optimization level
+# -march=native: Architecture-specific optimizations
+sed -i '/^OPENSSL_OPTS = /a\\OPENSSL_CFLAGS = -std=gnu89 -Wno-error -O2 -march=native' Makefile
+
+# Patch 3: Modify OpenSSL build rule to use OPENSSL_CFLAGS
+# The ./config line - need to escape quotes within the shell -c command
+# Use 4 backslashes: Python->Bash->Sed->Makefile
+sed -i 's|./config $(OPENSSL_OPTS)|CC=$${CC:-gcc-14} CFLAGS=\\\\"$(OPENSSL_CFLAGS)\\\\" ./config $(OPENSSL_OPTS)|' Makefile
+
+# The "make depend" line
+sed -i 's|@$(MAKE) -C $< depend|@$(MAKE) -C $< CC=$${CC:-gcc-14} CFLAGS=\\\\"$(OPENSSL_CFLAGS)\\\\" depend|' Makefile
+
+# The "make" line (but not "make install_sw")
+# Match the line that has just "@$(MAKE) -C $<" followed by newline (before install_sw line)
+sed -i '/depend/,/install_sw/{s|@$(MAKE) -C $<$|@$(MAKE) -C $< CC=$${CC:-gcc-14} CFLAGS=\\\\"$(OPENSSL_CFLAGS)\\\\"|;}' Makefile
+
+echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
+# === End of GCC-14 compatibility patch ===
+
+'''
+
+        # Find and replace the wrk build section
+        # Look for: "cd wrk-4.2.0\nmake -j $NUM_CPU_CORES"
+        old_pattern = 'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES'
+        new_pattern = 'cd wrk-4.2.0' + patch_code + 'make -j $(nproc)'
+
+        if old_pattern in content:
+            content = content.replace(old_pattern, new_pattern)
+            print(f"  [OK] Patched wrk build section")
+        else:
+            print(f"  [ERROR] Could not find wrk build section to patch")
+            print(f"  [INFO] Looking for pattern: {repr(old_pattern)}")
+            return
+
+        # Write patched install.sh
+        with open(install_sh, 'w') as f:
+            f.write(content)
+
+        print(f"  [OK] install.sh patched successfully")
+        print(f"  [INFO] Patches applied:")
+        print(f"         - wrk CFLAGS: -std=c99 -> -std=gnu99")
+        print(f"         - OpenSSL CFLAGS: -std=gnu89 -Wno-error -O2 -march=native")
+        print(f"         - OpenSSL build: Uses CC and CFLAGS from environment")
+        print(f"         - Build parallelism: $(nproc) instead of $NUM_CPU_CORES")
+
     def install_benchmark(self):
         """
         Install nginx-3.0.1 with GCC-14 native compilation.
@@ -344,8 +445,12 @@ class NginxRunner:
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
-        # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        # STEP 1: Patch install.sh BEFORE running batch-install
+        # This allows install.sh to patch wrk's Makefile before building
+        self.patch_install_sh_for_gcc14()
+
+        # STEP 2: Remove existing installation
+        print(f"\n  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
@@ -425,277 +530,7 @@ class NginxRunner:
             print(f"  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
-
-        # Fix wrk build for GCC-14 compatibility
-        self.fix_wrk_for_gcc14()
-
-    def fix_wrk_for_gcc14(self):
-        """
-        Fix wrk build to work with GCC-14 while using bundled OpenSSL 1.1.1i.
-        
-        Problem: wrk-4.2.0 bundles OpenSSL 1.1.1i which has inline assembly syntax
-        incompatible with GCC-14's strict parsing.
-        
-        Solution: Patch OpenSSL build to use GCC-14 compatible flags (-std=gnu89)
-        to allow old-style inline assembly syntax while maintaining benchmark consistency.
-        
-        Note: We use bundled OpenSSL 1.1.1i (not system OpenSSL) to ensure consistent
-        benchmark results across different environments.
-        """
-        print(f"\n>>> Fixing wrk for GCC-14 compatibility...")
-        print(f"  [INFO] Strategy: Patch bundled OpenSSL 1.1.1i for GCC-14 compatibility")
-        print(f"  [INFO] Using bundled OpenSSL to ensure benchmark consistency")
-        
-        # Detect architecture
-        arch_result = subprocess.run(['uname', '-m'], capture_output=True, text=True)
-        architecture = arch_result.stdout.strip()
-        print(f"  [INFO] Detected architecture: {architecture}")
-        
-        # Architecture-specific notes
-        if architecture == 'x86_64' or architecture == 'amd64':
-            print(f"         Optimization: -march=native enables SSE4.2, AVX, AVX2, etc.")
-        elif architecture == 'aarch64' or architecture == 'arm64':
-            print(f"         Optimization: -march=native enables NEON, Crypto extensions, etc.")
-        else:
-            print(f"         Optimization: -march=native adapts to detected CPU features")
-        
-        # Locate wrk directory
-        pts_home = Path.home() / '.phoronix-test-suite'
-        wrk_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark / 'wrk-4.2.0'
-        
-        if not wrk_dir.exists():
-            print(f"  [WARN] wrk directory not found: {wrk_dir}")
-            print(f"  [INFO] Skipping wrk fix")
-            return
-        
-        print(f"  [INFO] wrk directory: {wrk_dir}")
-        
-        # Remove obj directory to force clean rebuild
-        obj_dir = wrk_dir / 'obj'
-        if obj_dir.exists():
-            print(f"  [INFO] Removing obj directory for clean rebuild...")
-            shutil.rmtree(obj_dir)
-        
-        # Strategy 2: Modify Makefile to add GCC-14 compatible flags for OpenSSL build
-        makefile = wrk_dir / 'Makefile'
-        if not makefile.exists():
-            print(f"  [WARN] Makefile not found: {makefile}")
-            return
-        
-        print(f"  [INFO] Patching Makefile for GCC-14 compatibility...")
-        
-        # Read original Makefile
-        with open(makefile, 'r') as f:
-            makefile_content = f.read()
-        
-        # Backup original Makefile
-        makefile_backup = wrk_dir / 'Makefile.original'
-        if not makefile_backup.exists():
-            with open(makefile_backup, 'w') as f:
-                f.write(makefile_content)
-            print(f"  [INFO] Original Makefile backed up to Makefile.original")
-        
-        # Patch 1: Add GCC-14 compatible flags for wrk itself
-        makefile_patched = makefile_content.replace(
-            'CFLAGS  += -std=c99 -Wall -O2 -D_REENTRANT',
-            'CFLAGS  += -std=gnu99 -Wall -O2 -D_REENTRANT -Wno-error'
-        )
-        
-        # Patch 2: Modify OpenSSL build options to use GCC-14 compatible flags
-        # The key is to add CFLAGS with -std=gnu89 for OpenSSL build
-        # Add -march=native for architecture-specific optimization (works on x86_64, arm64, etc.)
-        # OpenSSL's config script automatically detects the architecture
-        # Find the OPENSSL_OPTS line and modify it
-        openssl_opts_original = 'OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))'
-        openssl_opts_patched = 'OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))\nOPENSSL_CFLAGS = -std=gnu89 -Wno-error -O2 -march=native'
-        
-        makefile_patched = makefile_patched.replace(openssl_opts_original, openssl_opts_patched)
-        
-        # Patch 3: Modify OpenSSL config and build commands to use our custom CFLAGS
-        # OpenSSL's config script auto-detects architecture (x86_64, arm64, etc.)
-        # We pass CFLAGS to ensure GCC-14 compatibility and native optimization
-        # Use regex to handle tabs properly in Makefile
-        
-        # Find and replace the OpenSSL build rule
-        import re as regex_module
-        openssl_build_pattern = r'\$\(ODIR\)/lib/libssl\.a: \$\(ODIR\)/\$\(OPENSSL\)\n\t@echo Building OpenSSL\.\.\.\n\t@\$\(SHELL\) -c "cd \$< && \./config \$\(OPENSSL_OPTS\)"\n\t@\$\(MAKE\) -C \$< depend\n\t@\$\(MAKE\) -C \$<\n\t@\$\(MAKE\) -C \$< install_sw\n\t@touch \$@'
-        
-        openssl_build_replacement = r'''$(ODIR)/lib/libssl.a: $(ODIR)/$(OPENSSL)
-\t@echo Building OpenSSL...
-\t@echo "  [INFO] Detected architecture: $$(uname -m)"
-\t@echo "  [INFO] Using CFLAGS: $(OPENSSL_CFLAGS)"
-\t@$(SHELL) -c "cd $< && CC=gcc-14 CFLAGS=\\"$(OPENSSL_CFLAGS)\\" ./config $(OPENSSL_OPTS)"
-\t@$(MAKE) -C $< CC=gcc-14 CFLAGS="$(OPENSSL_CFLAGS)" depend
-\t@$(MAKE) -C $< CC=gcc-14 CFLAGS="$(OPENSSL_CFLAGS)"
-\t@$(MAKE) -C $< install_sw
-\t@touch $@'''
-        
-        makefile_patched = regex_module.sub(openssl_build_pattern, openssl_build_replacement, makefile_patched)
-        
-        # If regex doesn't match, try simpler line-by-line replacement
-        if '$(OPENSSL_CFLAGS)' not in makefile_patched or 'CC=gcc-14 CFLAGS' not in makefile_patched:
-            print(f"  [INFO] Using alternative patching method for OpenSSL build...")
-            lines = makefile_patched.split('\n')
-            new_lines = []
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-                # Find the OpenSSL build rule
-                if line.strip() == '$(ODIR)/lib/libssl.a: $(ODIR)/$(OPENSSL)':
-                    new_lines.append(line)
-                    i += 1
-                    # Replace the build commands
-                    if i < len(lines) and 'echo Building OpenSSL' in lines[i]:
-                        new_lines.append(lines[i])  # Keep "echo Building OpenSSL..."
-                        new_lines.append('\t@echo "  [INFO] Detected architecture: $$(uname -m)"')
-                        new_lines.append('\t@echo "  [INFO] Using CFLAGS: $(OPENSSL_CFLAGS)"')
-                        i += 1
-                    # Replace config line
-                    if i < len(lines) and './config' in lines[i]:
-                        new_lines.append('\t@$(SHELL) -c "cd $< && CC=gcc-14 CFLAGS=\\"$(OPENSSL_CFLAGS)\\" ./config $(OPENSSL_OPTS)"')
-                        i += 1
-                    # Replace depend line
-                    if i < len(lines) and 'depend' in lines[i]:
-                        new_lines.append('\t@$(MAKE) -C $< CC=gcc-14 CFLAGS="$(OPENSSL_CFLAGS)" depend')
-                        i += 1
-                    # Replace make line
-                    if i < len(lines) and '@$(MAKE) -C $<' == lines[i].strip() and 'depend' not in lines[i]:
-                        new_lines.append('\t@$(MAKE) -C $< CC=gcc-14 CFLAGS="$(OPENSSL_CFLAGS)"')
-                        i += 1
-                    # Keep install_sw and touch lines
-                    while i < len(lines) and (lines[i].strip().startswith('@$(MAKE)') or lines[i].strip().startswith('@touch')):
-                        new_lines.append(lines[i])
-                        i += 1
-                    continue
-                new_lines.append(line)
-                i += 1
-            makefile_patched = '\n'.join(new_lines)
-        
-        # Write patched Makefile
-        with open(makefile, 'w') as f:
-            f.write(makefile_patched)
-        
-        print(f"  [OK] Makefile patched successfully")
-        print(f"  [INFO] OpenSSL 1.1.1i will be built with:")
-        print(f"         CC=gcc-14")
-        print(f"         CFLAGS='-std=gnu89 -Wno-error -O2 -march=native'")
-        print(f"  [INFO] Architecture-specific optimization enabled via -march=native")
-        print(f"         x86_64: Uses SSE, AVX, AVX2, etc. based on CPU")
-        print(f"         arm64:  Uses NEON, Crypto extensions, etc. based on CPU")
-        
-        # Strategy 3: Rebuild wrk with bundled OpenSSL using GCC-14
-        print(f"  [INFO] Rebuilding wrk with bundled OpenSSL 1.1.1i and GCC-14...")
-        
-        # Clean first
-        clean_cmd = f'cd {wrk_dir} && make clean'
-        result = subprocess.run(
-            ['bash', '-c', clean_cmd],
-            capture_output=True,
-            text=True
-        )
-        
-        # Rebuild with GCC-14
-        nproc = os.cpu_count() or 1
-        build_cmd = f'cd {wrk_dir} && CC=gcc-14 make -j{nproc}'
-        print(f"  [BUILD CMD] {build_cmd}")
-        
-        result = subprocess.run(
-            ['bash', '-c', build_cmd],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            print(f"  [ERROR] wrk rebuild failed")
-            print(f"  [ERROR] stdout: {result.stdout[-1000:]}")
-            print(f"  [ERROR] stderr: {result.stderr[-1000:]}")
-            sys.exit(1)
-        
-        # Verify wrk was built successfully
-        wrk_binary = wrk_dir / 'wrk'
-        if not wrk_binary.exists():
-            print(f"  [ERROR] wrk binary not found after rebuild: {wrk_binary}")
-            sys.exit(1)
-        
-        print(f"  [OK] wrk rebuilt successfully with GCC-14 and bundled OpenSSL 1.1.1i")
-        
-        # Verify OpenSSL was built and linked
-        openssl_lib = obj_dir / 'lib' / 'libssl.a'
-        if openssl_lib.exists():
-            print(f"  [OK] OpenSSL 1.1.1i static library found: {openssl_lib}")
-        else:
-            print(f"  [WARN] OpenSSL library not found at expected location")
-        
-        # Verify wrk can run
-        test_cmd = f'{wrk_binary} -h'
-        result = subprocess.run(
-            ['bash', '-c', test_cmd],
-            capture_output=True,
-            text=True
-        )
-        
-        if 'Usage: wrk' in result.stdout or 'Usage: wrk' in result.stderr:
-            print(f"  [OK] wrk verification successful")
-        else:
-            print(f"  [WARN] wrk verification unclear, but binary exists")
-        
-        # Verify which OpenSSL version wrk is using
-        ldd_cmd = f'ldd {wrk_binary} | grep -i ssl || echo "Static linking detected"'
-        result = subprocess.run(
-            ['bash', '-c', ldd_cmd],
-            capture_output=True,
-            text=True
-        )
-        if 'Static linking detected' in result.stdout:
-            print(f"  [OK] wrk is statically linked with bundled OpenSSL 1.1.1i")
-        else:
-            print(f"  [INFO] OpenSSL linkage: {result.stdout.strip()}")
-        
-        # Verify architecture-specific optimizations in binary
-        print(f"  [INFO] Verifying architecture-specific optimizations...")
-        arch_check_cmd = f'file {wrk_binary}'
-        result = subprocess.run(
-            ['bash', '-c', arch_check_cmd],
-            capture_output=True,
-            text=True
-        )
-        print(f"  [INFO] Binary architecture: {result.stdout.strip()}")
-        
-        # Check for specific instruction sets in the binary
-        if architecture in ['x86_64', 'amd64']:
-            # Check for AVX/AVX2 instructions on x86_64
-            strings_cmd = f'objdump -d {wrk_binary} 2>/dev/null | grep -E "vpadd|vpmul|vmov" | head -1 || echo "No AVX instructions found"'
-            result = subprocess.run(['bash', '-c', strings_cmd], capture_output=True, text=True)
-            if 'No AVX' not in result.stdout:
-                print(f"  [OK] Architecture-specific optimizations detected (AVX/AVX2)")
-            else:
-                print(f"  [INFO] Standard x86_64 instructions (AVX not required)")
-        elif architecture in ['aarch64', 'arm64']:
-            # ARM64 binaries are typically optimized by default
-            print(f"  [INFO] ARM64 native optimizations applied")
-        
-        # Fix pts-install.json status to mark installation as successful
-        # Since we've successfully rebuilt wrk, we can mark the installation as complete
-        pts_install_json = pts_home / 'installed-tests' / 'pts' / self.benchmark / 'pts-install.json'
-        if pts_install_json.exists():
-            print(f"  [INFO] Updating pts-install.json to mark installation as successful...")
-            try:
-                with open(pts_install_json, 'r') as f:
-                    install_data = json.load(f)
-                
-                # Update status to successful
-                install_data['test_installation']['status'] = 'INSTALLED'
-                # Clear errors
-                install_data['test_installation']['errors'] = {}
-                
-                # Write back
-                with open(pts_install_json, 'w') as f:
-                    json.dump(install_data, f, indent=4)
-                
-                print(f"  [OK] pts-install.json updated successfully")
-            except Exception as e:
-                print(f"  [WARN] Failed to update pts-install.json: {e}")
-                print(f"  [INFO] Installation may still work despite this warning")
+        print(f"  [INFO] wrk was built with GCC-14 compatible flags via patched install.sh")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """
