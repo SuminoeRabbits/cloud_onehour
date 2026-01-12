@@ -422,6 +422,34 @@ echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
             print(f"  [INFO] Looking for pattern: {repr(old_pattern)}")
             return
 
+        # Patch 4: Fix nginx wrapper script to handle thread count properly
+        # wrk requires: threads <= connections
+        # Original: ./wrk-4.2.0/wrk -t \$NUM_CPU_CORES \$@ > \$LOG_FILE 2>&1
+        # Problem: When connections (-c) < NUM_CPU_CORES, wrk fails
+        # Note: $ is escaped as \$ in install.sh
+        old_wrapper = './wrk-4.2.0/wrk -t \\$NUM_CPU_CORES \\$@ > \\$LOG_FILE 2>&1'
+        new_wrapper = '''# Parse connection count from arguments to determine thread count
+# wrk requires: threads <= connections
+CONNECTIONS=1
+for arg in "\\$@"; do
+    case "\\$prev_arg" in
+        -c) CONNECTIONS="\\$arg" ;;
+    esac
+    prev_arg="\\$arg"
+done
+# Use min(NUM_CPU_CORES, CONNECTIONS) for thread count
+THREADS=\\$NUM_CPU_CORES
+if [ "\\$CONNECTIONS" -lt "\\$THREADS" ]; then
+    THREADS=\\$CONNECTIONS
+fi
+./wrk-4.2.0/wrk -t \\$THREADS "\\$@" > \\$LOG_FILE 2>&1'''
+
+        if old_wrapper in content:
+            content = content.replace(old_wrapper, new_wrapper)
+            print(f"  [OK] Patched nginx wrapper script")
+        else:
+            print(f"  [WARN] Could not find nginx wrapper script pattern")
+
         # Write patched install.sh
         with open(install_sh, 'w') as f:
             f.write(content)
@@ -432,6 +460,7 @@ echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
         print(f"         - OpenSSL CFLAGS: -std=gnu89 -Wno-error -O2 -march=native")
         print(f"         - OpenSSL build: Uses CC and CFLAGS from environment")
         print(f"         - Build parallelism: $(nproc) instead of $NUM_CPU_CORES")
+        print(f"         - wrk thread count: min(NUM_CPU_CORES, connections)")
 
     def install_benchmark(self):
         """
