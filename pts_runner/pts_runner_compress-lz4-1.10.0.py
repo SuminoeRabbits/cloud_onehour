@@ -562,7 +562,14 @@ class CompressLZ4BenchmarkRunner:
             if json_file.exists():
                 with open(json_file, 'r') as f:
                     data = json.load(f)
-                    for result_id, result in data.get('results', {}).items():
+                    results_data = data.get('results', {})
+
+                    # Handle both dict (normal case) and list (failure case)
+                    if isinstance(results_data, list):
+                        print(f"[WARN] No valid results in {json_file.name} (benchmark may have failed)")
+                        continue
+
+                    for result_id, result in results_data.items():
                         for system_id, system_result in result.get('results', {}).items():
                             all_results.append({
                                 'threads': num_threads,
