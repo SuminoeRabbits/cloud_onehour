@@ -281,7 +281,10 @@ class InstanceLogger:
         self.name = instance_name
         self.dashboard = global_dashboard
         self.log_file = log_dir / f"{instance_name.replace(':', '_')}.log"
-        
+
+        # Ensure log directory exists (safety check)
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
         # Initialize log file
         with open(self.log_file, 'w') as f:
             f.write(f"=== Log started for {instance_name} ===\n")
@@ -363,12 +366,11 @@ def cleanup_active_instances(signum=None, frame=None):
                         shell=True, capture_output=True, timeout=30
                     )
                 elif cloud == 'oci':
-                    # TODO: Implement OCI instance termination
-                    # subprocess.run(
-                    #     f"oci compute instance terminate --instance-id {instance_id} --force",
-                    #     shell=True, capture_output=True, timeout=30
-                    # )
-                    print(f"[Cleanup] OCI termination not yet implemented for {name}", flush=True)
+                    region = inst_info.get('region') # Not strictly needed for CLI but good for logging
+                    run_cmd(
+                        f"oci compute instance terminate --instance-id {instance_id} --force --wait-for-state TERMINATED",
+                        capture=True, timeout=300
+                    )
 
                 print(f"[Cleanup] {cloud}:{name} terminated", flush=True)
             except Exception as e:
@@ -763,62 +765,155 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     return name if ip else None, ip
 
 
-def launch_oci_instance(inst, config, compartment_id, region, logger=None):
-    """Launch OCI instance and return (instance_id, ip).
-    
-    Args:
-        inst: Instance configuration dict
-        config: Full configuration dict
-        compartment_id: OCI compartment ID
-        region: OCI region
-        logger: InstanceLogger object
+    # 1. Find Subnet ID (from config or auto-detect public subnet)
+    subnet_id = config['oci'].get('subnet_id')
 
-    Returns:
-        tuple: (instance_id, ip) or (None, None) if not implemented/failed
-    """
-    name = inst['name']
+    if not subnet_id:
+        if logger:
+            logger.info("Subnet ID not configured, auto-detecting public subnet in compartment...")
+        elif DEBUG_MODE:
+            log("Subnet ID not configured, auto-detecting public subnet in compartment...")
+        
+        # Find VCNs first
+        vcns_json = run_cmd(f"oci network vcn list --compartment-id {compartment_id} --query 'data[0].id' --raw-output", logger=logger)
+        if vcns_json and vcns_json != "None":
+            # List subnets in the VCN (assuming first VCN is correct one if multiple)
+            # We want a public subnet (prohibit-public-ip-on-vnic = false)
+            subnet_cmd = (
+                f"oci network subnet list --compartment-id {compartment_id} --vcn-id {vcns_json} "
+                f"--query 'data[?\"prohibit-public-ip-on-vnic\"==`false`] | [0].id' --raw-output"
+            )
+            subnet_id = run_cmd(subnet_cmd, logger=logger)
+
+    if not subnet_id or subnet_id == "None":
+        msg = "Failed to detect a valid public subnet. Please specify 'subnet_id' in config.yaml or create a public subnet."
+        if logger: logger.error(msg)
+        else: print(f"[Error] {msg}")
+        return None, None
 
     if logger:
-        logger.info(f"Launching OCI instance: {name} ({inst['type']})")
-        logger.warn("OCI launch not yet implemented")
-    elif DEBUG_MODE == True:
-        log(f"Launching OCI instance: {name} ({inst['type']})")
-        log("OCI launch not yet implemented", "WARN")
-    else:
-        print(f"[Warning] OCI instance launch not yet implemented for {name}")
+        logger.info(f"Using Subnet ID: {subnet_id}")
 
-    # TODO: When implementing, follow this structure:
-    #
-    # 1. Find image OCID for Ubuntu
-    # os_version = config['common']['os_version']
-    # image_ocid = get_oci_ubuntu_image(region, os_version, inst['arch'])
-    #
-    # 2. Configure boot volume size using centralized helper
-    # storage_config = build_storage_config(inst, 'oci')
-    #
-    # 3. Launch instance
-    # instance_id = run_cmd(
-    #     f"oci compute instance launch "
-    #     f"--compartment-id {compartment_id} "
-    #     f"--availability-domain <AD> "
-    #     f"--shape {inst['type']} "
-    #     f"--image-id {image_ocid} "
-    #     f"{storage_config}"
-    #     f"--display-name {name} "
-    #     f"--query 'data.id' --raw-output"
-    # )
-    #
-    # 4. Wait for instance to be running
-    # run_cmd(f"oci compute instance action --instance-id {instance_id} --action start --wait-for-state RUNNING")
-    #
-    # 5. Get public IP
-    # ip = run_cmd(
-    #     f"oci compute instance get --instance-id {instance_id} "
-    #     f"--query 'data.\"primary-public-ip\"' --raw-output"
-    # )
-    #
-    # return instance_id, ip
+    # 2. Find Availability Domain (pick first one)
+    ad = run_cmd(f"oci iam availability-domain list --compartment-id {compartment_id} --query 'data[0].name' --raw-output", logger=logger)
+    if not ad:
+        if logger: logger.error("Failed to get Availability Domain")
+        return None, None
 
+    # 3. Find Ubuntu Image
+    os_version = config['common']['os_version'] # e.g. "22.04"
+    arch_filter = "Canonical Ubuntu" 
+    # For OCI, we need to search carefully. Canonical images usually have "Canonical-Ubuntu-22.04-..." names.
+    # Architecture: "VM.Standard.A1.Flex" -> we need aarch64 image. "VM.Standard.E*" -> x86_64.
+    
+    is_arm = "A1" in inst['type'] or "Ampere" in inst['type'] or inst.get('arch') == 'arm64'
+    op_sys = "Canonical Ubuntu"
+    
+    # OCI image search is tricky via CLI with just flags. Use list and grep/query.
+    # Query for latest image matching OS and Version.
+    # operating-system "Canonical Ubuntu", operating-system-version "22.04"
+    
+    # We strip patch version if present (e.g. 22.04.1 -> 22.04)
+    os_ver_major = os_version.split('.')[0] + "." + os_version.split('.')[1]
+    
+    if logger:
+        logger.info(f"Searching for {op_sys} {os_ver_major} image...")
+
+    # Different shapes might need different images (Specialty limits), but generally Standard/Flex use standard images.
+    # Note: OCI image listing can be slow.
+    image_query = (
+        f"oci compute image list --compartment-id {compartment_id} "
+        f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+        f"--shape {inst['type']} --sort-by TIMECREATED --sort-order DESC "
+        f"--query 'data[0].id' --raw-output"
+    )
+    
+    image_id = run_cmd(image_query, logger=logger)
+    
+    if not image_id or image_id == "None":
+        # Fallback: try searching without shape filter (sometimes shape compatibility check filters too much)
+        image_query_fallback = (
+            f"oci compute image list --compartment-id {compartment_id} "
+            f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+            f"--sort-by TIMECREATED --sort-order DESC "
+            f"--query 'data[0].id' --raw-output"
+        )
+        image_id = run_cmd(image_query_fallback, logger=logger)
+
+    if not image_id or image_id == "None":
+        if logger: logger.error(f"Could not find Ubuntu {os_version} image for {inst['type']}")
+        return None, None
+        
+    if logger:
+        logger.info(f"Using Image ID: {image_id}")
+        logger.info(f"Using Availability Domain: {ad}")
+
+    # 4. Prepare SSH Key
+    # AWS/GCP logic usually assumes the key exists. OCI needs the public key CONTENT or FILE.
+    key_path = Path(config['common']['ssh_key_path'])
+    pub_key_path = key_path.with_suffix('.pub') # Assume .pub exists, or key_path IS .pub? Commonly key_path is private.
+    
+    # If key_path is private (no extension or .pem), try finding .pub
+    if not pub_key_path.exists():
+        # Maybe key_path is the public key? Unlikely for SSH execution.
+        # Try appending .pub
+        pub_key_path = Path(str(key_path) + ".pub")
+        
+    if not pub_key_path.exists():
+        msg = f"Public key file not found at {pub_key_path} (needed for OCI)"
+        if logger: logger.error(msg)
+        else: print(f"[Error] {msg}")
+        return None, None
+
+    # 5. Launch Instance
+    storage_config = build_storage_config(inst, 'oci')
+    
+    if logger:
+        logger.info("Launching OCI instance...")
+        
+    launch_cmd = (
+        f"oci compute instance launch "
+        f"--compartment-id {compartment_id} "
+        f"--availability-domain \"{ad}\" "
+        f"--shape \"{inst['type']}\" "
+        f"--subnet-id {subnet_id} "
+        f"--image-id {image_id} "
+        f"{storage_config}"
+        f"--display-name \"{name}\" "
+        f"--ssh-authorized-keys-file \"{pub_key_path}\" "
+        f"--assign-public-ip true "
+        f"--wait-for-state RUNNING "
+        f"--query 'data.id' --raw-output"
+    )
+    
+    # Run Launch
+    # Note: OCI CLI wait-for-state blocks until running.
+    instance_id = run_cmd(launch_cmd, logger=logger, timeout=600)
+    
+    if not instance_id or "opc-request-id" in instance_id: # Error output sometimes contains request id
+        if logger: logger.error(f"Launch failed or returned invalid ID: {instance_id}")
+        return None, None
+
+    # 6. Get Public IP
+    # Instance is running, but we need to fetch the IP explicitly involved in the VNIC.
+    if logger:
+        logger.info(f"Instance launched ({instance_id}), fetching IP...")
+        
+    # Get Primary VNIC attachment
+    vnic_att_query = (
+        f"oci compute vnic-attachment list --compartment-id {compartment_id} --instance-id {instance_id} "
+        f"--query 'data[0].\"vnic-id\"' --raw-output"
+    )
+    vnic_id = run_cmd(vnic_att_query, logger=logger)
+    
+    if vnic_id and vnic_id != "None":
+        ip_query = (
+            f"oci network vnic get --vnic-id {vnic_id} "
+            f"--query 'data.\"public-ip\"' --raw-output"
+        )
+        ip = run_cmd(ip_query, logger=logger)
+        return instance_id, ip
+    
     return None, None
 
 
@@ -844,7 +939,12 @@ def get_instance_status(cloud, instance_id, region=None, project=None, zone=None
             return status.strip() if status else "TERMINATED" # Assume terminated if verify fails
 
         elif cloud == 'oci':
-            return "unknown" 
+            # OCI status: PROVISIONING, STAGING, RUNNING, STOPPING, STOPPED, TERMINATING, TERMINATED
+            status = run_cmd(
+                f"oci compute instance get --instance-id {instance_id} --query 'data.\"lifecycle-state\"' --raw-output",
+                capture=True, ignore=True, logger=logger
+            )
+            return status.strip() if status else "TERMINATED"
 
     except Exception:
         return "unknown"
@@ -1805,8 +1905,12 @@ def main():
                         future.result()
                     except Exception as exc:
                         # Log error to a general error log since instance context might be lost
-                        with open(log_dir / "general_errors.log", "a") as f:
+                        error_log = log_dir / "general_errors.log"
+                        error_log.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+                        with open(error_log, "a") as f:
                             f.write(f"[{datetime.now()}] {cloud.upper()} thread failed: {exc}\n")
+                            import traceback
+                            f.write(traceback.format_exc() + "\n")
                         
         # Stop Dashboard
         DASHBOARD.stop()
