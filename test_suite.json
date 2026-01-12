@@ -89,7 +89,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
                     "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument",
-                    "exe_time_v8cpu": "30.0"
+                    "exe_time_v8cpu": "20.0"
                 },
                 "pts/compress-xz-1.1.0": {
                     "enabled": true,
@@ -98,7 +98,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
                     "notes": "Uses -T$NUM_CPU_CORES runtime CLI argument",
-                    "exe_time_v8cpu": "4.0"
+                    "exe_time_v8cpu": "30.0"
                 },
                 "pts/compress-lz4-1.10.0": {
                     "enabled": true,
@@ -107,7 +107,7 @@
                     "TH_scaling": "single-threaded",
                     "sve2_support": false,
                     "notes": "N/A - single-threaded benchmark only",
-                    "exe_time_v8cpu": "14.9"
+                    "exe_time_v8cpu": "30.0"
                 }
             }
         },
