@@ -23,7 +23,7 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-7zip-1.12.0.py > /tmp/pts_runner_compress-7zip.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-zstd-1.6.0.py --quick > /tmp/pts_runner_compress-zstd.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-xz-1.1.0.py --quick > /tmp/pts_runner_compress-xz.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-lz4-1.10.0.py --quick 1 > /tmp/pts_runner_compress-lz4.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_compress-lz4-1.10.0.py 1 --quick > /tmp/pts_runner_compress-lz4.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_rustls-1.0.0.py 288 --quick > /tmp/pts_runner_rustls0.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_rustls-1.0.0.py 4 --quick > /tmp/pts_runner_rustls.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_openssl-3.6.0.py 288 --quick > /tmp/pts_runner_openssl0.log 2>&1",
