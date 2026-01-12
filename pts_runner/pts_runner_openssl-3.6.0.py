@@ -16,6 +16,19 @@ Test Characteristics:
 - Notable Instructions: SVE2 support for ARM architectures
 - THFix_in_compile: false - Thread count NOT fixed at compile time
 - THChange_at_runtime: true - Runtime thread configuration via -multi $NUM_CPU_CORES option
+
+Compilation Parallelism Optimization:
+- Problem: install.sh uses "make -j $NUM_CPU_CORES" which ties compilation parallelism to benchmark thread count
+- Impact: Benchmarking with 1 thread would compile OpenSSL with only 1 thread (very slow)
+- Solution: Patch install.sh BEFORE batch-install to use "make -j $(nproc)" instead
+- Implementation: patch_install_sh_for_parallelism() modifies install.sh before installation
+- Result: OpenSSL always compiles using all available CPU cores, regardless of benchmark thread count
+- Note: Benchmark thread count is still controlled by NUM_CPU_CORES at runtime (unaffected)
+
+GCC-14 Compatibility:
+- OpenSSL 3.6.0 (2024 release) is fully compatible with GCC-14
+- No special patches required (unlike nginx-3.0.1 which bundles OpenSSL 1.1.1i)
+- Builds successfully with GCC-14's default settings
 """
 
 import argparse
@@ -316,6 +329,69 @@ class OpensslRunner:
 
         return ','.join(cpu_list)
 
+    def patch_install_sh_for_parallelism(self):
+        """
+        Patch PTS install.sh to use $(nproc) instead of $NUM_CPU_CORES for compilation.
+
+        This ensures OpenSSL build uses all available CPU cores for compilation,
+        regardless of the benchmark thread count setting.
+
+        Background:
+        - install.sh uses "make -j $NUM_CPU_CORES" which ties compilation parallelism
+          to benchmark thread count
+        - This is suboptimal: compiling with 1 thread when benchmarking with 1 thread
+        - Solution: Use $(nproc) for compilation parallelism
+        - Benchmark thread count is still controlled by NUM_CPU_CORES at runtime
+        """
+        print(f"\n>>> Patching install.sh for optimal compilation parallelism...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+        install_sh = pts_home / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+
+        if not install_sh.exists():
+            print(f"  [WARN] install.sh not found: {install_sh}")
+            print(f"  [INFO] Path: {install_sh}")
+            return
+
+        print(f"  [INFO] Reading install.sh: {install_sh}")
+
+        # Read original install.sh
+        with open(install_sh, 'r') as f:
+            content = f.read()
+
+        # Check if already patched
+        if 'make -j $(nproc)' in content or '# Compilation parallelism optimization' in content:
+            print(f"  [INFO] install.sh already patched, skipping")
+            return
+
+        # Backup original
+        backup = install_sh.parent / 'install.sh.original'
+        if not backup.exists():
+            shutil.copy(install_sh, backup)
+            print(f"  [INFO] Backed up original: {backup}")
+
+        # Replace make parallelism
+        old_pattern = 'make -j $NUM_CPU_CORES'
+        new_pattern = 'make -j $(nproc)  # Compilation parallelism optimization: use all cores'
+
+        if old_pattern in content:
+            content = content.replace(old_pattern, new_pattern)
+            print(f"  [OK] Patched make command")
+        else:
+            print(f"  [WARN] Could not find make command to patch")
+            print(f"  [INFO] Looking for pattern: {repr(old_pattern)}")
+            return
+
+        # Write patched install.sh
+        with open(install_sh, 'w') as f:
+            f.write(content)
+
+        print(f"  [OK] install.sh patched successfully")
+        print(f"  [INFO] Patch applied:")
+        print(f"         - Build parallelism: $(nproc) instead of $NUM_CPU_CORES")
+        print(f"         - Compilation now uses all {os.cpu_count()} CPU cores")
+        print(f"         - Benchmark thread count still controlled by NUM_CPU_CORES at runtime")
+
     def install_benchmark(self):
         """
         Install openssl-3.6.0 with GCC-14 native compilation.
@@ -333,8 +409,12 @@ class OpensslRunner:
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
-        # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        # STEP 1: Patch install.sh BEFORE running batch-install
+        # This optimizes compilation parallelism (uses all cores, not $NUM_CPU_CORES)
+        self.patch_install_sh_for_parallelism()
+
+        # STEP 2: Remove existing installation
+        print(f"\n  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
