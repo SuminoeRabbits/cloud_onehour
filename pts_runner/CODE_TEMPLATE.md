@@ -263,6 +263,56 @@ class BenchmarkRunner:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 ```
 
+### メインフローメソッド (`run`)
+
+**CRITICAL**: `run()` メソッドは必ず `return True` を返す必要があります。
+
+返り値を忘れると、`None` が返され、`main()` 関数で `sys.exit(1)` が実行され、cloud_exec.py がベンチマーク失敗と誤判定します。
+
+```python
+def run(self):
+    """Main execution method."""
+    print(f"{'='*80}")
+    print(f"PTS Benchmark Runner: {self.benchmark}")
+    print(f"Machine: {self.machine_name}")
+    print(f"OS: {self.os_name}")
+    print(f"vCPU Count: {self.vcpu_count}")
+    print(f"Thread List: {self.thread_list}")
+    print(f"Quick Mode: {self.quick_mode}")
+    print(f"Results Directory: {self.results_dir}")
+    print(f"{'='*80}\n")
+
+    # Install benchmark
+    self.install_benchmark()
+
+    # Run benchmark for each thread count
+    for num_threads in self.thread_list:
+        print(f"\n{'='*80}")
+        print(f">>> Running {self.benchmark} with {num_threads} thread(s)")
+        print(f"{'='*80}")
+
+        success = self.run_benchmark(num_threads)
+        if not success:
+            print(f"[ERROR] Benchmark failed for {num_threads} thread(s)")
+            sys.exit(1)
+
+    # Export results
+    print(f"\n{'='*80}")
+    print(f">>> Exporting results")
+    print(f"{'='*80}")
+    self.export_results()
+
+    # Generate summary
+    self.generate_summary()
+
+    print(f"\n{'='*80}")
+    print(f"[SUCCESS] All benchmarks completed successfully")
+    print(f"{'='*80}")
+
+    # CRITICAL: Must return True for cloud_exec.py integration
+    return True
+```
+
 ### 基本メソッド
 
 ```python
@@ -1002,10 +1052,12 @@ if __name__ == "__main__":
 - [ ] Cloud VM環境（SW events only）
 
 ### 機能テスト
+- [ ] **`run()` メソッドが `return True` を返すか確認（CRITICAL）**
 - [ ] `--quick`フラグで正常動作
 - [ ] TEST_RESULTS_NAMEに `{self.benchmark}` を使用しているか確認
 - [ ] ドット付きベンチマーク名でexport成功
 - [ ] summary.json生成成功
+- [ ] cloud_exec.py でベンチマーク成功と判定されるか確認
 - [ ] perf無効時もエラーなく完走
 - [ ] コンパイラパッチの冪等性確認
 
@@ -1033,12 +1085,38 @@ if __name__ == "__main__":
 
 ## よくある問題と解決策
 
-### Q1: summary.jsonが生成されない
+### Q1: cloud_exec.pyでベンチマーク成功なのに失敗と判定される（CRITICAL）
+**A**: `run()` メソッドに `return True` を追加してください。
+
+**症状**:
+- ベンチマークは正常に完了し、`[SUCCESS] All benchmarks completed successfully` が表示される
+- しかし、cloud_exec.py が `[ERROR] Workload failed` と判定する
+- リモートログに `FAILED` マーカーが記録される
+
+**原因**:
+`run()` メソッドが何も返さない（暗黙的に `None` を返す）ため、`main()` 関数で `sys.exit(0 if None else 1)` → `sys.exit(1)` となり、スクリプトが終了コード1で終了します。
+
+**解決策**:
+```python
+def run(self):
+    # ... ベンチマーク実行 ...
+    print(f"[SUCCESS] All benchmarks completed successfully")
+
+    return True  # ← これを追加
+```
+
+**検証方法**:
+```bash
+./pts_runner_xxx.py 1 --quick
+echo "Exit code: $?"  # 0 であるべき
+```
+
+### Q2: summary.jsonが生成されない
 **A**: 以下を確認:
 1. TEST_RESULTS_NAMEに `{self.benchmark}` を使用しているか
 2. export_results()でドット除去対応: `result_dir_name = result_name.replace('.', '')`
 
-### Q2: WSLでperfが動かない
+### Q3: WSLでperfが動かない
 **A**: `get_perf_events()`が自動的にSWイベントにフォールバックします。perfなしでもベンチマークは実行可能です。
 
 ### Q3: GCC-14でコンパイルエラー

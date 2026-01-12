@@ -87,6 +87,8 @@ class ComplianceChecker:
 
         self.check_generate_summary_method()
 
+        self.check_run_method_return()
+
         self.check_dot_removal()
 
         self.check_test_category_dir_safety()
@@ -240,7 +242,48 @@ class ComplianceChecker:
 
             self.errors.append("❌ CRITICAL: generate_summary() method not found")
 
-   
+
+
+    def check_run_method_return(self):
+
+        """Check if run() method returns True (CRITICAL for cloud_exec.py integration)"""
+
+        # Parse the file as AST to check for return statements in run() method
+        try:
+            tree = ast.parse(self.content)
+
+            # Find the run() method
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == 'run':
+                    # Check if the method has a return True statement
+                    has_return_true = False
+                    for item in ast.walk(node):
+                        if isinstance(item, ast.Return):
+                            # Check if return value is True or a truthy expression
+                            if item.value is not None:
+                                if isinstance(item.value, ast.Constant) and item.value.value is True:
+                                    has_return_true = True
+                                    break
+                                # Also accept "return len(failed) == 0" pattern
+                                elif isinstance(item.value, ast.Compare):
+                                    has_return_true = True
+                                    break
+
+                    if has_return_true:
+                        self.passed.append("✅ run() method returns True (cloud_exec.py compatible)")
+                    else:
+                        self.errors.append("❌ CRITICAL: run() method must return True (for cloud_exec.py integration)")
+                        self.errors.append("   Fix: Add 'return True' at the end of run() method")
+                    return
+
+            # run() method not found
+            self.errors.append("❌ CRITICAL: run() method not found")
+
+        except SyntaxError:
+            # Syntax error already reported by check_python_syntax
+            pass
+
+
 
     def check_dot_removal(self):
 

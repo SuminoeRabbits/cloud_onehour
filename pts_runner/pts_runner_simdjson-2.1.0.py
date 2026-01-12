@@ -293,6 +293,7 @@ class SimdJsonRunner:
             self.run_benchmark(t)
         self.export_results()
         self.generate_summary()
+        return True
 
 def main():
     parser = argparse.ArgumentParser()

@@ -730,6 +730,8 @@ class CompressLZ4BenchmarkRunner:
         print(f"[SUCCESS] All benchmarks completed successfully")
         print(f"{'='*80}")
 
+        return True
+
 
 def main():
     parser = argparse.ArgumentParser(

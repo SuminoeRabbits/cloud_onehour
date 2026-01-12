@@ -719,6 +719,8 @@ class TensorFlowLiteBenchmarkRunner:
         print(f"[SUCCESS] All benchmarks completed successfully")
         print(f"{'='*80}")
 
+        return True
+
 
 def main():
     parser = argparse.ArgumentParser(
