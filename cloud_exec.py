@@ -697,7 +697,7 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
         log(f"Instance ID: {instance_id}")
         log("Waiting for instance to be running...")
 
-    run_cmd(f"aws ec2 wait instance-running --region {region} --instance-ids {instance_id}", logger=logger)
+    run_cmd(f"aws ec2 wait instance-running --region {region} --instance-ids {instance_id}", logger=logger, timeout=600)
 
     ip = run_cmd(
         f"aws ec2 describe-instances --region {region} --instance-ids {instance_id} "
@@ -746,7 +746,8 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
         f"{storage_config}"
         f"--image-family={image_family} --image-project=ubuntu-os-cloud "
         f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'",
-        logger=logger
+        logger=logger,
+        timeout=600
     )
 
     if ip:
@@ -1599,6 +1600,11 @@ def process_instance(cloud, inst, config, key_path, log_dir):
 
             sg_id = setup_aws_sg(region, config['common']['security_group_name'], logger=logger)
             instance_id, ip = launch_aws_instance(inst, config, region, key_name, sg_id, logger=logger)
+
+            # Register instance ASAP for cleanup on signal/exception (even before IP is verified)
+            if instance_id and instance_id != "None":
+                register_instance(cloud, instance_id, name, region=region, project=project, zone=zone, compartment_id=compartment_id)
+
         elif cloud == 'gcp':
             project = config['gcp']['project_id']
             if project == "AUTO_DETECT":
@@ -1608,6 +1614,11 @@ def process_instance(cloud, inst, config, key_path, log_dir):
             logger.info(f"GCP Project: {project}, Zone: {zone}")
 
             instance_id, ip = launch_gcp_instance(inst, config, project, zone, logger=logger)
+
+            # Register instance ASAP for cleanup on signal/exception (even before IP is verified)
+            if instance_id and instance_id != "None":
+                register_instance(cloud, instance_id, name, region=region, project=project, zone=zone, compartment_id=compartment_id)
+
         elif cloud == 'oci':
             compartment_id = config['oci']['compartment_id']
             region = config['oci']['region']
@@ -1615,6 +1626,11 @@ def process_instance(cloud, inst, config, key_path, log_dir):
             logger.info(f"OCI Compartment: {compartment_id}, Region: {region}")
 
             instance_id, ip = launch_oci_instance(inst, config, compartment_id, region, logger=logger)
+
+            # Register instance ASAP for cleanup on signal/exception (even before IP is verified)
+            if instance_id and instance_id != "None":
+                register_instance(cloud, instance_id, name, region=region, project=project, zone=zone, compartment_id=compartment_id)
+
         else:
             msg = f"Unknown cloud provider: {cloud}"
             logger.error(msg)
@@ -1625,9 +1641,6 @@ def process_instance(cloud, inst, config, key_path, log_dir):
             logger.error(msg)
             progress(instance_name, "Launch Failed", logger)
             return
-
-        # Register instance for cleanup on signal/exception
-        register_instance(cloud, instance_id, name, region=region, project=project, zone=zone, compartment_id=compartment_id)
 
         progress(instance_name, f"Instance launched (IP: {ip})", logger)
 
@@ -1670,31 +1683,42 @@ def process_instance(cloud, inst, config, key_path, log_dir):
 
         # Run all commands sequentially
         commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name, logger=logger)
+
+        # Check if instance was terminated externally (only if commands failed)
         if not commands_success:
-            # Check if instance was terminated externally
             status = get_instance_status(cloud, instance_id, region, project, zone, logger)
-            
+
             # AWS: terminated, shutting-down
             # GCP: TERMINATED (or empty if deleted)
             is_terminated = status in ['terminated', 'shutting-down', 'TERMINATED', 'STOPPING']
-            
+
             if is_terminated:
                 msg = f"Instance {name} was terminated externally (Status: {status})"
                 logger.error(msg)
                 progress(instance_name, "Terminated Externally", logger)
                 DASHBOARD.update(instance_name, status="TERMINATED")
+                # Still try to collect results even if terminated externally
             else:
-                msg = f"Command execution failed for {name}"
-                logger.error(msg)
-                progress(instance_name, "Workload Failed", logger)
-            return
+                msg = f"Command execution failed for {name}, but will still attempt to collect results"
+                logger.warn(msg)
+                progress(instance_name, "Workload Failed - Collecting Results", logger)
 
-        # Collect results
-        collect_results(ip, config, cloud, name, inst, key_path, ssh_strict, instance_name, logger=logger)
+        # CRITICAL: Always collect results, even if commands failed (for regression analysis)
+        # Only skip if instance was terminated externally AND collection would fail
+        try:
+            collect_results(ip, config, cloud, name, inst, key_path, ssh_strict, instance_name, logger=logger)
+        except Exception as collect_error:
+            logger.error(f"Failed to collect results: {collect_error}")
+            progress(instance_name, "Result collection failed", logger)
 
-        progress(instance_name, "Completed successfully", logger=logger)
-        logger.info(f"Instance {name} completed successfully")
-        DASHBOARD.update(instance_name, status="COMPLETED")
+        if commands_success:
+            progress(instance_name, "Completed successfully", logger=logger)
+            logger.info(f"Instance {name} completed successfully")
+            DASHBOARD.update(instance_name, status="COMPLETED")
+        else:
+            progress(instance_name, "Completed with errors", logger=logger)
+            logger.warn(f"Instance {name} completed with errors")
+            DASHBOARD.update(instance_name, status="COMPLETED")
 
     except Exception as e:
         msg = f"{cloud} instance {name}: {e}"
