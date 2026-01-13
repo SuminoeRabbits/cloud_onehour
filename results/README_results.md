@@ -93,45 +93,55 @@
         "total_vcpu": "<vcpu>",
         "cpu_name": "<cpu_name>",
         "cpu_isa": "<cpu_isa>",
-        "os":"<os>": {
-            "testcategory":"<testcategory>": {
-                "benchmark":"<benchmark>": {
-                    "thread":"<N>": {
-                        "perf_stat": {
-                            "start_freq": {
-                                "freq_0": <freq_0>,
-                                "freq_1": <freq_1>,
-                                "freq_2": <freq_2>
-                            },
-                            "end_freq": {
-                                "freq_0": <freq_0>,
-                                "freq_1": <freq_1>,
-                                "freq_2": <freq_2>
-                            },
-                            "ipc": {
-                                "ipc_0": <ipc_0>,
-                                "ipc_1": <ipc_1>,
-                                "ipc_2": <ipc_2>
-                            },
-                            "total_cycles": {
-                                "total_cycles_0": <total_cycles_0>,
-                                "total_cycles_1": <total_cycles_1>,
-                                "total_cycles_2": <total_cycles_2>
-                            },
-                            "total_instructions": {
-                                "total_instructions_0": <total_instructions_0>,
-                                "total_instructions_1": <total_instructions_1>,
-                                "total_instructions_2": <total_instructions_2>
-                            },
-                            "cpu_utilization_percent": <cpu_utilization_percent>,
-                            "elapsed_time_sec": <elapsed_time_sec>
-                        },
-                        "testname":"<testname>" {
-                            "description": "<description>",
-                            "values": "<values>",
-                            "unit": "<unit>",
-                            "time": "<time>",
-                            "cost": "<cost>"
+        "os": {
+            "<os>": {
+                "testcategory": {
+                    "<testcategory>": {
+                        "benchmark": {
+                            "<benchmark>": {
+                                "thread": {
+                                    "<N>": {
+                                        "perf_stat": {
+                                            "start_freq": {
+                                                "freq_0": <freq_0>,
+                                                "freq_1": <freq_1>,
+                                                "freq_2": <freq_2>
+                                            },
+                                            "end_freq": {
+                                                "freq_0": <freq_0>,
+                                                "freq_1": <freq_1>,
+                                                "freq_2": <freq_2>
+                                            },
+                                            "ipc": {
+                                                "ipc_0": <ipc_0>,
+                                                "ipc_1": <ipc_1>,
+                                                "ipc_2": <ipc_2>
+                                            },
+                                            "total_cycles": {
+                                                "total_cycles_0": <total_cycles_0>,
+                                                "total_cycles_1": <total_cycles_1>,
+                                                "total_cycles_2": <total_cycles_2>
+                                            },
+                                            "total_instructions": {
+                                                "total_instructions_0": <total_instructions_0>,
+                                                "total_instructions_1": <total_instructions_1>,
+                                                "total_instructions_2": <total_instructions_2>
+                                            },
+                                            "cpu_utilization_percent": <cpu_utilization_percent>,
+                                            "elapsed_time_sec": <elapsed_time_sec>
+                                        },
+                                        "testname": {
+                                            "<testname>": {
+                                                "description": "<description>",
+                                                "values": "<values>",
+                                                "unit": "<unit>",
+                                                "time": "<time>",
+                                                "cost": "<cost>"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
