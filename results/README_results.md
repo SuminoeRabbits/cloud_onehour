@@ -21,24 +21,41 @@
 ## Common rule
 データを読むうえで<files>内で利用されている共通の概念を説明する。
 
-### Number of threads in hardware and Thread count in <benchmark>
-`<benchmark>`で利用するスレッド数は`<N>`で表され、ハードウェア資源の持っているスレッド数は`vCPU`として表される。`<benchmark>`毎に下記の3通りが出現することに注意。
+### Number of threads in hardware and Thread count in `<benchmark>`
+`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`<benchmark>`で利用するスレッド数は`<N>`で表され、ハードウェア資源の持っているスレッド数は`vCPU`として表される。`<benchmark>`毎に下記の3通りが出現することに注意。
  - `<N>=vCPU` : `<N>`は固定。マルチスレッド化によるスケールアウトの恩恵のみを想定している。
  - `<N>=1` : `<N>`は固定。マルチスレッド化が十分にされておらず、1スレッドでのスケールアップを想定している。
- - `<N>={1,2,3...,vCPU}`: 利用する`<N>`を1から`vCPU`まで増やすことで、スケールアップ、スケールアウトの両方に対応している。
+ - `<N>={1,2,3...,vCPU}`: `<N>`が最小1から最大`vCPU`までの間のいくつか出現していることがある。これは`<N>`増やすことで、スケールアップ、スケールアウトの両方をベンチマークする目的がある。
 
-### relaionship between CPU affinity and <N>-Thread in <benchmark> 
-<benchmark>で利用されるスレッド数`<N>`に対して実際に利用されるＣＰＵアフィニティの順序はamd64系のHyperThread機能を考慮して、`{0,2,4,6....,1,3,5,7..[vCPU-1]}`と設定している。
+### relaionship between CPU affinity and `<N>`-Thread in <benchmark> 
+`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`<benchmark>`で利用されるスレッド数`<N>`であるが、実際に利用されるＣＰＵアフィニティの順序はamd64系のHyperThread機能を考慮して、`{0,2,4,6....,1,3,5,7..[vCPU-1]}`と設定している。
+
 例えば`vCPU=4`, `<N>=2`では利用されるCPUアフィニティは`{0,2}`となる。CPUアフィニティはLinux標準コマンドである`taskset`で指定される。なお`<N>=vCPU`の場合はすべてのCPUアフィニティを利用していることになるので`taskset`は適応しない。
 このようなCPUアフィニティの分散は`arm64`系プロセッサにおいて`vCPU=physical CPU`である場合は意味がをなさないが、両方のISAで対応できるようにこのような仕様にしている。
 
-### How to distingush <N> in <files>?
-スレッド数`<N>`で実行された`<benchmark>`の情報は`<files>`中の`<N>-thead...`で始まるファイル名で保存されている。
+### How to distingush `<N>` in `<files>`
+スレッド数`<N>`でテストが実行された際は、ログが`<files>`中の`<N>-thread...`で始まるファイル名で保存されている。これらが指定した`<N>`に対してすべて揃っている状態でテスト完了とする。
 
-### in one <benchmark>
+- `<N>-thread_freq_end.txt`:スレッド数`<N>`テスト終了時のCPUクロックリスト。
+- `<N>-thread_freq_end.txt`:スレッド数`<N>`テスト開始時のCPUクロックリスト。
+- `<N>-thread_perf_stats.txt`:スレッド数`<N>`テストのperf stat raw value。
+- `<N>-thread_perf_summary.json`:スレッド数`<N>`テストのperf stat summary。
+- `<N>-thread.csv`:すべてのスレッド数`<N>`テストのCSVまとめ。
+- `<N>-thread.json`:すべてのスレッド数`<N>`テストのJSONまとめ。
 
-### summary file in <files>
-`<benchmark>`が正常終了している場合のみ`<files>`中に`summary.json`,`summary.log`が生成される。この2ファイルはフォーマットの違いだけであり内容に違いはない。
+[注意]そろっていない場合はテスト完了ではないので処理を行わない。
+
+### summary file in `<files>`
+`<benchmark>`が完了している場合のみ`<files>`中に`summary.json`,`summary.log`が生成される。この2ファイルはフォーマットの違いだけであり内容に違いはない。
+
+[注意]そろっていない場合はテスト完了ではないので処理を行わない。
+
+
+次に`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`summary.json`についてデータの読み方を説明する。
+
+#### Multiple "test_name", "description" in one <benchmark>
+<benchmark>の中で複数の"test_name"が実行されているケースがある。この際は"description"を見て、それぞれの"test_name"の特徴を理解することが必要である。
+
 
 
 ## perf_stat output
@@ -68,28 +85,60 @@
 まずデータ構造を説明し、その後にそれぞれに入力されるべきデータを説明する。
 
 ## Definition of one big JSON structure
-
+データ構造の定義は以下の通り。
 ```json
 {
-    "machinename":"<machinename>"{
-        "total_vcpu":"<vcpu>"
-        "cpu_name":"<cpu_name>"
-        "cpu_isa":"<cpu_isa>"
-        "CSP":"<csp>"
-        "os":"<os>"{
-            "testcategory":"<testcategory>"{
-                "benchmark":"<benchmark>"{
-                    "threads":"<N>"{
-                        "perf_stat":{                            
-                            "start_freq":{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
-                            "end_freq":{"freq_0":<freq_0>, "freq_1":<freq_1>, "freq_2":<freq_2>, ...}
-                            "ipc":{"ipc_0":<ipc_0>, "ipc_1":<ipc_1>, "ipc_2":<ipc_2>, ...}
-                            "total_cycles":{"total_cycles_0":<total_cycles_0>, "total_cycles_1":<total_cycles_1>, "total_cycles_2":<total_cycles_2>, ...}
-                            "total_instructions":{"total_instructions_0":<total_instructions_0>, "total_instructions_1":<total_instructions_1>, "total_instructions_2":<total_instructions_2>, ...}
+    "machinename":"<machinename>"
+    {
+        "CSP":"<csp>",
+        "total_vcpu":"<vcpu>",
+        "cpu_name":"<cpu_name>",
+        "cpu_isa":"<cpu_isa>",
+        "os":"<os>"
+        {
+            "testcategory":"<testcategory>"
+            {
+                "benchmark":"<benchmark>"
+                {
+                    "threads":"<N>"
+                    {
+                        "perf_stat":
+                        {                            
+                            "start_freq":
+                            {
+                                "freq_0":<freq_0>, 
+                                "freq_1":<freq_1>, 
+                                "freq_2":<freq_2>, ...
+                            }
+                            "end_freq":
+                            {
+                                "freq_0":<freq_0>, 
+                                "freq_1":<freq_1>, 
+                                "freq_2":<freq_2>, ...
+                            }
+                            "ipc":
+                            {
+                                "ipc_0":<ipc_0>, 
+                                "ipc_1":<ipc_1>, 
+                                "ipc_2":<ipc_2>, ...
+                            }
+                            "total_cycles":
+                            {
+                                "total_cycles_0":<total_cycles_0>, 
+                                "total_cycles_1":<total_cycles_1>, 
+                                "total_cycles_2":<total_cycles_2>, ...
+                            }
+                            "total_instructions:
+                            {
+                                "total_instructions_0":<total_instructions_0>, 
+                                "total_instructions_1":<total_instructions_1>, 
+                                "total_instructions_2":<total_instructions_2>, ...
+                            }
                             "cpu_utilization_percent":<cpu_utilization_percent>
                             "elapsed_time_sec":<elapsed_time_sec>
                         }
-                        "test_name":"<testname>"{
+                        "test_name":"<testname>"
+                        {
                             "description":"<description>"
                             "values":"<values>"
                             "unit":"<unit>"
@@ -113,38 +162,39 @@
 | :---                   | :---:| :---:| :---: |:---: |
 |"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A|
 |"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)|
-|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (v4 / AVX-512)|
-|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon (Granite Rapids)|	x86-64 (v4 / AMX)|
+|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
+|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon (6th Granite Rapids)|	x86-64 (AMX + AVX-512)|
+|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)|
+|"m7i" and "2xlarge"|	AWS|8|	Intel Xeon (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)|
 |"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A |
 |"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64|
-|"c4d-standard-8"|	GCP|	8|	5th Gen Intel Xeon (Emerald Rapids)|	x86-64 (v4 / AMX)|
-|"c4-standard-8"|	GCP|	8|	5th Gen Intel Xeon (Emerald Rapids)|	x86-64 (v4 / AMX)|
-|"c4a-standard-8"|	GCP|	8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (v4 / AVX-512)|
-|"t2a-standard-8"|	GCP|	8|	Neoverse-N1(Ampere Altra)|	Armv8.2|
+|"c4d-standard-8"|	GCP|	8|	5th Gen Intel Xeon (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
+|"c4-standard-8"|	GCP|	8|	5th Gen Intel Xeon (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
+|"c4a-standard-8"|	GCP|	8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
 
-#### "machinename":"<machinename>"
+#### "machinename":"\<machinename\>"
 `${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
 
-#### "os":"<os>"
+#### "os":"\<os\>"
 `<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。`${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名が<os>に相当する。
 
-#### "total_vcpu":"<vcpu>"
+#### "total_vcpu":"\<vcpu\>"
 `<machinename>`から決定される。(##Look-Up-Table)参照。
 
-#### "cpu_name":"<cpu_name>"
+#### "cpu_name":"\<cpu_name\>"
 `<machinename>`から決定される。(##Look-Up-Table)参照。
 
-#### "cpu_isa":"<cpu_isa>"
+#### "cpu_isa":"\<cpu_isa\>"
 `<machinename>`から決定される。(##Look-Up-Table)参照。
 
-#### "CSP":"<csp>"
+#### "CSP":"\<csp\>"
 `<machinename>`から決定される。(##Look-Up-Table)参照。
 
-#### "testcategory":"<testcategory>"
+#### "testcategory":"\<testcategory\>"
 `${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリ名が<testcategory>に相当する。
 複数ある場合はアルファベット順に登録する。
 
-#### "benchmark":"<benchmark>"
+#### "benchmark":"\<benchmark\>"
 
 
 # Search, analysis and report by AI
