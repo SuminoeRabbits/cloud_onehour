@@ -153,6 +153,7 @@
 }
 ```
 ## Definition data source
+データ構造に挿入すべきデータソースを説明する。
 
 ### Look-Up-Table
 
@@ -175,26 +176,28 @@
 #### "machinename":"\<machinename\>"
 `${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
 
-#### "os":"\<os\>"
-`<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。`${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名が<os>に相当する。
-
 #### "total_vcpu":"\<vcpu\>"
-`<machinename>`から決定される。(##Look-Up-Table)参照。
+`<machinename>`から決定される。(###Look-Up-Table)参照。`<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。
 
 #### "cpu_name":"\<cpu_name\>"
-`<machinename>`から決定される。(##Look-Up-Table)参照。
+`<machinename>`から決定される。(###Look-Up-Table)参照。
 
 #### "cpu_isa":"\<cpu_isa\>"
-`<machinename>`から決定される。(##Look-Up-Table)参照。
+`<machinename>`から決定される。(###Look-Up-Table)参照。
 
 #### "CSP":"\<csp\>"
-`<machinename>`から決定される。(##Look-Up-Table)参照。
+`<machinename>`から決定される。(###Look-Up-Table)参照。
+
+#### "os":"\<os\>"
+`${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名が`<os>`に相当する。複数ある場合はアルファベット順に登録する。
 
 #### "testcategory":"\<testcategory\>"
-`${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリ名が<testcategory>に相当する。
+`${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリ名が`<testcategory>`に相当する。
 複数ある場合はアルファベット順に登録する。
 
 #### "benchmark":"\<benchmark\>"
+`${PROJECT_ROOT}/<machinename>/<os>/`<testcategory>`直下にあるディレクトリ名が`<testcategory>`に相当する。
+複数ある場合はアルファベット順に登録する。
 
+#### "threads":"\<N\>"
 
-# Search, analysis and report by AI
