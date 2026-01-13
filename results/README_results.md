@@ -93,10 +93,10 @@
         "total_vcpu": "<vcpu>",
         "cpu_name": "<cpu_name>",
         "cpu_isa": "<cpu_isa>",
-        "<os>": {
-            "<testcategory>": {
-                "<benchmark>": {
-                    "<N>": {
+        "os":"<os>": {
+            "testcategory":"<testcategory>": {
+                "benchmark":"<benchmark>": {
+                    "thread":"<N>": {
                         "perf_stat": {
                             "start_freq": {
                                 "freq_0": <freq_0>,
@@ -126,7 +126,7 @@
                             "cpu_utilization_percent": <cpu_utilization_percent>,
                             "elapsed_time_sec": <elapsed_time_sec>
                         },
-                        "<testname>": {
+                        "testname":"<testname>" {
                             "description": "<description>",
                             "values": "<values>",
                             "unit": "<unit>",
