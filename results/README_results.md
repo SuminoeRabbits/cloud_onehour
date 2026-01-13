@@ -88,62 +88,50 @@
 データ構造の定義は以下の通り。
 ```json
 {
-    "machinename":"<machinename>"
-    {
-        "CSP":"<csp>",
-        "total_vcpu":"<vcpu>",
-        "cpu_name":"<cpu_name>",
-        "cpu_isa":"<cpu_isa>",
-        "os":"<os>"
-        {
-            "testcategory":"<testcategory>"
-            {
-                "benchmark":"<benchmark>"
-                {
-                    "threads":"<N>"
-                    {
-                        "perf_stat":
-                        {                            
-                            "start_freq":
-                            {
-                                "freq_0":<freq_0>, 
-                                "freq_1":<freq_1>, 
-                                "freq_2":<freq_2>, ...
-                            }
-                            "end_freq":
-                            {
-                                "freq_0":<freq_0>, 
-                                "freq_1":<freq_1>, 
-                                "freq_2":<freq_2>, ...
-                            }
-                            "ipc":
-                            {
-                                "ipc_0":<ipc_0>, 
-                                "ipc_1":<ipc_1>, 
-                                "ipc_2":<ipc_2>, ...
-                            }
-                            "total_cycles":
-                            {
-                                "total_cycles_0":<total_cycles_0>, 
-                                "total_cycles_1":<total_cycles_1>, 
-                                "total_cycles_2":<total_cycles_2>, ...
-                            }
-                            "total_instructions:
-                            {
-                                "total_instructions_0":<total_instructions_0>, 
-                                "total_instructions_1":<total_instructions_1>, 
-                                "total_instructions_2":<total_instructions_2>, ...
-                            }
-                            "cpu_utilization_percent":<cpu_utilization_percent>
-                            "elapsed_time_sec":<elapsed_time_sec>
-                        }
-                        "test_name":"<testname>"
-                        {
-                            "description":"<description>"
-                            "values":"<values>"
-                            "unit":"<unit>"
-                            "time":"<time>"
-                            "cost":"<cost>"
+    "<machinename>": {
+        "CSP": "<csp>",
+        "total_vcpu": "<vcpu>",
+        "cpu_name": "<cpu_name>",
+        "cpu_isa": "<cpu_isa>",
+        "<os>": {
+            "<testcategory>": {
+                "<benchmark>": {
+                    "<N>": {
+                        "perf_stat": {
+                            "start_freq": {
+                                "freq_0": <freq_0>,
+                                "freq_1": <freq_1>,
+                                "freq_2": <freq_2>
+                            },
+                            "end_freq": {
+                                "freq_0": <freq_0>,
+                                "freq_1": <freq_1>,
+                                "freq_2": <freq_2>
+                            },
+                            "ipc": {
+                                "ipc_0": <ipc_0>,
+                                "ipc_1": <ipc_1>,
+                                "ipc_2": <ipc_2>
+                            },
+                            "total_cycles": {
+                                "total_cycles_0": <total_cycles_0>,
+                                "total_cycles_1": <total_cycles_1>,
+                                "total_cycles_2": <total_cycles_2>
+                            },
+                            "total_instructions": {
+                                "total_instructions_0": <total_instructions_0>,
+                                "total_instructions_1": <total_instructions_1>,
+                                "total_instructions_2": <total_instructions_2>
+                            },
+                            "cpu_utilization_percent": <cpu_utilization_percent>,
+                            "elapsed_time_sec": <elapsed_time_sec>
+                        },
+                        "<testname>": {
+                            "description": "<description>",
+                            "values": "<values>",
+                            "unit": "<unit>",
+                            "time": "<time>",
+                            "cost": "<cost>"
                         }
                     }
                 }
