@@ -23,7 +23,7 @@ fi
 echo "Installing essential build dependencies..."
 sudo apt-get update
 sudo apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev \
-    flex bison texinfo libzstd-dev wget
+    flex bison texinfo libzstd-dev wget ninja-build
 
 # Check if GCC-14 is already installed
 gcc14_installed=false
