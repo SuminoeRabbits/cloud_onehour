@@ -38,7 +38,7 @@
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "workload_timeout": 6000,
+    "workload_timeout": 8000,
     "ssh_strict_host_key_checking": false,
     "debug_stdout": true,
     "long_running_indicators": [
