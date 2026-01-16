@@ -60,7 +60,7 @@
         "vcpus": 8,
         "name": "aws-i7ie-2xlarge-amd64-vcpu-8",
         "cpu_cost_hour[730h-mo]": 1.2236,
-        "extra_150g_storage": false,
+        "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0197
       },
       {
