@@ -1822,21 +1822,66 @@ def process_csp_instances(cloud, instances, config, key_path, log_dir):
     return enabled_count
 
 def load_config(config_path='cloud_config.json'):
-    """Load benchmark configuration from JSON file."""
+    """Load benchmark configuration from JSON file.
+
+    Supports two formats:
+    1. New format: cloud_config.json + cloud_instances.json (split)
+    2. Legacy format: cloud_config.json with all-in-one (backward compatible)
+    """
     if not os.path.exists(config_path):
         print(f"[Error] Configuration file not found: {config_path}")
         print(f"[Info] Copy cloud_config.example.json to {config_path} and update settings.")
         return None
 
+    # Load main config
     with open(config_path, 'r') as f:
         config = json.load(f)
+
+    # Check if using new split format
+    if 'instance_definitions_file' in config:
+        # New format: Load separate instance definitions
+        instance_file = config['instance_definitions_file']
+
+        # Support both absolute and relative paths
+        if os.path.isabs(instance_file):
+            instance_file_path = instance_file
+        else:
+            # Relative to cloud_config.json directory
+            config_dir = os.path.dirname(os.path.abspath(config_path))
+            instance_file_path = os.path.join(config_dir, instance_file)
+
+        if not os.path.exists(instance_file_path):
+            print(f"[Error] Instance definitions file not found: {instance_file_path}")
+            print(f"[Info] Specified in 'instance_definitions_file': {instance_file}")
+            return None
+
+        with open(instance_file_path, 'r') as f:
+            instance_config = json.load(f)
+
+        # Merge instance definitions into main config
+        for csp in ['aws', 'gcp', 'oci']:
+            if csp in instance_config:
+                config[csp] = instance_config[csp]
+
+        if config['common'].get('debug_stdout', False):
+            print(f"[Info] Loaded split config: {config_path} + {instance_file}")
+
+    elif 'aws' in config or 'gcp' in config or 'oci' in config:
+        # Old format: All in one file (backward compatibility)
+        if config['common'].get('debug_stdout', False):
+            print(f"[Info] Using legacy all-in-one config format")
+
+    else:
+        print(f"[Error] Invalid config format: No instance definitions found")
+        print(f"[Info] Config must contain either 'instance_definitions_file' or cloud provider sections")
+        return None
 
     # Set global debug mode
     global DEBUG_MODE
     DEBUG_MODE = config['common'].get('debug_stdout', False)
 
     if DEBUG_MODE == True:
-        log("Configuration loaded successfully")
+        log("Configuration loaded and validated successfully")
 
     return config
 
