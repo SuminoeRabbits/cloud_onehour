@@ -93,6 +93,7 @@
         "total_vcpu": "<vcpu>",
         "cpu_name": "<cpu_name>",
         "cpu_isa": "<cpu_isa>",
+        "cost_hour[730h-mo]":"<cost>",
         "os": {
             "<os>": {
                 "testcategory": {
@@ -158,23 +159,25 @@
 `<machinename>`に含まれる文字列で決定される数字である。対応表は下記の通り。
 ここに記載がない場合は、`<machinename>`はそのまま利用するが他の`<machinename>`向け情報は`N/A`とする。
 
-|<machinename>が含む文字列|	csp  |vcpu  |cpu_name|cpu_isa|
-| :---                   | :---:| :---:| :---: |:---: |
-|"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A|
-|"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)|
-|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC 9R45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
-|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon 6 (6th Granite Rapids)|	x86-64 (AMX + AVX-512)|
-|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon 5 Metal(5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
-|"m7i" and "2xlarge"|	AWS|8|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)|
-|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A (SVE2-128)|
-|"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64|
-|"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
-|"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
-|"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) |
-|"VM.Standard.E5.Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)|
-|"VM.Standard.E6.Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
-|"VM.Standard.A1.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)|
+|<machinename>が含む文字列|	csp  |vcpu  |cpu_name|cpu_isa| cost_hour[730h-mo] |
+| :---                   | :---:| :---:| :---:  |:---:  | :---:      |
+|"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A|  |
+|"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)| |
+|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC 9R45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| |
+|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon 6 (6th Granite Rapids)|	x86-64 (AMX + AVX-512)| |
+|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon 5 Metal(5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| |
+|"m7i" and "2xlarge"|	AWS|8|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)| |
+|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A (SVE2-128)| |
+|"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64| |
+|"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| | 
+|"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| |
+|"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | |
+|"VM.Standard.E5.Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| |
+|"VM.Standard.E6.Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| |
+|"VM.Standard.A1.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| |
 
+### Cost at Look-Up-Table
+"cost_hour[730h-mo]":"<cost>"は1時間当たりの利用コストである。cloud_instances.json内の"cpu_cost_hour[730h-mo]"と"extra_150g_storage_cost_hour"の和で算出される。もしcloud_instances.jsonで定義されていない場合は、"0.0"とする。
 
 #### "machinename":"\<machinename\>"
 `${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
@@ -225,6 +228,8 @@ Python3.10で動作すること。`make_one_big_json.py`自分自身と出力フ
 ## argument parameters
 オプションは下記の通りとする。  
 - `--dir`(省略可能) :　
-    `${PROJECT_ROOT}`を指定する。なおここで指定される`${PROJECT_ROOT}`は複数あっても構わない。その場合でも`one_big_json.json`内でマージされることとする。省略された場合は`${PROJECT_ROOT}=${PWD}`と解釈する
+    `${PROJECT_ROOT}`を指定する。なおここで指定される`${PROJECT_ROOT}`は複数あっても構わない。その場合でも`one_big_json.json`内でマージされることとする。省略された場合は`${PROJECT_ROOT}=${PWD}`と解釈する。
 - `--output`(省略可能):
     生成される`one_big_json.json`のDirectoryとファイル名を変更したいときに利用する。省略された場合は`${PWD}/one_big_json.json`と解釈され、もしすでに同名のファイルが存在する場合は上書き保存するかを確認する。
+- `--instance_source`(省略可能)：
+    `one_big_json.json`内の"<cost>"を計算する際の情報ファイルである`cloud_instances.json`のDirectoryを指定する。省略された場合は`${PWD}../`と解釈する。もし`cloud_instances.json`が指定のDirectoryに見つからない場合はエラーメッセージを出して終了する。
