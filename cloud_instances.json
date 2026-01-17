@@ -133,11 +133,11 @@
     ]
   },
   "oci": {
-    "enable": false,
+    "enable": true,
     "region": "ap-tokyo-1",
     "instances": [
       {
-        "enable": true,
+        "enable": false,
         "testloads": true,
         "type": "VM.Standard.E5.Flex",
         "arch": "amd64",
@@ -145,13 +145,13 @@
         "ocpus": 4,
         "vcpus": 8,
         "memory_gb": 32,
-        "name": "oci-vm-standard-e5-flex-amd64-vcpu-8",
+        "name": "oci-vm-standard-e5-flex-amd64-vcpu-8-test",
         "cpu_cost_hour[730h-mo]": 0.164,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": true,
+        "enable": false,
         "testloads": false,
         "type": "VM.Standard.E5.Flex",
         "arch": "amd64",
@@ -167,14 +167,14 @@
       {
         "enable": true,
         "testloads": false,
-        "type": "VM.Standard.X10.Flex",
+        "type": "VM.Standard.E6.Flex",
         "arch": "amd64",
-        "hostname": "oci-vm-standard-x10-flex-amd64",
+        "hostname": "oci-vm-standard-e6-flex-amd64",
         "ocpus": 4,
         "vcpus": 8,
         "memory_gb": 32,
-        "name": "oci-vm-standard-x10-flex-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.2184,
+        "name": "oci-vm-standard-e6-flex-amd64-vcpu-8",
+        "cpu_cost_hour[730h-mo]": 0.184,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
       },
