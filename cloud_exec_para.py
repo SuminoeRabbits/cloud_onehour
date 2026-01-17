@@ -893,7 +893,9 @@ def build_storage_config(inst, cloud_type):
     elif cloud_type == 'gcp':
         return "--boot-disk-size=150GB "
     elif cloud_type == 'oci':
-        return "--boot-volume-size-in-gbs 150 --is-preserve-boot-volume false "
+        # Note: OCI boot volumes are automatically deleted when instance is terminated
+        # No explicit preserve flag needed in newer OCI CLI versions
+        return "--boot-volume-size-in-gbs 150 "
     else:
         return ""
 
@@ -2216,18 +2218,37 @@ class OCIProvider(CloudProvider):
     """OCI-specific implementation of CloudProvider."""
 
     def initialize_shared_resources(self, logger=None) -> Dict[str, Any]:
-        """Initialize OCI shared resources (Compartment, Subnet, AD)."""
-        # Note: OCI initialization logic from cloud_exec.py would go here
-        # For now, using placeholder values
-        compartment_id = self.csp_config.get('compartment_id')
-        subnet_id = self.csp_config.get('subnet_id')
-        availability_domain = self.csp_config.get('availability_domain')
+        """Initialize OCI shared resources (Compartment, Subnet, AD) from environment variables."""
+        import os
+
+        # Priority: environment variables > config file
+        # This allows for secure credential management without hardcoding
+        compartment_id = os.getenv('OCI_COMPARTMENT_ID') or self.csp_config.get('compartment_id')
+        subnet_id = os.getenv('OCI_SUBNET_ID') or self.csp_config.get('subnet_id')
+        availability_domain = os.getenv('OCI_AVAILABILITY_DOMAIN') or self.csp_config.get('availability_domain')
+        region = os.getenv('OCI_REGION') or self.csp_config.get('region', 'us-ashburn-1')
+
+        # Validate required parameters
+        if not compartment_id:
+            raise ValueError(
+                "OCI compartment_id not found. Set OCI_COMPARTMENT_ID environment variable or "
+                "specify compartment_id in cloud_instances.json"
+            )
+
+        if logger:
+            logger.info(f"OCI Configuration:")
+            logger.info(f"  Region: {region}")
+            logger.info(f"  Compartment ID: {compartment_id[:20]}...")
+            if subnet_id:
+                logger.info(f"  Subnet ID: {subnet_id[:20]}...")
+            if availability_domain:
+                logger.info(f"  Availability Domain: {availability_domain}")
 
         self.shared_resources = {
             'compartment_id': compartment_id,
             'subnet_id': subnet_id,
             'availability_domain': availability_domain,
-            'region': self.csp_config.get('region', 'us-ashburn-1')
+            'region': region
         }
 
         return self.shared_resources
@@ -2293,11 +2314,164 @@ class OCIProvider(CloudProvider):
         return 1.0
 
     def launch_instance(self, inst: Dict[str, Any], logger=None) -> Tuple[Optional[str], Optional[str]]:
-        """Launch OCI instance."""
-        # Note: launch_oci_instance would be called here
-        # Placeholder for now
+        """Launch OCI instance and return (instance_id, ip)."""
+        compartment_id = self.shared_resources['compartment_id']
+        region = self.shared_resources['region']
+        name = inst['name']
+
         if logger:
-            logger.error("OCI launch not yet fully implemented")
+            logger.info(f"Launching OCI instance: {name} ({inst['type']})")
+
+        # 1. Find Subnet ID (from config or auto-detect public subnet)
+        subnet_id = self.shared_resources.get('subnet_id')
+
+        if not subnet_id:
+            if logger:
+                logger.info("Subnet ID not configured, auto-detecting public subnet in compartment...")
+
+            # Find VCNs first
+            vcns_json = run_cmd(
+                f"oci network vcn list --compartment-id {compartment_id} --query 'data[0].id' --raw-output",
+                logger=logger
+            )
+            if vcns_json and vcns_json != "None":
+                # List subnets in the VCN (we want a public subnet)
+                subnet_cmd = (
+                    f"oci network subnet list --compartment-id {compartment_id} --vcn-id {vcns_json} "
+                    f"--query 'data[?\"prohibit-public-ip-on-vnic\"==`false`] | [0].id' --raw-output"
+                )
+                subnet_id = run_cmd(subnet_cmd, logger=logger)
+
+        if not subnet_id or subnet_id == "None":
+            msg = "Failed to detect a valid public subnet. Please specify 'subnet_id' in cloud_instances.json or create a public subnet."
+            if logger:
+                logger.error(msg)
+            return None, None
+
+        if logger:
+            logger.info(f"Using Subnet ID: {subnet_id}")
+
+        # 2. Find Availability Domain (pick first one)
+        ad = run_cmd(
+            f"oci iam availability-domain list --compartment-id {compartment_id} --query 'data[0].name' --raw-output",
+            logger=logger
+        )
+        if not ad:
+            if logger:
+                logger.error("Failed to get Availability Domain")
+            return None, None
+
+        # 3. Find Ubuntu Image
+        os_version = self.config['common']['os_version']
+        os_ver_major = os_version.split('.')[0] + "." + os_version.split('.')[1]
+        op_sys = "Canonical Ubuntu"
+
+        if logger:
+            logger.info(f"Searching for {op_sys} {os_ver_major} image...")
+
+        image_query = (
+            f"oci compute image list --compartment-id {compartment_id} "
+            f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+            f"--shape {inst['type']} --sort-by TIMECREATED --sort-order DESC "
+            f"--query 'data[0].id' --raw-output"
+        )
+
+        image_id = run_cmd(image_query, logger=logger)
+
+        if not image_id or image_id == "None":
+            # Fallback: try searching without shape filter
+            image_query_fallback = (
+                f"oci compute image list --compartment-id {compartment_id} "
+                f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+                f"--sort-by TIMECREATED --sort-order DESC "
+                f"--query 'data[0].id' --raw-output"
+            )
+            image_id = run_cmd(image_query_fallback, logger=logger)
+
+        if not image_id or image_id == "None":
+            if logger:
+                logger.error(f"Could not find Ubuntu {os_version} image for {inst['type']}")
+            return None, None
+
+        if logger:
+            logger.info(f"Using Image ID: {image_id}")
+            logger.info(f"Using Availability Domain: {ad}")
+
+        # 4. Prepare SSH Key
+        from pathlib import Path
+        key_path = Path(self.config['common']['ssh_key_path'])
+        pub_key_path = key_path.with_suffix('.pub')
+
+        if not pub_key_path.exists():
+            pub_key_path = Path(str(key_path) + ".pub")
+
+        if not pub_key_path.exists():
+            msg = f"Public key file not found at {pub_key_path} (needed for OCI)"
+            if logger:
+                logger.error(msg)
+            return None, None
+
+        # 5. Build shape-specific configuration
+        shape_config = ""
+        if "Flex" in inst['type']:
+            # Flex shapes require OCPU and memory configuration
+            ocpus = inst.get('ocpus', 1)
+            memory_gb = inst.get('memory_gb', ocpus * 8)  # Default: 8GB per OCPU
+            shape_config = f"--shape-config '{{\"ocpus\":{ocpus},\"memoryInGBs\":{memory_gb}}}' "
+
+        # 6. Launch Instance
+        storage_config = build_storage_config(inst, 'oci')
+
+        if logger:
+            logger.info("Launching OCI instance...")
+
+        launch_cmd = (
+            f"oci compute instance launch "
+            f"--compartment-id {compartment_id} "
+            f"--availability-domain \"{ad}\" "
+            f"--shape \"{inst['type']}\" "
+            f"{shape_config}"
+            f"--subnet-id {subnet_id} "
+            f"--image-id {image_id} "
+            f"{storage_config}"
+            f"--display-name \"{name}\" "
+            f"--ssh-authorized-keys-file \"{pub_key_path}\" "
+            f"--assign-public-ip true "
+            f"--wait-for-state RUNNING "
+            f"--query 'data.id' --raw-output"
+        )
+
+        # Run Launch (OCI CLI wait-for-state blocks until running)
+        instance_id = run_cmd(launch_cmd, logger=logger, timeout=600)
+
+        if not instance_id or "opc-request-id" in instance_id:
+            if logger:
+                logger.error(f"Launch failed or returned invalid ID: {instance_id}")
+            return None, None
+
+        # 7. Get Public IP
+        if logger:
+            logger.info(f"Instance launched ({instance_id}), fetching IP...")
+
+        # Get Primary VNIC attachment
+        vnic_att_query = (
+            f"oci compute vnic-attachment list --compartment-id {compartment_id} --instance-id {instance_id} "
+            f"--query 'data[0].\"vnic-id\"' --raw-output"
+        )
+        vnic_id = run_cmd(vnic_att_query, logger=logger)
+
+        if vnic_id and vnic_id != "None":
+            ip_query = (
+                f"oci network vnic get --vnic-id {vnic_id} "
+                f"--query 'data.\"public-ip\"' --raw-output"
+            )
+            ip = run_cmd(ip_query, logger=logger)
+
+            if logger:
+                logger.info(f"Instance ready: {name} @ {ip}")
+
+            return instance_id, ip
+
         return None, None
 
     def terminate_instance(self, instance_id: str, inst: Dict[str, Any], logger=None) -> bool:

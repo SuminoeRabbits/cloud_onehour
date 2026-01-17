@@ -78,7 +78,7 @@
     ]
   },
   "gcp": {
-    "enable": false,
+    "enable": true,
     "project_id": "AUTO_DETECT",
     "zone": "asia-northeast1-b",
     "instances": [
@@ -134,25 +134,24 @@
   },
   "oci": {
     "enable": false,
-    "compartment_id": "ocid1.compartment.oc1...",
     "region": "ap-tokyo-1",
     "instances": [
       {
         "enable": true,
         "testloads": true,
-        "type": "VM.Standard.E4.Flex",
+        "type": "VM.Standard.E5.Flex",
         "arch": "amd64",
-        "hostname": "oci-vm-standard-e4-flex-amd64",
-        "ocpus": 2,
-        "vcpus": 4,
-        "memory_gb": 16,
-        "name": "oci-vm-standard-e4-flex-amd64-vcpu-4",
-        "cpu_cost_hour[730h-mo]": 0.074,
+        "hostname": "oci-vm-standard-e5-flex-amd64",
+        "ocpus": 4,
+        "vcpus": 8,
+        "memory_gb": 32,
+        "name": "oci-vm-standard-e5-flex-amd64-vcpu-8",
+        "cpu_cost_hour[730h-mo]": 0.164,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
         "type": "VM.Standard.E5.Flex",
         "arch": "amd64",
@@ -166,7 +165,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
         "type": "VM.Standard.X10.Flex",
         "arch": "amd64",
@@ -180,7 +179,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
         "type": "VM.Standard.A1.Flex",
         "arch": "arm64",
