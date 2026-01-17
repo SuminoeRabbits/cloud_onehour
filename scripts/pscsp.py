@@ -53,9 +53,9 @@ def get_gcp_instances(region_keyword):
     return rows if rows else [["GCP", region_keyword, "(No Instances Found)", "-", "-"]]
 
 def get_oci_instances():
-    # 1. まずテナンシーID（ルートコンパートメント）を自動取得
-    cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].id", "--raw-output"]
-    # run_commandはJSON想定なので、ここは個別に実行
+    # 1. テナンシーID（ルートコンパートメント）を取得
+    # compartment listの最初の項目のcompartment-idがテナンシーID
+    cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"]
     try:
         cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
         if cid_proc.returncode != 0:
@@ -69,10 +69,12 @@ def get_oci_instances():
     success, data, err = run_command(cmd)
     if not success:
         return [["OCI", "N/A", "ERROR", "N/A", err]]
-    
+
     rows = []
     for inst in data.get("data", []):
-        rows.append(["OCI", inst.get("region", "N/A"), inst.get("display-name"), inst.get("id")[-10:], inst.get("lifecycle-state")])
+        # TERMINATEDインスタンスは除外
+        if inst.get("lifecycle-state") != "TERMINATED":
+            rows.append(["OCI", inst.get("region", "N/A"), inst.get("display-name"), inst.get("id")[-10:], inst.get("lifecycle-state")])
     return rows if rows else [["OCI", "N/A", "(No Instances Found)", "-", "-"]]
 
 def main():
