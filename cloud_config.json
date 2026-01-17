@@ -5,7 +5,13 @@
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
     "testloads": [
-      "ls -la  > /tmp/testloads.log 2>&1"
+      "sudo apt-get -y update > /tmp/apt_update_test.log 2>&1",
+      "sudo apt-get install -y git curl python3-pip > /tmp/apt_install_test.log 2>&1",
+      "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_test.log 2>&1",
+      "python3 --version && pip3 --version > /tmp/python_env_test.log 2>&1",
+      "df -h > /tmp/disk_test.log 2>&1",
+      "free -m > /tmp/memory_test.log 2>&1",
+      "nproc > /tmp/cpu_test.log 2>&1"
     ],
     "workloads": [
       "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
