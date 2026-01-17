@@ -130,8 +130,8 @@
                                             "cpu_utilization_percent": <cpu_utilization_percent>,
                                             "elapsed_time_sec": <elapsed_time_sec>
                                         },
-                                        "testname": {
-                                            "<testname>": {
+                                        "test_name": {
+                                            "<test_name>": {
                                                 "description": "<description>",
                                                 "values": "<values>",
                                                 "unit": "<unit>",
@@ -156,20 +156,25 @@
 ### Look-Up-Table
 
 `<machinename>`に含まれる文字列で決定される数字である。対応表は下記の通り。
+ここに記載がない場合は、`<machinename>`はそのまま利用するが他の`<machinename>`向け情報は`N/A`とする。
 
 |<machinename>が含む文字列|	csp  |vcpu  |cpu_name|cpu_isa|
 | :---                   | :---:| :---:| :---: |:---: |
 |"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A|
 |"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)|
-|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
-|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon (6th Granite Rapids)|	x86-64 (AMX + AVX-512)|
-|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)|
-|"m7i" and "2xlarge"|	AWS|8|	Intel Xeon (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)|
-|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A |
+|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC 9R45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
+|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon 6 (6th Granite Rapids)|	x86-64 (AMX + AVX-512)|
+|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon 5 Metal(5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
+|"m7i" and "2xlarge"|	AWS|8|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)|
+|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A (SVE2-128)|
 |"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64|
-|"c4d-standard-8"|	GCP|	8|	5th Gen Intel Xeon (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
-|"c4-standard-8"|	GCP|	8|	5th Gen Intel Xeon (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
-|"c4a-standard-8"|	GCP|	8|	AMD EPYC (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
+|"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
+|"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)|
+|"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) |
+|"VM.Standard.E5.Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)|
+|"VM.Standard.E6.Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)|
+|"VM.Standard.A1.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)|
+
 
 #### "machinename":"\<machinename\>"
 `${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
@@ -194,8 +199,32 @@
 複数ある場合はアルファベット順に登録する。
 
 #### "benchmark":"\<benchmark\>"
-`${PROJECT_ROOT}/<machinename>/<os>/`<testcategory>`直下にあるディレクトリ名が`<testcategory>`に相当する。
+`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>`の直下にあるディレクトリ名が`<benchmark>`に相当する。
 複数ある場合はアルファベット順に登録する。
 
-#### "threads":"\<N\>"
+#### data extract from "\<benchmark\>"
+以下、`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`からのデータ抽出法である。以下、このDirectoryを便宜上`${BENCHMARK}`と定義する。
 
+##### "threads":"\<N\>"
+まず`${BENCHMARK}`中に[How to distingush `<N>` in `<files>`](### How to distingush `<N>` in `<files>`)で`<N>`が特定されているとする。それぞれの `<N>` に対して個別に子ノードを生成する。
+
+##### "\<N\>":"perf_stat"
+[perf_stat output](## perf_stat output)を参照。
+
+##### "\<N\>":"test_name"
+
+一つの`<N>` に対して複数の`<test_name>`が存在しうる。`${BENCHMARK}/summary.json`より抽出する。
+
+
+# make_one_big_json.py specification
+ここでは、`one_big_json.json`を生成するPythonスクリプト`make_one_big_json.py`を実装する際の仕様について記す。
+
+## requirement
+Python3.10で動作すること。`make_one_big_json.py`自分自身と出力ファイルである`one_big_json.json`に対してSyntax Errorを検出する機能を有する。
+
+## argument parameters
+オプションは下記の通りとする。  
+- `--dir`(省略可能) :　
+    `${PROJECT_ROOT}`を指定する。なおここで指定される`${PROJECT_ROOT}`は複数あっても構わない。その場合でも`one_big_json.json`内でマージされることとする。省略された場合は`${PROJECT_ROOT}=${PWD}`と解釈する
+- `--output`(省略可能):
+    生成される`one_big_json.json`のDirectoryとファイル名を変更したいときに利用する。省略された場合は`${PWD}/one_big_json.json`と解釈され、もしすでに同名のファイルが存在する場合は上書き保存するかを確認する。
