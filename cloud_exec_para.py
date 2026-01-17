@@ -1460,7 +1460,13 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     # 3. Default: run workloads
     workloads = []
 
-    testloads_mode = inst.get('testloads', False) or config.get('_testloads_mode', False)
+    # Check if instance has explicit testloads setting
+    if 'testloads' in inst:
+        # Instance-level setting takes highest priority
+        testloads_mode = inst['testloads']
+    else:
+        # Fall back to global --test flag, or default to False
+        testloads_mode = config.get('_testloads_mode', False)
 
     if testloads_mode:
         if logger:
@@ -2217,6 +2223,67 @@ class GCPProvider(CloudProvider):
 class OCIProvider(CloudProvider):
     """OCI-specific implementation of CloudProvider."""
 
+    # OCI supported Ubuntu versions
+    # Update this list when OCI adds support for new Ubuntu versions
+    OCI_SUPPORTED_UBUNTU_VERSIONS = ['22.04', '24.04']
+
+    def _normalize_ubuntu_version_for_oci(self, os_version: str, logger=None) -> str:
+        """
+        Normalize Ubuntu version to OCI-supported version.
+
+        OCI currently only supports Ubuntu 22.04 and 24.04.
+        - Ubuntu 25+ will fall back to 24.04
+        - Ubuntu 23 will fall back to 22.04
+        - Ubuntu 22 and below will fall back to 22.04
+
+        Args:
+            os_version: Original OS version (e.g., "25.04", "23.10", "22.04")
+            logger: Optional logger for warnings
+
+        Returns:
+            Normalized version supported by OCI (e.g., "24.04" or "22.04")
+        """
+        try:
+            # Extract major.minor version
+            version_parts = os_version.split('.')
+            if len(version_parts) < 2:
+                if logger:
+                    logger.warn(f"Invalid OS version format: {os_version}, defaulting to 24.04")
+                return '24.04'
+
+            major = int(version_parts[0])
+            minor = int(version_parts[1])
+            os_ver_major_minor = f"{major}.{minor:02d}"
+
+            # Check if already supported
+            if os_ver_major_minor in self.OCI_SUPPORTED_UBUNTU_VERSIONS:
+                return os_ver_major_minor
+
+            # Apply fallback logic
+            if major >= 25:
+                # Ubuntu 25+ -> 24.04
+                normalized = '24.04'
+                if logger:
+                    logger.warn(
+                        f"OCI does not support Ubuntu {os_ver_major_minor}. "
+                        f"Falling back to Ubuntu {normalized}."
+                    )
+            else:
+                # Ubuntu 23 and below -> 22.04
+                normalized = '22.04'
+                if logger:
+                    logger.warn(
+                        f"OCI does not support Ubuntu {os_ver_major_minor}. "
+                        f"Falling back to Ubuntu {normalized}."
+                    )
+
+            return normalized
+
+        except (ValueError, IndexError) as e:
+            if logger:
+                logger.warn(f"Error parsing OS version {os_version}: {e}, defaulting to 24.04")
+            return '24.04'
+
     def initialize_shared_resources(self, logger=None) -> Dict[str, Any]:
         """Initialize OCI shared resources (Compartment, Subnet, AD) from environment variables."""
         import os
@@ -2363,11 +2430,16 @@ class OCIProvider(CloudProvider):
 
         # 3. Find Ubuntu Image
         os_version = self.config['common']['os_version']
-        os_ver_major = os_version.split('.')[0] + "." + os_version.split('.')[1]
+
+        # Normalize Ubuntu version for OCI (OCI-specific fallback)
+        os_ver_major = self._normalize_ubuntu_version_for_oci(os_version, logger)
         op_sys = "Canonical Ubuntu"
 
         if logger:
-            logger.info(f"Searching for {op_sys} {os_ver_major} image...")
+            if os_version.startswith(os_ver_major):
+                logger.info(f"Searching for {op_sys} {os_ver_major} image...")
+            else:
+                logger.info(f"Searching for {op_sys} {os_ver_major} image (normalized from {os_version})...")
 
         image_query = (
             f"oci compute image list --compartment-id {compartment_id} "
@@ -2390,7 +2462,7 @@ class OCIProvider(CloudProvider):
 
         if not image_id or image_id == "None":
             if logger:
-                logger.error(f"Could not find Ubuntu {os_version} image for {inst['type']}")
+                logger.error(f"Could not find Ubuntu {os_ver_major} image for {inst['type']}")
             return None, None
 
         if logger:
@@ -2736,6 +2808,116 @@ def execute_instances_parallel(
             print("[SHUTDOWN] All threads finished.")
 
 
+def validate_instance_definitions(instances_def: Dict[str, Any], csp_filter: Optional[str] = None) -> None:
+    """
+    Validate cloud_instances.json for duplicate names and other conflicts.
+
+    Args:
+        instances_def: Instance definitions from cloud_instances.json
+        csp_filter: Optional CSP name to validate (if None, validates all CSPs)
+
+    Raises:
+        ValueError: If validation fails with detailed error message
+    """
+    errors = []
+    warnings = []
+
+    # Determine which CSPs to validate
+    csps_to_check = [csp_filter] if csp_filter else instances_def.keys()
+
+    for csp in csps_to_check:
+        if csp not in instances_def:
+            continue
+
+        csp_config = instances_def[csp]
+        if not isinstance(csp_config, dict):
+            continue
+
+        instances = csp_config.get('instances', [])
+        if not instances:
+            continue
+
+        # Get only enabled instances for validation
+        enabled_instances = [inst for inst in instances if inst.get('enable', False)]
+
+        if not enabled_instances:
+            continue
+
+        # Check for duplicate names (CRITICAL)
+        names = [inst.get('name', '') for inst in enabled_instances]
+        name_counts = {}
+        for name in names:
+            if name:
+                name_counts[name] = name_counts.get(name, 0) + 1
+
+        duplicates = {name: count for name, count in name_counts.items() if count > 1}
+        if duplicates:
+            errors.append(
+                f"[{csp.upper()}] CRITICAL: Duplicate instance names found!\n"
+                + "\n".join([f"  - '{name}' appears {count} times" for name, count in duplicates.items()])
+                + "\n  Instance names must be unique within a CSP to avoid conflicts."
+            )
+
+        # Check for duplicate hostnames (WARNING - may be intentional for same machine type)
+        hostnames = [inst.get('hostname', '') for inst in enabled_instances]
+        hostname_counts = {}
+        for hostname in hostnames:
+            if hostname:
+                hostname_counts[hostname] = hostname_counts.get(hostname, 0) + 1
+
+        duplicate_hostnames = {hn: count for hn, count in hostname_counts.items() if count > 1}
+        if duplicate_hostnames:
+            warnings.append(
+                f"[{csp.upper()}] WARNING: Duplicate hostnames found:\n"
+                + "\n".join([f"  - '{hn}' appears {count} times" for hn, count in duplicate_hostnames.items()])
+                + "\n  This may be intentional if using same machine type with different configs."
+            )
+
+        # Check required fields
+        required_fields = ['name', 'type', 'enable']
+        for i, inst in enumerate(enabled_instances, 1):
+            missing = [field for field in required_fields if field not in inst or not inst[field]]
+            if missing:
+                errors.append(
+                    f"[{csp.upper()}] Instance #{i} is missing required fields: {', '.join(missing)}"
+                )
+
+        # CSP-specific validations
+        if csp == 'oci':
+            for i, inst in enumerate(enabled_instances, 1):
+                # OCI Flex shapes require ocpus and memory_gb
+                if 'Flex' in inst.get('type', ''):
+                    if 'ocpus' not in inst:
+                        errors.append(
+                            f"[{csp.upper()}] Instance '{inst.get('name', f'#{i}')}': "
+                            f"Flex shape requires 'ocpus' field"
+                        )
+                    if 'memory_gb' not in inst:
+                        errors.append(
+                            f"[{csp.upper()}] Instance '{inst.get('name', f'#{i}')}': "
+                            f"Flex shape requires 'memory_gb' field"
+                        )
+
+    # Print warnings
+    if warnings:
+        print(f"\n{'='*80}")
+        print("VALIDATION WARNINGS:")
+        print(f"{'='*80}")
+        for warning in warnings:
+            print(warning)
+        print(f"{'='*80}\n")
+
+    # Raise errors if any
+    if errors:
+        error_msg = f"\n{'='*80}\n"
+        error_msg += "VALIDATION FAILED - Configuration Errors Found:\n"
+        error_msg += f"{'='*80}\n"
+        error_msg += "\n\n".join(errors)
+        error_msg += f"\n{'='*80}\n"
+        error_msg += "\nPlease fix these errors in cloud_instances.json before running.\n"
+        raise ValueError(error_msg)
+
+
 def load_config(config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Load cloud_config.json and cloud_instances.json.
@@ -2819,6 +3001,13 @@ Examples:
         config, instances_def = load_config(args.config)
     except Exception as e:
         print(f"[ERROR] Failed to load configuration: {e}")
+        sys.exit(1)
+
+    # Validate instance definitions BEFORE execution
+    try:
+        validate_instance_definitions(instances_def, csp_filter=args.csp)
+    except ValueError as e:
+        print(str(e))
         sys.exit(1)
 
     # Add testloads mode flag to config
