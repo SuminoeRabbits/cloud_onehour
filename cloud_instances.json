@@ -179,7 +179,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": true,
+        "enable": false,
         "testloads": false,
         "type": "VM.Standard.A1.Flex",
         "arch": "arm64",

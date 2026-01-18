@@ -1579,6 +1579,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             check_count = 0
             last_log_size = 0
             ssh_fail_count = 0
+            warned_90_percent = False  # Track if we've issued 90% warning
 
             while time.time() - start_time < workload_timeout:
                 # Exponential backoff: 30s -> 45s -> 67s -> 101s -> 151s -> 227s -> 300s (max 5 min)
@@ -1736,6 +1737,59 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                 # Still running, continue polling
                 elapsed = int(time.time() - start_time)
 
+                # Check if we've reached 90% of timeout - issue warning and dump diagnostic info
+                if not warned_90_percent and elapsed >= workload_timeout * 0.9:
+                    warned_90_percent = True
+                    if logger:
+                        logger.warn(f"Workload {i}/{total_workloads} approaching timeout (90%: {elapsed}s / {workload_timeout}s)")
+                        logger.warn("Collecting diagnostic information...")
+                    else:
+                        print(f"  [WARNING] Workload {i}/{total_workloads} approaching timeout (90%: {elapsed}s / {workload_timeout}s)")
+                        print(f"  [WARNING] Collecting diagnostic information...")
+
+                    # Dump diagnostic info at 90%
+                    try:
+                        # Get process tree
+                        ps_output = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'ps auxf | head -100'",
+                                           capture=True, ignore=True, timeout=30, logger=logger)
+                        if logger and ps_output:
+                            logger.warn(f"Process tree (top 100 processes):\n{ps_output}")
+                        elif ps_output:
+                            print(f"  [DIAG] Process tree (top 100 processes):\n{ps_output}")
+
+                        # Get last 50 lines of log
+                        log_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {remote_log_path} 2>/dev/null || echo \"[No log available]\"'",
+                                          capture=True, ignore=True, timeout=30, logger=logger)
+                        if logger and log_tail:
+                            logger.warn(f"Last 50 lines of wrapper log ({remote_log_path}):\n{log_tail}")
+                        elif log_tail:
+                            print(f"  [DIAG] Last 50 lines of wrapper log:\n{log_tail}")
+
+                        # Get last 50 lines of workload log if available
+                        workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', cmd)
+                        if workload_log_match:
+                            workload_log_path = workload_log_match.group(1)
+                            wl_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {workload_log_path} 2>/dev/null || echo \"[No workload log]\"'",
+                                             capture=True, ignore=True, timeout=30, logger=logger)
+                            if logger and wl_tail:
+                                logger.warn(f"Last 50 lines of workload log ({workload_log_path}):\n{wl_tail}")
+                            elif wl_tail:
+                                print(f"  [DIAG] Last 50 lines of workload log:\n{wl_tail}")
+
+                        # Get memory/disk info
+                        mem_info = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'free -h'",
+                                          capture=True, ignore=True, timeout=30, logger=logger)
+                        if logger and mem_info:
+                            logger.warn(f"Memory status:\n{mem_info}")
+                        elif mem_info:
+                            print(f"  [DIAG] Memory status:\n{mem_info}")
+
+                    except Exception as e:
+                        if logger:
+                            logger.error(f"Failed to collect 90% diagnostic info: {e}")
+                        else:
+                            print(f"  [ERROR] Failed to collect 90% diagnostic info: {e}")
+
                 # Get CPU usage from remote instance
                 cpu_usage_cmd = (
                     f"ssh {ssh_opt} {ssh_user}@{ip} "
@@ -1771,14 +1825,82 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     print(progress_msg)
 
             else:
-                # Timeout reached
+                # Timeout reached - Collect final diagnostic information
                 if logger:
                     logger.error(f"Workload {i}/{total_workloads} timed out after {workload_timeout}s")
-                elif False:
-                    log(f"Workload {i}/{total_workloads} timed out after {workload_timeout}s", "ERROR")
-                #elif DEBUG_MODE == False:
-                    print(f"  [Error] Workload {i}/{total_workloads} timed out")
-                
+                    logger.error("Collecting final diagnostic information...")
+                else:
+                    print(f"  [ERROR] Workload {i}/{total_workloads} timed out after {workload_timeout}s")
+                    print(f"  [ERROR] Collecting final diagnostic information...")
+
+                # Dump comprehensive diagnostic info at timeout
+                try:
+                    # Get full process tree
+                    ps_output = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'ps auxf'",
+                                       capture=True, ignore=True, timeout=30, logger=logger)
+                    if logger and ps_output:
+                        logger.error(f"Full process tree at timeout:\n{ps_output}")
+                    elif ps_output:
+                        print(f"  [TIMEOUT-DIAG] Full process tree:\n{ps_output}")
+
+                    # Get last 100 lines of wrapper log
+                    log_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {remote_log_path} 2>/dev/null || echo \"[No log available]\"'",
+                                      capture=True, ignore=True, timeout=30, logger=logger)
+                    if logger and log_tail:
+                        logger.error(f"Last 100 lines of wrapper log ({remote_log_path}):\n{log_tail}")
+                    elif log_tail:
+                        print(f"  [TIMEOUT-DIAG] Last 100 lines of wrapper log:\n{log_tail}")
+
+                    # Get last 100 lines of workload log if available
+                    workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', cmd)
+                    if workload_log_match:
+                        workload_log_path = workload_log_match.group(1)
+                        wl_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {workload_log_path} 2>/dev/null || echo \"[No workload log]\"'",
+                                         capture=True, ignore=True, timeout=30, logger=logger)
+                        if logger and wl_tail:
+                            logger.error(f"Last 100 lines of workload log ({workload_log_path}):\n{wl_tail}")
+                        elif wl_tail:
+                            print(f"  [TIMEOUT-DIAG] Last 100 lines of workload log:\n{wl_tail}")
+
+                    # Get memory and disk info
+                    sys_info = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'free -h && echo \"===DISK===\" && df -h'",
+                                      capture=True, ignore=True, timeout=30, logger=logger)
+                    if logger and sys_info:
+                        logger.error(f"System resources at timeout:\n{sys_info}")
+                    elif sys_info:
+                        print(f"  [TIMEOUT-DIAG] System resources:\n{sys_info}")
+
+                    # Get running pts/python processes
+                    pts_procs = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'ps aux | grep -E \"phoronix|python|pts_runner\" | grep -v grep'",
+                                       capture=True, ignore=True, timeout=30, logger=logger)
+                    if logger and pts_procs:
+                        logger.error(f"PTS/Python processes at timeout:\n{pts_procs}")
+                    elif pts_procs:
+                        print(f"  [TIMEOUT-DIAG] PTS/Python processes:\n{pts_procs}")
+
+                    # Try to get strace of any long-running process (if available)
+                    strace_check = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'which strace'",
+                                          capture=True, ignore=True, timeout=10, logger=logger)
+                    if strace_check and strace_check.strip():
+                        # Find the main python process PID
+                        pid_check = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'pgrep -f pts_runner | head -1'",
+                                           capture=True, ignore=True, timeout=10, logger=logger)
+                        if pid_check and pid_check.strip():
+                            main_pid = pid_check.strip()
+                            # Get strace for 5 seconds to see what it's waiting on
+                            strace_out = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'timeout 5 strace -p {main_pid} 2>&1 || true'",
+                                               capture=True, ignore=True, timeout=10, logger=logger)
+                            if logger and strace_out:
+                                logger.error(f"strace of main process (PID {main_pid}):\n{strace_out}")
+                            elif strace_out:
+                                print(f"  [TIMEOUT-DIAG] strace of main process (PID {main_pid}):\n{strace_out}")
+
+                except Exception as e:
+                    if logger:
+                        logger.error(f"Failed to collect timeout diagnostic info: {e}")
+                    else:
+                        print(f"  [ERROR] Failed to collect timeout diagnostic info: {e}")
+
                 duration = time.time() - workload_start
                 DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
                 continue # Proceed to next workload on timeout
@@ -1812,10 +1934,38 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                         time.sleep(10)
                         continue
 
+                    # Final timeout - collect diagnostic information
                     msg = f"Workload {i}/{total_workloads} timed out after {workload_timeout}s"
-                    if logger: logger.error(msg)
-                    #elif DEBUG_MODE: log(msg, "ERROR")
-                    else: print(f"  [Error] {msg}")
+                    if logger:
+                        logger.error(msg)
+                        logger.error("Collecting diagnostic information for regular command timeout...")
+                    else:
+                        print(f"  [ERROR] {msg}")
+                        print(f"  [ERROR] Collecting diagnostic information...")
+
+                    # Dump diagnostic info for regular command timeout
+                    try:
+                        # Get process tree
+                        ps_output = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'ps auxf | head -100'",
+                                           capture=True, ignore=True, timeout=30, logger=logger)
+                        if logger and ps_output:
+                            logger.error(f"Process tree at timeout:\n{ps_output}")
+                        elif ps_output:
+                            print(f"  [TIMEOUT-DIAG] Process tree:\n{ps_output}")
+
+                        # Get system info
+                        sys_info = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'free -h && echo \"===UPTIME===\" && uptime'",
+                                          capture=True, ignore=True, timeout=30, logger=logger)
+                        if logger and sys_info:
+                            logger.error(f"System info at timeout:\n{sys_info}")
+                        elif sys_info:
+                            print(f"  [TIMEOUT-DIAG] System info:\n{sys_info}")
+
+                    except Exception as e:
+                        if logger:
+                            logger.error(f"Failed to collect diagnostic info: {e}")
+                        else:
+                            print(f"  [ERROR] Failed to collect diagnostic info: {e}")
 
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")

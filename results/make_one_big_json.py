@@ -520,15 +520,21 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         cost_hour: Cost per hour (cost_hour[730h-mo]) for this machine
 
     Per README_results.md specification:
-        Benchmark completion conditions (3 cases):
+        Benchmark completion conditions (4 cases):
         Case 1: Both summary.json and <N>-thread.json exist
         Case 2: <N>-thread.json exists (without summary.json)
         Case 3: <N>-thread_perf_summary.json exists
+        Case 4: Special case for build-* benchmarks without perf_summary.json
 
         cost = cost_hour[730h-mo] * time / 3600
         where time is in seconds, so divide by 3600 to convert to hours
     """
     summary_json = benchmark_dir / "summary.json"
+    benchmark_name = benchmark_dir.name
+
+    # Case 4 special benchmarks (per README_results.md)
+    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]
+    is_case4 = benchmark_name in case4_benchmarks
 
     # Find all thread counts from <N>-thread.json files (Case 1 & 2)
     thread_json_files = list(benchmark_dir.glob("*-thread.json"))
@@ -538,11 +544,15 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     perf_summary_files = list(benchmark_dir.glob("*-thread_perf_summary.json"))
     perf_summary_thread_nums = sorted(set(f.stem.split("-")[0] for f in perf_summary_files if f.stem.split("-")[0].isdigit()))
 
-    # Merge thread numbers from both sources
-    all_thread_nums = sorted(set(thread_nums + perf_summary_thread_nums))
+    # Find all thread counts from <N>-thread.log files (Case 4)
+    thread_log_files = list(benchmark_dir.glob("*-thread.log"))
+    log_thread_nums = sorted(set(f.stem.split("-")[0] for f in thread_log_files if f.stem.split("-")[0].isdigit()))
+
+    # Merge thread numbers from all sources
+    all_thread_nums = sorted(set(thread_nums + perf_summary_thread_nums + (log_thread_nums if is_case4 else [])))
 
     # Check if benchmark is complete per README_results.md
-    # At least one of: <N>-thread.json or <N>-thread_perf_summary.json must exist
+    # At least one of: <N>-thread.json, <N>-thread_perf_summary.json, or (Case 4: <N>-thread.log) must exist
     if not all_thread_nums:
         print(f"Warning: Skipping incomplete benchmark at {benchmark_dir} (no <N>-thread.json or <N>-thread_perf_summary.json found)", file=sys.stderr)
         return None
@@ -573,10 +583,12 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         # Case 1: If summary.json exists with <N>-thread.json, use both
         # Case 2: If only <N>-thread.json exists (no summary.json), extract directly from it
         # Case 3: If <N>-thread_perf_summary.json exists, use it (with or without <N>-thread.json)
+        # Case 4: Special case for build-* benchmarks (use <N>-thread.log)
         test_results = {}
+        has_thread_log = thread_num in log_thread_nums
 
         # Determine which case to apply
-        # Priority: Case 1 > Case 2 > Case 3
+        # Priority: Case 1 > Case 2 > Case 3 > Case 4
         if summary_data and "results" in summary_data and has_thread_json:
             # Case 1: Both summary.json and <N>-thread.json exist
             # Use summary.json for test metadata and <N>-thread.json for raw data
@@ -761,6 +773,63 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     }
                 except (json.JSONDecodeError, IOError) as e:
                     print(f"Warning: Failed to read {perf_summary_file}: {e}", file=sys.stderr)
+
+        elif is_case4 and has_thread_log:
+            # Case 4: Special case for build-* benchmarks (no perf_summary.json, use <N>-thread.log)
+            # Per README_results.md Case 4:
+            # - Extract "Average: XXXX.XXXX Seconds" from <N>-thread.log
+            # - values: extracted value
+            # - raw_values: [extracted value]
+            # - unit: "Seconds"
+            # - test_run_times: [extracted value]
+            # - description: benchmark-specific description
+            thread_log = benchmark_dir / f"{thread_num}-thread.log"
+
+            if thread_log.exists():
+                try:
+                    with open(thread_log, 'r') as f:
+                        log_content = f.read()
+
+                    # Extract "Average: XXXX.XXXX Seconds" from log
+                    match = re.search(r'Average:\s+([\d.]+)\s+Seconds', log_content)
+                    if match:
+                        value = float(match.group(1))
+                        values = value
+                        raw_values = [value]
+                        unit = "Seconds"
+                        test_run_times = [value]
+
+                        # Set appropriate description and test_name based on benchmark
+                        if benchmark_name == "build-gcc-1.5.0":
+                            test_name = "Timed GCC Compilation"
+                            description = "Timed GCC Compilation 15.2"
+                        elif benchmark_name == "build-linux-kernel-1.17.1":
+                            test_name = "Timed Linux Kernel Compilation"
+                            description = "Timed Linux Kernel Compilation 6.15"
+                        elif benchmark_name == "build-llvm-1.6.0":
+                            test_name = "Timed LLVM Compilation"
+                            description = "Timed LLVM Compilation 21.1"
+                        else:
+                            test_name = benchmark_name
+                            description = "Build benchmark"
+
+                        # Calculate cost using extracted time value
+                        cost = cost_hour * value / 3600.0
+
+                        test_results[test_name] = {
+                            "description": description,
+                            "values": values,
+                            "raw_values": raw_values,
+                            "unit": unit,
+                            "time": value,
+                            "test_run_times": test_run_times,
+                            "cost": cost
+                        }
+                    else:
+                        print(f"Warning: Could not find 'Average: X.XX Seconds' pattern in {thread_log}", file=sys.stderr)
+
+                except (IOError, ValueError) as e:
+                    print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
 
         # Add test results to thread data under "test_name" key
         if test_results:

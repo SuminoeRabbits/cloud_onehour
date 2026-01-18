@@ -39,6 +39,7 @@
         - ["\<N\>":"test\_name"](#ntest_name)
           - [データソース](#データソース)
           - [ケース３ データソース 例外処理](#ケース３-データソース-例外処理)
+          - [ケース４ データソース 例外処理](#ケース４-データソース-例外処理)
           - [descriptionによるマッチング](#descriptionによるマッチング)
         - ["\<N\>":"test\_name":"values", "raw\_values", "time", "test\_run\_times"](#ntest_namevalues-raw_values-time-test_run_times)
         - ["\<N\>":"test\_name":"cost"](#ntest_namecost)
@@ -98,12 +99,16 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 [注意][必須ファイル]がそろっていない場合はテスト完了ではないので処理を行わない。
 
 ### summary file in `<files>`
-`<benchmark>`が完了している条件は3つのケースがありうる。
+`<benchmark>`が完了している条件は４つのケースがありうる。
 1. `<files>`中に`summary.json`と`<N>-thread.json`の両方が存在
 2. `<files>`中に`<N>-thread.json`が存在
 3. `<files>`中に`<N>-thread_perf_summary.json`が存在
+4. `<files>`中に`<N>-thread_perf_summary.json`が存在しないがテストが完了している特殊例。このケース４の特殊例は
+    - `<benchmark>="build-gcc-1.5.0"`
+    - `<benchmark>="build-linux-kernel-1.17.1"`
+    - `<benchmark>="build-llvm-1.6.0"`
 
-[注意]これら3条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
+[注意]これら４条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
 
 
 次に`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`summary.json`についてデータの読み方を説明する。
@@ -340,6 +345,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **test_run_times**: `4-thread_perf_summary.json`内の"elapsed_time_sec"
     - **description**: "Coremark 1.0"
 
+###### ケース４ データソース 例外処理
+ケース４でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
 - `<benchmark>="build-gcc-1.5.0"`: 
     `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
