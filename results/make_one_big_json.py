@@ -727,21 +727,53 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             with open(thread_log, 'r') as f:
                                 log_content = f.read()
 
-                            if benchmark_name == "coremark-1.0.1":
-                                # Extract "Average: XXXX.XXXX Iterations/Sec" (more flexible regex)
-                                # Allow for various formats and potential typos
-                                match = re.search(r'Average:\s*([\d.]+)\s*Iterations?/Sec', log_content, re.IGNORECASE)
+                            # Verify file is not empty
+                            if not log_content.strip():
+                                print(f"Warning: Log file is empty: {thread_log}", file=sys.stderr)
+                            elif benchmark_name == "coremark-1.0.1":
+                                # Extract "Average: XXXX.XXXX Iterations/Sec" (very flexible regex)
+                                patterns = [
+                                    r'Average:\s*([\d.]+)\s*Iterations?/Sec',
+                                    r'Average:\s*([\d.]+)\s*iterations?/sec',
+                                    r'Average\s*:\s*([\d.]+)\s*Iterations?/Sec',
+                                ]
+
+                                match = None
+                                for pattern in patterns:
+                                    match = re.search(pattern, log_content, re.IGNORECASE)
+                                    if match:
+                                        break
+
                                 if match:
                                     value = float(match.group(1))
                                     values = value
                                     raw_values = [value]
                                     unit = "Iterations/Sec"
                                     description = "Coremark 1.0"
+                                else:
+                                    # Enhanced debugging
+                                    excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'iteration' in line.lower()]
+                                    excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
+                                    print(f"Warning: Could not find 'Average: X Iterations/Sec' pattern in {thread_log}", file=sys.stderr)
+                                    print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                                    print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
 
                             elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
-                                # Extract "Average: XXXX.XXXX Seconds" (more flexible regex)
-                                # Allow for various formats: "Average: X Seconds", "Average:X Seconds", etc.
-                                match = re.search(r'Average:\s*([\d.]+)\s*Seconds', log_content, re.IGNORECASE)
+                                # Extract "Average: XXXX.XXXX Seconds" (very flexible regex)
+                                # Try multiple patterns to handle various formats
+                                patterns = [
+                                    r'Average:\s*([\d.]+)\s*Seconds',  # Standard format
+                                    r'Average:\s*([\d.]+)\s*seconds',  # Lowercase
+                                    r'Average\s*:\s*([\d.]+)\s*Seconds',  # Extra space before colon
+                                    r'average:\s*([\d.]+)\s*seconds',  # All lowercase
+                                ]
+
+                                match = None
+                                for pattern in patterns:
+                                    match = re.search(pattern, log_content, re.IGNORECASE)
+                                    if match:
+                                        break
+
                                 if match:
                                     value = float(match.group(1))
                                     values = value
@@ -757,7 +789,12 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                     elif benchmark_name == "build-llvm-1.6.0":
                                         description = "Timed LLVM Compilation 21.1"
                                 else:
+                                    # Enhanced debugging: show file location and excerpt
+                                    excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'seconds' in line.lower()]
+                                    excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no lines with 'average' or 'seconds' found)"
                                     print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
+                                    print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                                    print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
 
                         except (IOError, ValueError) as e:
                             print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
@@ -794,45 +831,67 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     with open(thread_log, 'r') as f:
                         log_content = f.read()
 
-                    # Extract "Average: XXXX.XXXX Seconds" from log (more flexible regex)
-                    # Allow for various formats: "Average: X Seconds", "Average:X Seconds", etc.
-                    match = re.search(r'Average:\s*([\d.]+)\s*Seconds', log_content, re.IGNORECASE)
-                    if match:
-                        value = float(match.group(1))
-                        values = value
-                        raw_values = [value]
-                        unit = "Seconds"
-                        test_run_times = [value]
-
-                        # Set appropriate description and test_name based on benchmark
-                        if benchmark_name == "build-gcc-1.5.0":
-                            test_name = "Timed GCC Compilation"
-                            description = "Timed GCC Compilation 15.2"
-                        elif benchmark_name == "build-linux-kernel-1.17.1":
-                            test_name = "Timed Linux Kernel Compilation"
-                            description = "Timed Linux Kernel Compilation 6.15"
-                        elif benchmark_name == "build-llvm-1.6.0":
-                            test_name = "Timed LLVM Compilation"
-                            description = "Timed LLVM Compilation 21.1"
-                        else:
-                            test_name = benchmark_name
-                            description = "Build benchmark"
-
-                        # Calculate cost using extracted time value
-                        cost = cost_hour * value / 3600.0
-
-                        test_results[test_name] = {
-                            "description": description,
-                            "values": values,
-                            "raw_values": raw_values,
-                            "unit": unit,
-                            "time": value,
-                            "test_run_times": test_run_times,
-                            "cost": cost
-                        }
+                    # Verify file is not empty
+                    if not log_content.strip():
+                        print(f"Warning: Log file is empty: {thread_log}", file=sys.stderr)
                     else:
-                        # Only warn if the file exists but pattern not found
-                        print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
+                        # Extract "Average: XXXX.XXXX Seconds" from log (very flexible regex)
+                        # Try multiple patterns to handle various formats
+                        patterns = [
+                            r'Average:\s*([\d.]+)\s*Seconds',  # Standard format
+                            r'Average:\s*([\d.]+)\s*seconds',  # Lowercase
+                            r'Average\s*:\s*([\d.]+)\s*Seconds',  # Extra space before colon
+                            r'average:\s*([\d.]+)\s*seconds',  # All lowercase
+                        ]
+
+                        match = None
+                        matched_pattern = None
+                        for pattern in patterns:
+                            match = re.search(pattern, log_content, re.IGNORECASE)
+                            if match:
+                                matched_pattern = pattern
+                                break
+
+                        if match:
+                            value = float(match.group(1))
+                            values = value
+                            raw_values = [value]
+                            unit = "Seconds"
+                            test_run_times = [value]
+
+                            # Set appropriate description and test_name based on benchmark
+                            if benchmark_name == "build-gcc-1.5.0":
+                                test_name = "Timed GCC Compilation"
+                                description = "Timed GCC Compilation 15.2"
+                            elif benchmark_name == "build-linux-kernel-1.17.1":
+                                test_name = "Timed Linux Kernel Compilation"
+                                description = "Timed Linux Kernel Compilation 6.15"
+                            elif benchmark_name == "build-llvm-1.6.0":
+                                test_name = "Timed LLVM Compilation"
+                                description = "Timed LLVM Compilation 21.1"
+                            else:
+                                test_name = benchmark_name
+                                description = "Build benchmark"
+
+                            # Calculate cost using extracted time value
+                            cost = cost_hour * value / 3600.0
+
+                            test_results[test_name] = {
+                                "description": description,
+                                "values": values,
+                                "raw_values": raw_values,
+                                "unit": unit,
+                                "time": value,
+                                "test_run_times": test_run_times,
+                                "cost": cost
+                            }
+                        else:
+                            # Enhanced debugging: show file location and excerpt
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'seconds' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no lines with 'average' or 'seconds' found)"
+                            print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
+                            print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                            print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
 
                 except (IOError, ValueError) as e:
                     print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
