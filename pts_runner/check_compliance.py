@@ -111,6 +111,7 @@ class ComplianceChecker:
         self.check_batch_env_vars()
         self.check_pts_cache_clean()
         self.check_results_dir_structure()
+        self.check_thread_capping()
 
 
 
@@ -727,7 +728,7 @@ class ComplianceChecker:
         # Look for the results_dir assignment
         # We handle variations in whitespace and line breaks
         results_dir_pattern = r'self\.results_dir\s*=\s*self\.project_root\s*/\s*"results"\s*/\s*self\.machine_name\s*/\s*self\.os_name\s*/\s*self\.test_category_dir\s*/\s*self\.benchmark'
-        
+
         # Also check for variations with single quotes
         results_dir_pattern_sq = r"self\.results_dir\s*=\s*self\.project_root\s*/\s*'results'\s*/\s*self\.machine_name\s*/\s*self\.os_name\s*/\s*self\.test_category_dir\s*/\s*self\.benchmark"
 
@@ -739,6 +740,67 @@ class ComplianceChecker:
                 "   Expected: self.results_dir = self.project_root / \"results\" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark\n"
                 "   This ensures consistent log organization across machines and OS versions."
             )
+
+    def check_thread_capping(self):
+        """
+        Check if thread count is capped at vcpu_count (min(threads_arg, self.vcpu_count)).
+
+        Exception: Single-threaded benchmarks (e.g., redis, phpbench, simdjson, tinymembench, apache)
+        are allowed to use self.thread_list = [1] and ignore thread arguments.
+        """
+        # Single-threaded benchmarks that are intentionally fixed at 1 thread
+        single_threaded_benchmarks = [
+            'redis', 'phpbench', 'simdjson', 'tinymembench', 'apache'
+        ]
+
+        # Check if this is a single-threaded benchmark
+        is_single_threaded = any(name in self.filepath.name for name in single_threaded_benchmarks)
+
+        if is_single_threaded:
+            # Check that it uses thread_list = [1]
+            if re.search(r'self\.thread_list\s*=\s*\[1\]', self.content):
+                self.passed.append("✅ Single-threaded benchmark correctly uses thread_list = [1]")
+            else:
+                self.warnings.append(
+                    f"⚠️  WARNING: Single-threaded benchmark should use self.thread_list = [1]\n"
+                    f"   Benchmark: {self.filepath.name}"
+                )
+            return
+
+        # For multi-threaded benchmarks, check for proper thread capping
+        # Pattern 1: min(threads_arg, self.vcpu_count)
+        has_min_capping = re.search(r'min\(\s*(?:threads_arg|num_threads)\s*,\s*self\.vcpu_count\s*\)', self.content)
+
+        # Pattern 2: Direct assignment without capping (anti-pattern)
+        # Matches: self.thread_list = [threads_arg] or self.thread_list = [num_threads]
+        has_uncapped_assignment = re.search(
+            r'self\.thread_list\s*=\s*\[\s*(?:threads_arg|num_threads)\s*\]',
+            self.content
+        )
+
+        if has_min_capping:
+            self.passed.append("✅ Thread count properly capped at vcpu_count: min(threads_arg, self.vcpu_count)")
+        elif has_uncapped_assignment:
+            self.errors.append(
+                "❌ CRITICAL: Thread count not capped at vcpu_count\n"
+                "   Found: self.thread_list = [threads_arg] or self.thread_list = [num_threads]\n"
+                "   Expected: n = min(threads_arg, self.vcpu_count); self.thread_list = [n]\n"
+                "   Reference: CODE_TEMPLATE.md lines 232-237\n"
+                "   Issue: User may specify 288 threads on a 4-core system, causing issues"
+            )
+        else:
+            # Check if thread_list is set at all in __init__
+            has_thread_list_setup = re.search(r'self\.thread_list\s*=', self.content)
+            if has_thread_list_setup:
+                self.warnings.append(
+                    "⚠️  WARNING: Thread capping pattern unclear\n"
+                    "   Should use: n = min(threads_arg, self.vcpu_count); self.thread_list = [n]\n"
+                    "   Reference: CODE_TEMPLATE.md lines 232-237"
+                )
+            else:
+                self.warnings.append(
+                    "⚠️  WARNING: self.thread_list not initialized in __init__"
+                )
 
     def print_results(self):
 

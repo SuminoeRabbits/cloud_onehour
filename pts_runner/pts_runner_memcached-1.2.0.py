@@ -24,37 +24,40 @@ import time
 from pathlib import Path
 
 class MemcachedRunner:
-    def __init__(self, num_threads=None, quick_mode=False):
+    def __init__(self, threads_arg=None, quick_mode=False):
         """
         Initialize the Memcached Runner.
 
         Args:
-            num_threads: Number of threads (optional). If None, will run in scaling mode.
+            threads_arg: Number of threads (optional). If None, will run in scaling mode.
             quick_mode: If True, run in quick mode (FORCE_TIMES_TO_RUN=1).
         """
         self.benchmark = "memcached-1.2.0"
         self.benchmark_full = "pts/memcached-1.2.0"
         self.test_category = "Memory Access"
         self.test_category_dir = self.test_category.replace(' ', '_')
-        
+
         # System info
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
         self.os_name = self.get_os_name()
-        
+
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
 
         # Thread configuration
         self.quick_mode = quick_mode
-        self.manual_thread_count = num_threads
-        
-        if num_threads:
-            self.thread_list = [num_threads]
-        else:
+
+        if threads_arg is None:
             # Scaling mode: 1, 4, ..., vCPU
             self.thread_list = self.get_scaling_thread_list()
+        else:
+            # Fixed mode: cap at vcpu_count
+            n = min(threads_arg, self.vcpu_count)
+            if n != threads_arg:
+                print(f"  [INFO] Thread count {threads_arg} capped to {n} (nproc)")
+            self.thread_list = [n]
 
         # Results directory
         self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
@@ -375,10 +378,11 @@ def main():
     parser.add_argument('--threads', type=int, help='Threads (named)')
     parser.add_argument('--quick', action='store_true', help='Quick mode')
     args = parser.parse_args()
-    
+
     threads = args.threads if args.threads else args.threads_pos
-    runner = MemcachedRunner(num_threads=threads, quick_mode=args.quick)
-    runner.run()
+    runner = MemcachedRunner(threads_arg=threads, quick_mode=args.quick)
+    success = runner.run()
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
