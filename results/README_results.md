@@ -180,10 +180,12 @@
 "cost_hour[730h-mo]":"<cost>"は1時間当たりの利用コストである。cloud_instances.json内の"cpu_cost_hour[730h-mo]"と"extra_150g_storage_cost_hour"の和で算出される。もしcloud_instances.jsonで定義されていない場合は、"0.0"とする。
 
 #### "machinename":"\<machinename\>"
-`${PROJECT_ROOT}`直下にあるディレクトリ名が<machinename>に相当する。複数ある場合はアルファベット順に登録する。
+`${PROJECT_ROOT}`直下にあるディレクトリ名が`<machinename>`に相当する。複数ある場合はアルファベット順に登録する。
+`${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名を`<os>`、さらに`${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリを`<testcategory>`とするので、ディレクトリ構造が2層以上下位にない場合は`<machinename>`としない。
+`<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。
 
 #### "total_vcpu":"\<vcpu\>"
-`<machinename>`から決定される。(###Look-Up-Table)参照。`<machinename>`が決定されたら`${PROJECT_ROOT}/<machinename>`に移動する。
+`<machinename>`から決定される。(###Look-Up-Table)参照。
 
 #### "cpu_name":"\<cpu_name\>"
 `<machinename>`から決定される。(###Look-Up-Table)参照。
@@ -196,17 +198,22 @@
 
 #### "os":"\<os\>"
 `${PROJECT_ROOT}/<machinename>`直下にあるディレクトリ名が`<os>`に相当する。複数ある場合はアルファベット順に登録する。
+`${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリ名を`<testcategory>`、さらに`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>`直下にあるディレクトリを`<benchmark>`とするので、ディレクトリ構造が2層以上下位にない場合は`<os>`としない。
+`<os>`が決定されたら`${PROJECT_ROOT}/<machinename>/<os>`に移動する。
 
 #### "testcategory":"\<testcategory\>"
 `${PROJECT_ROOT}/<machinename>/<os>`直下にあるディレクトリ名が`<testcategory>`に相当する。
 複数ある場合はアルファベット順に登録する。
+`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>`直下にあるディレクトリ名を`<benchmark>`とするので、ディレクトリ構造が1層以上下位にない場合は`<testcategory>`としない。
+`<testcategory>`が決定されたら`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>`に移動する。
 
 #### "benchmark":"\<benchmark\>"
 `${PROJECT_ROOT}/<machinename>/<os>/<testcategory>`の直下にあるディレクトリ名が`<benchmark>`に相当する。
 複数ある場合はアルファベット順に登録する。
+`<benchmark>`が決定されたら`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`に移動する。
 
 #### data extract from "\<benchmark\>"
-以下、`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`からのデータ抽出法である。以下、このDirectoryを便宜上`${BENCHMARK}`と定義する。
+以下、`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`からのデータ抽出法である。このDirectoryを環境変数`${BENCHMARK}`と定義して参照する。
 
 ##### "threads":"\<N\>"
 まず`${BENCHMARK}`中に[How to distingush `<N>` in `<files>`](### How to distingush `<N>` in `<files>`)で`<N>`が特定されているとする。それぞれの `<N>` に対して個別に子ノードを生成する。
