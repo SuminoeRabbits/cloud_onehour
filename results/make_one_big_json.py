@@ -7,6 +7,9 @@ Based on README_results.md specification.
 
 Version info: v1.0.0 (Updated: 2026-01-18)
 
+Important: All log files are automatically processed to remove ANSI color codes
+before parsing. This ensures consistent regex matching across different environments.
+
 Usage:
     # Build from directories:
     python3 make_one_big_json.py [--dir PATH] [--output PATH] [--instance_source PATH]
@@ -317,6 +320,47 @@ def get_machine_info(machinename: str, cloud_instances: Dict[str, Any]) -> Dict[
         "cpu_isa": "unknown",
         "cost_hour[730h-mo]": cost_from_json if cost_from_json is not None else 0.0
     }
+
+
+def strip_ansi_codes(text: str) -> str:
+    """
+    Remove ANSI color codes from text.
+
+    ANSI codes like \x1b[1;34m (blue) and \x1b[0m (reset) can interfere
+    with regex matching. This function removes all ANSI escape sequences.
+
+    Args:
+        text: Text that may contain ANSI codes
+
+    Returns:
+        Text with ANSI codes removed
+    """
+    # Pattern to match ANSI escape sequences
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    return ansi_escape.sub('', text)
+
+
+def read_log_file_safe(file_path: Path) -> str:
+    """
+    Safely read a log file with automatic ANSI code removal.
+
+    This function ensures that all log files are read consistently with
+    ANSI color codes removed, preventing regex matching issues.
+
+    Args:
+        file_path: Path to the log file to read
+
+    Returns:
+        File content with ANSI codes removed
+
+    Raises:
+        IOError: If file cannot be read
+    """
+    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        content = f.read()
+
+    # Always strip ANSI codes from log files
+    return strip_ansi_codes(content)
 
 
 def read_freq_file(freq_file: Path) -> Dict[str, int]:
@@ -724,8 +768,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     benchmark_name = benchmark_dir.name
                     if thread_log.exists():
                         try:
-                            with open(thread_log, 'r') as f:
-                                log_content = f.read()
+                            # Read log file with automatic ANSI code removal
+                            log_content = read_log_file_safe(thread_log)
 
                             # Verify file is not empty
                             if not log_content.strip():
@@ -837,8 +881,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 
             if thread_log.exists():
                 try:
-                    with open(thread_log, 'r') as f:
-                        log_content = f.read()
+                    # Read log file with automatic ANSI code removal
+                    log_content = read_log_file_safe(thread_log)
 
                     # Verify file is not empty
                     if not log_content.strip():
