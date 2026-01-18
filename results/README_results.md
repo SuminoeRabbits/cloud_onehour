@@ -107,6 +107,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - `<benchmark>="build-gcc-1.5.0"`
     - `<benchmark>="build-linux-kernel-1.17.1"`
     - `<benchmark>="build-llvm-1.6.0"`
+    - `<benchmark>="coremark-1.0.1"`
 
 [注意]これら４条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
 
@@ -335,19 +336,12 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 データソースとして、ケース１，２，３のどれを適応させたか、`<test_name>`毎に明確にする。
 
 ###### ケース３ データソース 例外処理
-ケース３でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
-
-- `<benchmark>="coremark-1.0.1"`: 
-    `<N>-thread.log`内の `Average: XXXX.XXXX Iterations/Sec`に注目。
-    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
-    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
-    - **unit**: `"Iterations/Sec"`
-    - **test_run_times**: `4-thread_perf_summary.json`内の"elapsed_time_sec"
-    - **description**: "Coremark 1.0"
+ケース３でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。TBF。
 
 ###### ケース４ データソース 例外処理
 ケース４でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
-- `<benchmark>="build-gcc-1.5.0"`: 
+
+- `<benchmark>="build-gcc-1.5.0"`:
     `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
@@ -355,7 +349,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **test_run_times**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **description**: "Timed GCC Compilation 15.2"
 
-- `<benchmark>="build-linux-kernel-1.17.1"`: 
+- `<benchmark>="build-linux-kernel-1.17.1"`:
     `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
@@ -363,13 +357,21 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **test_run_times**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **description**: "Timed Linux Kernel Compilation 6.15"
 
-- `<benchmark>="build-llvm-1.6.0"`: 
+- `<benchmark>="build-llvm-1.6.0"`:
     `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"Seconds"`
     - **test_run_times**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **description**: "Timed LLVM Compilation 21.1"
+
+- `<benchmark>="coremark-1.0.1"`:
+    `<N>-thread.log`内の `Average: XXXX.XXXX Iterations/Sec`に注目。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Iterations/Sec"`
+    - **test_run_times**: "N/A"
+    - **description**: "Coremark 1.0"
 
 ###### descriptionによるマッチング
 [summary file](#summary-file-in-files)のケース１，２の場合は

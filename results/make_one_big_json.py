@@ -577,7 +577,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     benchmark_name = benchmark_dir.name
 
     # Case 4 special benchmarks (per README_results.md)
-    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]
+    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1"]
     is_case4 = benchmark_name in case4_benchmarks
 
     # Find all thread counts from <N>-thread.json files (Case 1 & 2)
@@ -765,6 +765,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     test_run_times = [elapsed_time_sec]
 
                     # Exception handling for specific benchmarks
+                    # Note: coremark-1.0.1 has been moved to Case 4
                     benchmark_name = benchmark_dir.name
                     if thread_log.exists():
                         try:
@@ -774,39 +775,6 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             # Verify file is not empty
                             if not log_content.strip():
                                 print(f"Warning: Log file is empty: {thread_log}", file=sys.stderr)
-                            elif benchmark_name == "coremark-1.0.1":
-                                # Extract "Average: XXXX.XXXX Iterations/Sec" (very flexible regex)
-                                patterns = [
-                                    r'Average[:\s]+([\d.]+)\s+Iterations?/Sec',  # Most flexible
-                                    r'Average:\s*([\d.]+)\s*Iterations?/Sec',
-                                    r'^\s*Average:\s*([\d.]+)\s*Iterations?/Sec',  # With leading whitespace
-                                ]
-
-                                match = None
-                                for pattern in patterns:
-                                    match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
-                                    if match:
-                                        break
-
-                                if match:
-                                    value = float(match.group(1))
-                                    values = value
-                                    raw_values = [value]
-                                    unit = "Iterations/Sec"
-                                    description = "Coremark 1.0"
-                                else:
-                                    # Enhanced debugging
-                                    excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'iteration' in line.lower()]
-                                    excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
-                                    print(f"Warning: Could not find 'Average: X Iterations/Sec' pattern in {thread_log}", file=sys.stderr)
-                                    print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
-                                    print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
-                                    # Show hex dump of first relevant line for debugging
-                                    if excerpt_lines:
-                                        first_line = excerpt_lines[0]
-                                        hex_dump = ' '.join(f'{ord(c):02x}' for c in first_line[:50])
-                                        print(f"  First line hex (first 50 chars): {hex_dump}", file=sys.stderr)
-
                             elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
                                 # Extract "Average: XXXX.XXXX Seconds" (very flexible regex)
                                 # Try multiple patterns to handle various formats, including leading whitespace
@@ -869,14 +837,10 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     print(f"Warning: Failed to read {perf_summary_file}: {e}", file=sys.stderr)
 
         elif is_case4 and has_thread_log:
-            # Case 4: Special case for build-* benchmarks (no perf_summary.json, use <N>-thread.log)
+            # Case 4: Special case for benchmarks without perf_summary.json (use <N>-thread.log)
             # Per README_results.md Case 4:
-            # - Extract "Average: XXXX.XXXX Seconds" from <N>-thread.log
-            # - values: extracted value
-            # - raw_values: [extracted value]
-            # - unit: "Seconds"
-            # - test_run_times: [extracted value]
-            # - description: benchmark-specific description
+            # - coremark-1.0.1: Extract "Average: XXXX.XXXX Iterations/Sec" from <N>-thread.log
+            # - build-*: Extract "Average: XXXX.XXXX Seconds" from <N>-thread.log
             thread_log = benchmark_dir / f"{thread_num}-thread.log"
 
             if thread_log.exists():
@@ -887,6 +851,52 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     # Verify file is not empty
                     if not log_content.strip():
                         print(f"Warning: Log file is empty: {thread_log}", file=sys.stderr)
+                    elif benchmark_name == "coremark-1.0.1":
+                        # Extract "Average: XXXX.XXXX Iterations/Sec" (very flexible regex)
+                        patterns = [
+                            r'Average[:\s]+([\d.]+)\s+Iterations?/Sec',  # Most flexible
+                            r'Average:\s*([\d.]+)\s*Iterations?/Sec',
+                            r'^\s*Average:\s*([\d.]+)\s*Iterations?/Sec',  # With leading whitespace
+                        ]
+
+                        match = None
+                        for pattern in patterns:
+                            match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
+                            if match:
+                                break
+
+                        if match:
+                            value = float(match.group(1))
+                            values = value
+                            raw_values = [value]
+                            unit = "Iterations/Sec"
+                            test_run_times = ["N/A"]
+                            test_name = "Coremark"
+                            description = "Coremark 1.0"
+
+                            # Calculate cost using N/A for test_run_times
+                            cost = "N/A"
+
+                            test_results[test_name] = {
+                                "description": description,
+                                "values": values,
+                                "raw_values": raw_values,
+                                "unit": unit,
+                                "time": "N/A",
+                                "test_run_times": test_run_times,
+                                "cost": cost
+                            }
+                        else:
+                            # Enhanced debugging
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'iteration' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
+                            print(f"Warning: Could not find 'Average: X Iterations/Sec' pattern in {thread_log}", file=sys.stderr)
+                            print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                            print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+                            if excerpt_lines:
+                                first_line = excerpt_lines[0]
+                                hex_dump = ' '.join(f'{ord(c):02x}' for c in first_line[:50])
+                                print(f"  First line hex (first 50 chars): {hex_dump}", file=sys.stderr)
                     else:
                         # Extract "Average: XXXX.XXXX Seconds" from log (very flexible regex)
                         # Try multiple patterns to handle various formats, including leading whitespace
