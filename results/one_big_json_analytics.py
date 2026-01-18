@@ -4,10 +4,11 @@ one_big_json_analytics.py
 Version: v1.0.0
 Generated: 2026-01-18
 
-This script analyzes one_big_json.json and generates three types of comparisons:
+This script analyzes one_big_json.json and generates four types of comparisons:
 1. Performance comparison - Absolute performance across different machines
 2. Cost comparison - Cost efficiency across different machines
 3. Thread scaling comparison - Thread scaling characteristics within same machine
+4. CSP instance comparison - Cost efficiency within same CSP
 """
 
 import json
@@ -375,6 +376,191 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generate CSP instance comparison.
+    Within each CSP, compare instances using the arm64 instance as reference (100).
+    Reference instances:
+    - AWS: m8g-xlarge
+    - GCP: c4a-standard-8
+    - OCI: VM.Standard.A1.Flex
+    """
+    # Define reference instances for each CSP
+    csp_reference_instances = {
+        "AWS": "aws-m8g-xlarge",
+        "GCP": "gcp-c4a-standard-8",
+        "OCI": "oci-VM.Standard.A1.Flex"
+    }
+
+    # Group machines by CSP
+    csp_groups = {}
+    for machine_name, machine_data in data.items():
+        if machine_name == "generation_log":
+            continue
+
+        csp = machine_data.get("CSP", "unknown")
+        if csp == "unknown":
+            continue
+
+        if csp not in csp_groups:
+            csp_groups[csp] = []
+        csp_groups[csp].append((machine_name, machine_data))
+
+    result = {
+        "generation_log": {
+            "version_info": get_version_info(),
+            "date": datetime.now().strftime("%Y%m%d-%H%M%S")
+        },
+        "description": "CSP instance comparison",
+        "csps": {}
+    }
+
+    # Process each CSP separately
+    for csp, machines in csp_groups.items():
+        if csp not in csp_reference_instances:
+            print(f"Warning: No reference instance defined for CSP '{csp}' - skipping", file=sys.stderr)
+            continue
+
+        ref_machine_name = csp_reference_instances[csp]
+
+        # Find reference machine in this CSP group
+        ref_machine_data = None
+        ref_os = None
+
+        for machine_name, machine_data in machines:
+            if machine_name == ref_machine_name:
+                ref_machine_data = machine_data
+                # Use first available OS as reference
+                if "os" in machine_data and len(machine_data["os"]) > 0:
+                    ref_os = list(machine_data["os"].keys())[0]
+                break
+
+        if ref_machine_data is None or ref_os is None:
+            print(f"Error: Reference machine '{ref_machine_name}' not found for CSP '{csp}'", file=sys.stderr)
+            continue
+
+        # Collect reference costs
+        ref_hourly_cost = ref_machine_data.get("cost_hour[730h-mo]", 0.0)
+        reference_costs = {}
+        ref_os_data = ref_machine_data["os"][ref_os]
+
+        if "testcategory" not in ref_os_data:
+            print(f"Error: No testcategory found in reference {ref_machine_name}/{ref_os}", file=sys.stderr)
+            continue
+
+        for testcat, testcat_data in ref_os_data["testcategory"].items():
+            if "benchmark" not in testcat_data:
+                continue
+            for benchmark, bench_data in testcat_data["benchmark"].items():
+                if "thread" not in bench_data:
+                    continue
+                thread_counts = list(bench_data["thread"].keys())
+                max_thread = max(thread_counts, key=lambda x: int(x))
+
+                if "test_name" not in bench_data["thread"][max_thread]:
+                    continue
+
+                for test_name, test_data in bench_data["thread"][max_thread]["test_name"].items():
+                    time_val = test_data.get("time", 0)
+                    if time_val > 0:
+                        cost = (time_val / 3600.0) * ref_hourly_cost
+                        key = (testcat, benchmark, test_name)
+                        reference_costs[key] = cost
+
+        if not reference_costs:
+            print(f"Error: No reference costs could be calculated for CSP '{csp}'", file=sys.stderr)
+            continue
+
+        # Generate comparison for all machines in this CSP
+        result["csps"][csp] = {
+            "reference": {
+                "machine": ref_machine_name,
+                "os": ref_os,
+                "value": 100
+            },
+            "machines": {}
+        }
+
+        for machine_name, machine_data in machines:
+            if "os" not in machine_data:
+                continue
+
+            hourly_cost = machine_data.get("cost_hour[730h-mo]", 0.0)
+
+            for os_name, os_data in machine_data["os"].items():
+                machine_key = f"{machine_name}/{os_name}"
+                result["csps"][csp]["machines"][machine_key] = {
+                    "header": {
+                        "machinename": machine_name,
+                        "os": os_name,
+                        "CSP": csp,
+                        "cpu_name": machine_data.get("cpu_name", "unknown"),
+                        "cost_hour": hourly_cost
+                    },
+                    "workload": {}
+                }
+
+                if "testcategory" not in os_data:
+                    continue
+
+                for testcat, testcat_data in os_data["testcategory"].items():
+                    if "benchmark" not in testcat_data:
+                        continue
+                    for benchmark, bench_data in testcat_data["benchmark"].items():
+                        if "thread" not in bench_data:
+                            continue
+
+                        thread_counts = list(bench_data["thread"].keys())
+                        max_thread = max(thread_counts, key=lambda x: int(x))
+
+                        if "test_name" not in bench_data["thread"][max_thread]:
+                            continue
+
+                        for test_name, test_data in bench_data["thread"][max_thread]["test_name"].items():
+                            key = (testcat, benchmark, test_name)
+
+                            if key not in reference_costs:
+                                print(f"Warning: {test_name} exists in {machine_name} but not in reference for CSP {csp}",
+                                      file=sys.stderr)
+                                continue
+
+                            time_val = test_data.get("time", 0)
+
+                            if time_val <= 0:
+                                print(f"Warning: Time value is 0 or negative for {machine_name} in {testcat}/{benchmark}/{test_name} - setting to 'unknown'",
+                                      file=sys.stderr)
+                                score = "unknown"
+                            elif hourly_cost <= 0:
+                                print(f"Warning: Hourly cost is 0 or negative for {machine_name} - setting to 'unknown'",
+                                      file=sys.stderr)
+                                score = "unknown"
+                            else:
+                                cost = (time_val / 3600.0) * hourly_cost
+                                if cost == 0:
+                                    print(f"Warning: Calculated cost is 0 for {machine_name} in {testcat}/{benchmark}/{test_name} - setting to 'unknown'",
+                                          file=sys.stderr)
+                                    score = "unknown"
+                                elif reference_costs[key] == 0:
+                                    print(f"Warning: Reference cost is 0 for {testcat}/{benchmark}/{test_name} - setting to 'unknown'",
+                                          file=sys.stderr)
+                                    score = "unknown"
+                                else:
+                                    # Lower cost is better, so invert
+                                    score = round((reference_costs[key] / cost) * 100, 2)
+
+                            workload_key = f"{testcat}/{benchmark}/{test_name}"
+                            result["csps"][csp]["machines"][machine_key]["workload"][workload_key] = score
+
+                # Check for missing tests
+                for key in reference_costs.keys():
+                    testcat, benchmark, test_name = key
+                    workload_key = f"{testcat}/{benchmark}/{test_name}"
+                    if workload_key not in result["csps"][csp]["machines"][machine_key]["workload"]:
+                        result["csps"][csp]["machines"][machine_key]["workload"][workload_key] = "unknown"
+
+    return result
+
+
 def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate thread scaling comparison.
@@ -474,13 +660,15 @@ def main():
                         help='Generate cost comparison only')
     parser.add_argument('--th', action='store_true',
                         help='Generate thread scaling comparison only')
+    parser.add_argument('--csp', action='store_true',
+                        help='Generate CSP instance comparison only')
     parser.add_argument('--all', action='store_true',
                         help='Generate all comparisons (default if no option specified)')
 
     args = parser.parse_args()
 
     # If no specific option, default to --all
-    if not (args.perf or args.cost or args.th or args.all):
+    if not (args.perf or args.cost or args.th or args.csp or args.all):
         args.all = True
 
     # Validate script syntax (basic check)
@@ -511,6 +699,10 @@ def main():
     if args.th or args.all:
         print("Generating thread scaling comparison...", file=sys.stderr)
         results["thread_scaling_comparison"] = thread_scaling_comparison(data)
+
+    if args.csp or args.all:
+        print("Generating CSP instance comparison...", file=sys.stderr)
+        results["csp_instance_comparison"] = csp_instance_comparison(data)
 
     # Output to stdout
     print(json.dumps(results, indent=2, ensure_ascii=False))

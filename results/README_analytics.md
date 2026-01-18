@@ -110,7 +110,7 @@
     - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
 
 # CSP instance comparison
-CPSインスタンス比較の目的は同一のCSPで同一のWorkloadを異なる`<machinename>`（インスタンス）で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。各workload毎の値を`<benchmark_score>`とする。計算機利用料の算出は[Cost comparison](#cost-comparison)を参照する。
+CSPインスタンス比較の目的は同一のCSPで同一のWorkloadを異なる`<machinename>`（インスタンス）で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。各workload毎の値を`<benchmark_score>`とする。計算機利用料の算出は[Cost comparison](#cost-comparison)を参照する。
 
 ## set reference point
 性能値はそれぞれのCSPが保有しているarm64インスタンスを基準値`100`とする。arm64インスタンスとはインスタンス名に次の単語を含んでいる。
