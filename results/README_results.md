@@ -12,6 +12,11 @@
 "benchmark"=<benchmark>
 "files"=<files>
 
+ファイルでANSIエスケープシーケンスを一斉除去する必要がある場合は、データ処理前にこのコマンドを適応させること。
+```
+find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
+```
+
 # TOC
 <ここにTOCを記載してほしい>。
 
@@ -269,6 +274,15 @@
 - **test_run_times**: 各実行の実行時間の配列（秒単位）
 - **description**: テストの詳細説明
 
+[summary file](### summary file in `<files>`)のケース3の場合、すべてのデータは`${BENCHMARK}/<N>-thread_perf_summary.json`と`${BENCHMARK}/<N>-thread.json`から取得する。基本異なるフォーマットが利用されているので、**test_run_times**以外はN/Aとして`<test_name>`以下の子ノードを生成する。:
+- **values**: N/A
+- **raw_values**: N/A
+- **unit**: N/A
+- **test_run_times**: <N>-thread_perf_summary.json内の"elapsed_time_sec"を採用（秒単位）
+- **description**: テストの詳細説明
+
+データソースとして、ケース１，２，３のどれを適応させたか、`<test_name>`毎に明確にする。
+
 ###### descriptionによるマッチング
 [summary file](### summary file in `<files>`)のケース１，２の場合は
 `<N>-thread.json`には複数のテスト結果が含まれ、同じスレッド数`<N>`で同じ`test_name`でも`description`が異なる場合がある。正しいデータを選択するためのマッチングルール:
@@ -281,7 +295,9 @@
    - `test_run_times`配列全体
    - `value`（代表値）
    - `unit`（単位）
-4. `time`フィールドには`test_run_times[0]`（最初の値）を使用
+4. `time`フィールドには`test_run_times`の中央値（median）を使用
+   - **理由**: ベンチマーク実行時にたまに外れ値が出るため、中央値が最も信頼性の高い代表値となる
+   - 平均値ではなく中央値を使用することで、異常値の影響を受けにくいコスト計算が可能
 
 ##### "\<N\>":"test_name":"values", "raw_values", "time", "test_run_times"
 
