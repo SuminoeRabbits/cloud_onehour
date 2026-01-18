@@ -26,8 +26,11 @@
 ## exception handling
 まず最初に基準値を生成し、その後にworkloadの生成を行う。
     - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
-    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、Errorにはせず次に進む。
+    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
     - 他の<machinename>で存在し基準値に存在しない項目が出てきた場合、Warningを出力し次に進む。
+    - 基準値または比較対象の性能値が`0`の場合、除算エラーを避けるため`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
+    - Warningの際は入力JSONファイルの比較部分の行数を明記する。
+
 
 # Cost comparison
 コスト比較の目的は同一のWorkloadを異なる`<machinename>`で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。各workload毎の値を`<benchmark_score>`とする。
@@ -50,8 +53,10 @@
 ## exception handling
 まず最初に基準値を生成し、その後にworkloadの生成を行う。
     - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
-    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、Errorにはせず次に進む。
+    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
     - 他の<machinename>で存在し基準値に存在しない項目が出てきた場合、Warningを出力し次に進む。
+    - 基準値または比較対象の性能値が`0`の場合、除算エラーを避けるため`"unknown"`と記載しWarningを出力し次に進む。
+    - Warningの際は入力JSONファイルの比較部分の行数を明記する。
 
 # Thread scaling comparison
 スレッドスケーリング比較の目的は、同一のWorkloadを同一の`<machinename>`で利用するスレッド数`<N>`を変化させながら実施した際に、その`<machinename>`におけるスレッドスケーリングの特徴を知る事である。各workload毎の値を`<benchmark_score>`とする。
