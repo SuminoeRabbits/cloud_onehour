@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional
 import argparse
 import ast
 import py_compile
+import statistics
 
 
 # Look-Up-Table from README_results.md
@@ -478,8 +479,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     value = raw_data.get("value", result.get("value", 0.0))
                     unit = raw_data.get("unit", result.get("unit", ""))
 
-                    # Use first test_run_time for cost calculation
-                    time_sec = test_run_times[0] if test_run_times else 0.0
+                    # Use median test_run_time for cost calculation (handles outliers)
+                    time_sec = statistics.median(test_run_times) if test_run_times else 0.0
 
                     # Calculate cost: cost_hour * time_sec / 3600
                     cost = cost_hour * time_sec / 3600.0
@@ -517,8 +518,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             value = run_data.get("value", 0.0)
                             unit = test_info.get("scale", "")
 
-                            # Use first test_run_time for cost calculation
-                            time_sec = test_run_times[0] if test_run_times else 0.0
+                            # Use median test_run_time for cost calculation (handles outliers)
+                            time_sec = statistics.median(test_run_times) if test_run_times else 0.0
 
                             # Calculate cost: cost_hour * time_sec / 3600
                             cost = cost_hour * time_sec / 3600.0
