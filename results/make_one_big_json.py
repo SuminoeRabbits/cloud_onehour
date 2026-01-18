@@ -728,8 +728,9 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                 log_content = f.read()
 
                             if benchmark_name == "coremark-1.0.1":
-                                # Extract "Average: XXXX.XXXX Iterations/Sec"
-                                match = re.search(r'Average:\s+([\d.]+)\s+Iterations/Sec', log_content)
+                                # Extract "Average: XXXX.XXXX Iterations/Sec" (more flexible regex)
+                                # Allow for various formats and potential typos
+                                match = re.search(r'Average:\s*([\d.]+)\s*Iterations?/Sec', log_content, re.IGNORECASE)
                                 if match:
                                     value = float(match.group(1))
                                     values = value
@@ -738,8 +739,9 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                     description = "Coremark 1.0"
 
                             elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
-                                # Extract "Average: XXXX.XXXX Seconds"
-                                match = re.search(r'Average:\s+([\d.]+)\s+Seconds', log_content)
+                                # Extract "Average: XXXX.XXXX Seconds" (more flexible regex)
+                                # Allow for various formats: "Average: X Seconds", "Average:X Seconds", etc.
+                                match = re.search(r'Average:\s*([\d.]+)\s*Seconds', log_content, re.IGNORECASE)
                                 if match:
                                     value = float(match.group(1))
                                     values = value
@@ -754,6 +756,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                         description = "Timed Linux Kernel Compilation 6.15"
                                     elif benchmark_name == "build-llvm-1.6.0":
                                         description = "Timed LLVM Compilation 21.1"
+                                else:
+                                    print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
 
                         except (IOError, ValueError) as e:
                             print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
@@ -790,8 +794,9 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                     with open(thread_log, 'r') as f:
                         log_content = f.read()
 
-                    # Extract "Average: XXXX.XXXX Seconds" from log
-                    match = re.search(r'Average:\s+([\d.]+)\s+Seconds', log_content)
+                    # Extract "Average: XXXX.XXXX Seconds" from log (more flexible regex)
+                    # Allow for various formats: "Average: X Seconds", "Average:X Seconds", etc.
+                    match = re.search(r'Average:\s*([\d.]+)\s*Seconds', log_content, re.IGNORECASE)
                     if match:
                         value = float(match.group(1))
                         values = value
@@ -826,7 +831,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             "cost": cost
                         }
                     else:
-                        print(f"Warning: Could not find 'Average: X.XX Seconds' pattern in {thread_log}", file=sys.stderr)
+                        # Only warn if the file exists but pattern not found
+                        print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
 
                 except (IOError, ValueError) as e:
                     print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
