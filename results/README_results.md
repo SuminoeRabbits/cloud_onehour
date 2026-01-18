@@ -355,6 +355,16 @@ cost = cost_hour[730h-mo] × time / 3600
 ## requirement
 Python3.10で動作すること。`make_one_big_json.py`自分自身と出力ファイルである`one_big_json.json`に対してSyntax Errorを検出する機能を有する。
 
+## script version info
+スクリプト前段コメント欄にこのスクリプトの生成時刻を明記し、それを`version info`とする。生成されるJSONファイルの先頭に対しても、下記の生成データログを入れる。`version info`のフォーマットとしては`v<major>.<minor>.<patch>-g<git-hash>`とする。
+
+{
+    "generation log":{
+        "version info": "<version>"
+        "date": "<yyyymmdd-hhmmss>"
+    }
+}
+
 ## argument parameters
 オプションは下記の通りとする。  
 - `--dir`(省略可能) :　
@@ -366,3 +376,4 @@ Python3.10で動作すること。`make_one_big_json.py`自分自身と出力フ
  - `--merge`（省略可能）:
     `one_big_json.json`をDiretoryから生成するのではなく、複数のJSONをマージして１つのＪＳＯＮを作成する。マージの際は与えられた各ＪＳＯＮファイルの階層が一致するようにマージする。このオプションが指定された際は`--output`によりマージ先ファイルがデフォルト以外に指定されなければならない。よって利用方法は、例えば下記の様になる。
     make_one_big_json.py --merge ./1.JSON ./2.JSON .... --output ./New.JSON
+    マージされるJSON同士はスクリプトの`"version info":<version>`が一致していなければならない。一致していない場合はErrorを出して終了する。

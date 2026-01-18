@@ -5,6 +5,8 @@ make_one_big_json.py
 Generates one_big_json.json from results directory structure.
 Based on README_results.md specification.
 
+Version info: v1.0.0 (Updated: 2026-01-18)
+
 Usage:
     # Build from directories:
     python3 make_one_big_json.py [--dir PATH] [--output PATH] [--instance_source PATH]
@@ -22,6 +24,101 @@ import argparse
 import ast
 import py_compile
 import statistics
+import subprocess
+import re
+from datetime import datetime
+
+
+# Script version - Format: v<major>.<minor>.<patch>
+SCRIPT_VERSION = "v1.0.0"
+
+
+def get_version_info() -> str:
+    """
+    Get version info in format: v<major>.<minor>.<patch>-g<git-hash>
+
+    Returns:
+        Version string like "v1.0.0-g1277d46" if in git repo,
+        or "v1.0.0-unknown" if not in git repo or git not available
+    """
+    try:
+        # Try to get git hash (short form, 7 characters)
+        git_hash = subprocess.check_output(
+            ['git', 'rev-parse', '--short=7', 'HEAD'],
+            stderr=subprocess.DEVNULL,
+            cwd=Path(__file__).parent
+        ).decode().strip()
+
+        return f"{SCRIPT_VERSION}-g{git_hash}"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Not in git repo or git not available
+        return f"{SCRIPT_VERSION}-unknown"
+
+
+def get_generation_timestamp() -> str:
+    """
+    Get current timestamp in yyyymmdd-hhmmss format.
+
+    Returns:
+        Timestamp string like "20260118-143025"
+    """
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def create_generation_log() -> Dict[str, Any]:
+    """
+    Create generation log dict for output JSON.
+
+    Returns:
+        Dict with version_info and date
+    """
+    return {
+        "generation_log": {
+            "version_info": get_version_info(),
+            "date": get_generation_timestamp()
+        }
+    }
+
+
+def parse_version(version_str: str) -> Optional[tuple]:
+    """
+    Parse version string to extract major.minor.patch.
+
+    Args:
+        version_str: Version string like "v1.0.0-g1277d46"
+
+    Returns:
+        Tuple of (major, minor, patch) or None if parsing fails
+    """
+    match = re.match(r'v(\d+)\.(\d+)\.(\d+)', version_str)
+    if match:
+        return tuple(map(int, match.groups()))
+    return None
+
+
+def check_version_compatibility(version1: str, version2: str) -> bool:
+    """
+    Check if two versions are compatible for merging.
+
+    Per README_results.md specification:
+    - Versions must match exactly for merging
+
+    Args:
+        version1: First version string
+        version2: Second version string
+
+    Returns:
+        True if versions are compatible, False otherwise
+    """
+    # Extract version part (without git hash) for comparison
+    v1_match = re.match(r'(v\d+\.\d+\.\d+)', version1)
+    v2_match = re.match(r'(v\d+\.\d+\.\d+)', version2)
+
+    if not v1_match or not v2_match:
+        return False
+
+    # Per specification: versions must match exactly
+    return v1_match.group(1) == v2_match.group(1)
 
 
 # Look-Up-Table from README_results.md
@@ -803,9 +900,11 @@ def main():
 
         # Merge JSON files
         print(f"Merging {len(args.merge)} JSON files...")
+        current_version = get_version_info()
         merged_data = {}
+        first_version = None
 
-        for json_file_path in args.merge:
+        for idx, json_file_path in enumerate(args.merge):
             json_file = Path(json_file_path)
             if not json_file.exists():
                 print(f"Error: JSON file '{json_file}' does not exist", file=sys.stderr)
@@ -816,18 +915,44 @@ def main():
                 with open(json_file, 'r') as f:
                     json_data = json.load(f)
 
+                # Check version compatibility (per README_results.md specification)
+                if "generation_log" in json_data and "version_info" in json_data["generation_log"]:
+                    file_version = json_data["generation_log"]["version_info"]
+
+                    if idx == 0:
+                        first_version = file_version
+                        print(f"    Version: {file_version}")
+                    else:
+                        print(f"    Version: {file_version}")
+                        if not check_version_compatibility(first_version, file_version):
+                            print(f"Error: Version mismatch detected!", file=sys.stderr)
+                            print(f"  First file version: {first_version}", file=sys.stderr)
+                            print(f"  Current file version: {file_version}", file=sys.stderr)
+                            print(f"  JSON files with different versions cannot be merged.", file=sys.stderr)
+                            sys.exit(1)
+
+                    # Remove generation_log before merging (will be recreated)
+                    json_data.pop("generation_log", None)
+                else:
+                    print(f"    Warning: No version info found in {json_file}", file=sys.stderr)
+
                 # Merge hierarchically
                 merged_data = merge_json_data(merged_data, json_data)
             except json.JSONDecodeError as e:
                 print(f"Error: Failed to parse {json_file}: {e}", file=sys.stderr)
                 sys.exit(1)
 
+        # Add generation_log to merged data
+        final_output = create_generation_log()
+        final_output.update(merged_data)
+
         # Write merged output
         print(f"Writing merged output to: {output_file}")
         with open(output_file, 'w') as f:
-            json.dump(merged_data, f, indent=2)
+            json.dump(final_output, f, indent=2)
 
         print(f"Successfully merged {len(args.merge)} JSON files into {output_file}")
+        print(f"Output version: {current_version}")
         print(f"Total machines in merged output: {len(merged_data)}")
 
         # Check output JSON syntax
@@ -873,11 +998,17 @@ def main():
 
     print(f"Output file: {output_file}")
 
+    # Add generation_log to output
+    current_version = get_version_info()
+    final_output = create_generation_log()
+    final_output.update(merged_data)
+
     # Write output
     with open(output_file, 'w') as f:
-        json.dump(merged_data, f, indent=2)
+        json.dump(final_output, f, indent=2)
 
     print(f"Successfully generated {output_file}")
+    print(f"Output version: {current_version}")
     print(f"Total machines processed: {len(merged_data)}")
 
     # Check output JSON syntax
