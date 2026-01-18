@@ -426,10 +426,11 @@ class ApacheRunner:
 
     def patch_install_script(self):
         """
-        Patch the install.sh script to add GCC-14 compatibility fix.
+        Patch the install.sh script to add GCC-14 and Ubuntu 24.04 compatibility fixes.
 
-        This method modifies the test profile's install.sh to add 'no-asm'
-        to OpenSSL build options, avoiding inline assembly errors with GCC-14.
+        This method modifies the test profile's install.sh to:
+        1. Add 'no-asm' to OpenSSL build options (avoiding inline assembly errors with GCC-14)
+        2. Add '-Wno-error=implicit-function-declaration' to LuaJIT CFLAGS (fixing Ubuntu 24.04 ARM64 issues)
         """
         install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
 
@@ -437,25 +438,31 @@ class ApacheRunner:
             print(f"  [WARN] install.sh not found at {install_sh_path}")
             return False
 
-        print(f"  [INFO] Patching install.sh for GCC-14 compatibility...")
+        print(f"  [INFO] Patching install.sh for GCC-14 and Ubuntu 24.04 compatibility...")
 
         try:
             with open(install_sh_path, 'r') as f:
                 content = f.read()
 
             # Check if already patched
-            if 'no-asm' in content and 'GCC-14 compatibility' in content:
+            if 'no-asm' in content and 'GCC-14 compatibility' in content and 'Wno-error=implicit-function-declaration' in content:
                 print(f"  [OK] install.sh already patched")
                 return True
 
-            # Add the patch before 'make -j $NUM_CPU_CORES'
-            patch_line = '# GCC-14 compatibility: Add no-asm to OpenSSL build options to avoid inline assembly errors\nsed -i \'s/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/\' Makefile\n'
+            # Add patches before 'make -j $NUM_CPU_CORES'
+            # Patch 1: OpenSSL no-asm for GCC-14
+            # Patch 2: LuaJIT CFLAGS for Ubuntu 24.04 ARM64 implicit function declaration
+            patch_lines = '''# GCC-14 compatibility: Add no-asm to OpenSSL build options to avoid inline assembly errors
+sed -i 's/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/' Makefile
+# Ubuntu 24.04 compatibility: Suppress implicit-function-declaration errors in LuaJIT for ARM64
+sed -i 's/CFLAGS += -O2/CFLAGS += -O2 -Wno-error=implicit-function-declaration/' Makefile
+'''
 
             # Insert patch after 'cd wrk-4.2.0'
             if 'cd wrk-4.2.0' in content:
                 patched_content = content.replace(
                     'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES',
-                    f'cd wrk-4.2.0\n{patch_line}make -j $NUM_CPU_CORES'
+                    f'cd wrk-4.2.0\n{patch_lines}make -j $NUM_CPU_CORES'
                 )
 
                 # Write patched content
@@ -474,7 +481,7 @@ class ApacheRunner:
 
     def install_benchmark(self):
         """
-        Install apache-3.0.0 with GCC-14 and OpenSSL compatibility workaround.
+        Install apache-3.0.0 with GCC-14 and Ubuntu 24.04 compatibility workarounds.
 
         Note: Since THChange_at_runtime=false, this is a single-threaded benchmark.
         No runtime thread configuration is needed; Apache always runs with 1 thread.
@@ -482,10 +489,16 @@ class ApacheRunner:
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         Apache doesn't use NUM_CPU_CORES for this workload.
 
-        GCC-14 Compatibility Fix:
-        - Automatically patches install.sh to add 'no-asm' to OpenSSL build options
-        - Avoids "expected ')' before ':' token" errors in crypto/bn/asm/x86_64-gcc.c
-        - Slightly slower than assembly version, but enables GCC-14 compilation
+        Compatibility Fixes:
+        1. GCC-14/OpenSSL Fix:
+           - Automatically patches install.sh to add 'no-asm' to OpenSSL build options
+           - Avoids "expected ')' before ':' token" errors in crypto/bn/asm/x86_64-gcc.c
+           - Slightly slower than assembly version, but enables GCC-14 compilation
+
+        2. Ubuntu 24.04/LuaJIT Fix:
+           - Adds '-Wno-error=implicit-function-declaration' to LuaJIT CFLAGS
+           - Fixes "__clear_cache implicit declaration" errors on ARM64 with Ubuntu 24.04
+           - Ubuntu 24.04 treats implicit function declarations as errors by default
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -499,7 +512,7 @@ class ApacheRunner:
             stderr=subprocess.DEVNULL
         )
 
-        # Patch install.sh for GCC-14 compatibility
+        # Patch install.sh for GCC-14 and Ubuntu 24.04 compatibility
         self.patch_install_script()
 
         # Build install command with environment variables
@@ -507,10 +520,12 @@ class ApacheRunner:
         # Use batch-install to suppress prompts
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
         #
-        # GCC-14 Compatibility Workaround:
-        # - Modified install.sh to add 'no-asm' to OpenSSL build options in wrk Makefile
-        # - This disables inline assembly in OpenSSL 1.1.1i which has compatibility issues with GCC-14
-        # - Performance impact is minimal for this single-threaded Apache benchmark
+        # Compatibility Workarounds Applied by patch_install_script():
+        # 1. GCC-14/OpenSSL: Adds 'no-asm' to OpenSSL build options in wrk Makefile
+        #    - Disables inline assembly in OpenSSL 1.1.1i which has issues with GCC-14
+        # 2. Ubuntu 24.04/LuaJIT: Adds '-Wno-error=implicit-function-declaration' to CFLAGS
+        #    - Fixes "__clear_cache implicit declaration" errors on ARM64
+        # Performance impact is minimal for this single-threaded Apache benchmark
         nproc = os.cpu_count() or 1
         install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
