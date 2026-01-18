@@ -6,7 +6,11 @@ Generates one_big_json.json from results directory structure.
 Based on README_results.md specification.
 
 Usage:
+    # Build from directories:
     python3 make_one_big_json.py [--dir PATH] [--output PATH] [--instance_source PATH]
+
+    # Merge multiple JSON files:
+    python3 make_one_big_json.py --merge FILE1.json FILE2.json ... --output OUTPUT.json
 """
 
 import json
@@ -422,7 +426,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         Benchmark completion conditions (3 cases):
         Case 1: Both summary.json and <N>-thread.json exist
         Case 2: <N>-thread.json exists (without summary.json)
-        Case 3: <N>-thread_perf_summary.json exists (not implemented yet)
+        Case 3: <N>-thread_perf_summary.json exists
 
         cost = cost_hour[730h-mo] * time / 3600
         where time is in seconds, so divide by 3600 to convert to hours
@@ -433,10 +437,17 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     thread_json_files = list(benchmark_dir.glob("*-thread.json"))
     thread_nums = sorted(set(f.stem.split("-")[0] for f in thread_json_files if f.stem.split("-")[0].isdigit()))
 
+    # Find all thread counts from <N>-thread_perf_summary.json files (Case 3)
+    perf_summary_files = list(benchmark_dir.glob("*-thread_perf_summary.json"))
+    perf_summary_thread_nums = sorted(set(f.stem.split("-")[0] for f in perf_summary_files if f.stem.split("-")[0].isdigit()))
+
+    # Merge thread numbers from both sources
+    all_thread_nums = sorted(set(thread_nums + perf_summary_thread_nums))
+
     # Check if benchmark is complete per README_results.md
-    # Case 1 or 2: At least one <N>-thread.json must exist
-    if not thread_nums:
-        print(f"Warning: Skipping incomplete benchmark at {benchmark_dir} (no <N>-thread.json found)", file=sys.stderr)
+    # At least one of: <N>-thread.json or <N>-thread_perf_summary.json must exist
+    if not all_thread_nums:
+        print(f"Warning: Skipping incomplete benchmark at {benchmark_dir} (no <N>-thread.json or <N>-thread_perf_summary.json found)", file=sys.stderr)
         return None
 
     # Try to read summary.json if it exists (Case 1)
@@ -450,7 +461,11 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 
     benchmark_result = {}
 
-    for thread_num in thread_nums:
+    for thread_num in all_thread_nums:
+        # Determine which case applies for this thread_num
+        has_thread_json = thread_num in thread_nums
+        has_perf_summary = thread_num in perf_summary_thread_nums
+
         thread_data = process_thread_data(benchmark_dir, thread_num)
         if thread_data is None:
             # thread_data can be None if required files are missing
@@ -458,12 +473,16 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
             thread_data = {"perf_stat": {}}
 
         # Extract test results
-        # Case 1: If summary.json exists, use it to get test metadata
-        # Case 2: If summary.json doesn't exist, extract directly from <N>-thread.json
+        # Case 1: If summary.json exists with <N>-thread.json, use both
+        # Case 2: If only <N>-thread.json exists (no summary.json), extract directly from it
+        # Case 3: If <N>-thread_perf_summary.json exists, use it (with or without <N>-thread.json)
         test_results = {}
 
-        if summary_data and "results" in summary_data:
-            # Case 1: Use summary.json for test metadata
+        # Determine which case to apply
+        # Priority: Case 1 > Case 2 > Case 3
+        if summary_data and "results" in summary_data and has_thread_json:
+            # Case 1: Both summary.json and <N>-thread.json exist
+            # Use summary.json for test metadata and <N>-thread.json for raw data
             for result in summary_data["results"]:
                 if result.get("threads") == int(thread_num):
                     test_name = result.get("test_name", "unknown")
@@ -498,7 +517,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                         "test_run_times": test_run_times,
                         "cost": cost
                     }
-        else:
+
+        elif has_thread_json:
             # Case 2: No summary.json, extract directly from <N>-thread.json
             pts_json = benchmark_dir / f"{thread_num}-thread.json"
             if pts_json.exists():
@@ -541,6 +561,57 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 
                 except (json.JSONDecodeError, IOError) as e:
                     print(f"Warning: Failed to read {pts_json}: {e}", file=sys.stderr)
+
+        elif has_perf_summary:
+            # Case 3: <N>-thread_perf_summary.json exists (with or without <N>-thread.json)
+            # Per README_results.md Case 3:
+            # - values: N/A
+            # - raw_values: N/A
+            # - unit: N/A
+            # - test_run_times: [elapsed_time_sec] from <N>-thread_perf_summary.json
+            # - description: from <N>-thread.json if available, else "perf stat only"
+            perf_summary_file = benchmark_dir / f"{thread_num}-thread_perf_summary.json"
+            pts_json = benchmark_dir / f"{thread_num}-thread.json"
+
+            if perf_summary_file.exists():
+                try:
+                    with open(perf_summary_file, 'r') as f:
+                        perf_data = json.load(f)
+
+                    # Extract elapsed_time_sec from perf_summary
+                    elapsed_time_sec = perf_data.get("elapsed_time_sec", 0.0)
+
+                    # Try to get test_name and description from <N>-thread.json if it exists
+                    test_name = benchmark_dir.name  # default to benchmark name
+                    description = "perf stat only"  # default description
+
+                    if pts_json.exists():
+                        try:
+                            with open(pts_json, 'r') as f:
+                                pts_data = json.load(f)
+
+                            # Extract test_name and description from <N>-thread.json
+                            for test_id, test_info in pts_data.get("results", {}).items():
+                                test_name = test_info.get("title", test_name)
+                                description = test_info.get("description", description)
+                                break  # Use first test found
+                        except (json.JSONDecodeError, IOError):
+                            pass  # Use defaults
+
+                    # Calculate cost using elapsed_time_sec
+                    cost = cost_hour * elapsed_time_sec / 3600.0
+
+                    test_results[test_name] = {
+                        "description": description,
+                        "values": "N/A",
+                        "raw_values": "N/A",
+                        "unit": "N/A",
+                        "time": elapsed_time_sec,
+                        "test_run_times": [elapsed_time_sec],
+                        "cost": cost
+                    }
+                except (json.JSONDecodeError, IOError) as e:
+                    print(f"Warning: Failed to read {perf_summary_file}: {e}", file=sys.stderr)
 
         # Add test results to thread data under "test_name" key
         if test_results:
@@ -702,6 +773,8 @@ def main():
                         help='Output JSON file path (default: one_big_json.json)')
     parser.add_argument('--instance_source', type=str, default='../',
                         help='Directory containing cloud_instances.json (default: ../)')
+    parser.add_argument('--merge', nargs='+', metavar='JSON_FILE',
+                        help='Merge multiple JSON files instead of building from directories. Requires --output to be specified.')
 
     args = parser.parse_args()
 
@@ -711,9 +784,63 @@ def main():
         print("Script syntax check failed. Aborting.", file=sys.stderr)
         sys.exit(1)
 
+    output_file = Path(args.output)
+
+    # Handle --merge mode
+    if args.merge:
+        # In merge mode, --output must be specified and different from default
+        if args.output == 'one_big_json.json':
+            print("Error: When using --merge, you must specify --output with a non-default filename.", file=sys.stderr)
+            print("Example: make_one_big_json.py --merge ./1.json ./2.json --output ./New.json", file=sys.stderr)
+            sys.exit(1)
+
+        # Check if output file exists and confirm overwrite
+        if output_file.exists():
+            response = input(f"Output file '{output_file}' already exists. Overwrite? [y/N]: ")
+            if response.lower() not in ['y', 'yes']:
+                print("Aborted.")
+                sys.exit(0)
+
+        # Merge JSON files
+        print(f"Merging {len(args.merge)} JSON files...")
+        merged_data = {}
+
+        for json_file_path in args.merge:
+            json_file = Path(json_file_path)
+            if not json_file.exists():
+                print(f"Error: JSON file '{json_file}' does not exist", file=sys.stderr)
+                sys.exit(1)
+
+            print(f"  Loading {json_file}...")
+            try:
+                with open(json_file, 'r') as f:
+                    json_data = json.load(f)
+
+                # Merge hierarchically
+                merged_data = merge_json_data(merged_data, json_data)
+            except json.JSONDecodeError as e:
+                print(f"Error: Failed to parse {json_file}: {e}", file=sys.stderr)
+                sys.exit(1)
+
+        # Write merged output
+        print(f"Writing merged output to: {output_file}")
+        with open(output_file, 'w') as f:
+            json.dump(merged_data, f, indent=2)
+
+        print(f"Successfully merged {len(args.merge)} JSON files into {output_file}")
+        print(f"Total machines in merged output: {len(merged_data)}")
+
+        # Check output JSON syntax
+        print("\nChecking output JSON syntax...")
+        if not check_json_syntax(output_file):
+            print("Output JSON syntax check failed.", file=sys.stderr)
+            sys.exit(1)
+
+        return
+
+    # Normal mode: build from directories
     # If --dir is not specified, use current directory
     project_roots = args.dir if args.dir else ['.']
-    output_file = Path(args.output)
 
     # Load cloud_instances.json
     instance_source = Path(args.instance_source).resolve()

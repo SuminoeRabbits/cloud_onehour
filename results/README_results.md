@@ -363,3 +363,6 @@ Python3.10で動作すること。`make_one_big_json.py`自分自身と出力フ
     生成される`one_big_json.json`のDirectoryとファイル名を変更したいときに利用する。省略された場合は`${PWD}/one_big_json.json`と解釈され、もしすでに同名のファイルが存在する場合は上書き保存するかを確認する。
 - `--instance_source`(省略可能)：
     `one_big_json.json`内の"<cost>"を計算する際の情報ファイルである`cloud_instances.json`のDirectoryを指定する。省略された場合は`${PWD}../`と解釈する。もし`cloud_instances.json`が指定のDirectoryに見つからない場合はエラーメッセージを出して終了する。
+ - `--merge`（省略可能）:
+    `one_big_json.json`をDiretoryから生成するのではなく、複数のJSONをマージして１つのＪＳＯＮを作成する。マージの際は与えられた各ＪＳＯＮファイルの階層が一致するようにマージする。このオプションが指定された際は`--output`によりマージ先ファイルがデフォルト以外に指定されなければならない。よって利用方法は、例えば下記の様になる。
+    make_one_big_json.py --merge ./1.JSON ./2.JSON .... --output ./New.JSON
