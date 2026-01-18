@@ -733,14 +733,14 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             elif benchmark_name == "coremark-1.0.1":
                                 # Extract "Average: XXXX.XXXX Iterations/Sec" (very flexible regex)
                                 patterns = [
+                                    r'Average[:\s]+([\d.]+)\s+Iterations?/Sec',  # Most flexible
                                     r'Average:\s*([\d.]+)\s*Iterations?/Sec',
-                                    r'Average:\s*([\d.]+)\s*iterations?/sec',
-                                    r'Average\s*:\s*([\d.]+)\s*Iterations?/Sec',
+                                    r'^\s*Average:\s*([\d.]+)\s*Iterations?/Sec',  # With leading whitespace
                                 ]
 
                                 match = None
                                 for pattern in patterns:
-                                    match = re.search(pattern, log_content, re.IGNORECASE)
+                                    match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
                                     if match:
                                         break
 
@@ -757,20 +757,24 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                     print(f"Warning: Could not find 'Average: X Iterations/Sec' pattern in {thread_log}", file=sys.stderr)
                                     print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
                                     print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+                                    # Show hex dump of first relevant line for debugging
+                                    if excerpt_lines:
+                                        first_line = excerpt_lines[0]
+                                        hex_dump = ' '.join(f'{ord(c):02x}' for c in first_line[:50])
+                                        print(f"  First line hex (first 50 chars): {hex_dump}", file=sys.stderr)
 
                             elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
                                 # Extract "Average: XXXX.XXXX Seconds" (very flexible regex)
-                                # Try multiple patterns to handle various formats
+                                # Try multiple patterns to handle various formats, including leading whitespace
                                 patterns = [
+                                    r'Average[:\s]+([\d.]+)\s+Seconds',  # Most flexible: any whitespace/colon combo
                                     r'Average:\s*([\d.]+)\s*Seconds',  # Standard format
-                                    r'Average:\s*([\d.]+)\s*seconds',  # Lowercase
-                                    r'Average\s*:\s*([\d.]+)\s*Seconds',  # Extra space before colon
-                                    r'average:\s*([\d.]+)\s*seconds',  # All lowercase
+                                    r'^\s*Average:\s*([\d.]+)\s*Seconds',  # With leading whitespace
                                 ]
 
                                 match = None
                                 for pattern in patterns:
-                                    match = re.search(pattern, log_content, re.IGNORECASE)
+                                    match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
                                     if match:
                                         break
 
@@ -789,12 +793,17 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                     elif benchmark_name == "build-llvm-1.6.0":
                                         description = "Timed LLVM Compilation 21.1"
                                 else:
-                                    # Enhanced debugging: show file location and excerpt
+                                    # Enhanced debugging: show file location and excerpt with hex dump
                                     excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'seconds' in line.lower()]
                                     excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no lines with 'average' or 'seconds' found)"
                                     print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
                                     print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
                                     print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+                                    # Show hex dump of first relevant line for debugging
+                                    if excerpt_lines:
+                                        first_line = excerpt_lines[0]
+                                        hex_dump = ' '.join(f'{ord(c):02x}' for c in first_line[:50])
+                                        print(f"  First line hex (first 50 chars): {hex_dump}", file=sys.stderr)
 
                         except (IOError, ValueError) as e:
                             print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
@@ -836,18 +845,17 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                         print(f"Warning: Log file is empty: {thread_log}", file=sys.stderr)
                     else:
                         # Extract "Average: XXXX.XXXX Seconds" from log (very flexible regex)
-                        # Try multiple patterns to handle various formats
+                        # Try multiple patterns to handle various formats, including leading whitespace
                         patterns = [
+                            r'Average[:\s]+([\d.]+)\s+Seconds',  # Most flexible: any whitespace/colon combo
                             r'Average:\s*([\d.]+)\s*Seconds',  # Standard format
-                            r'Average:\s*([\d.]+)\s*seconds',  # Lowercase
-                            r'Average\s*:\s*([\d.]+)\s*Seconds',  # Extra space before colon
-                            r'average:\s*([\d.]+)\s*seconds',  # All lowercase
+                            r'^\s*Average:\s*([\d.]+)\s*Seconds',  # With leading whitespace
                         ]
 
                         match = None
                         matched_pattern = None
                         for pattern in patterns:
-                            match = re.search(pattern, log_content, re.IGNORECASE)
+                            match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
                             if match:
                                 matched_pattern = pattern
                                 break
@@ -886,12 +894,17 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                 "cost": cost
                             }
                         else:
-                            # Enhanced debugging: show file location and excerpt
+                            # Enhanced debugging: show file location and excerpt with hex dump
                             excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'seconds' in line.lower()]
                             excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no lines with 'average' or 'seconds' found)"
                             print(f"Warning: Could not find 'Average: X Seconds' pattern in {thread_log}", file=sys.stderr)
                             print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
                             print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+                            # Show hex dump of first relevant line for debugging
+                            if excerpt_lines:
+                                first_line = excerpt_lines[0]
+                                hex_dump = ' '.join(f'{ord(c):02x}' for c in first_line[:50])
+                                print(f"  First line hex (first 50 chars): {hex_dump}", file=sys.stderr)
 
                 except (IOError, ValueError) as e:
                     print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
