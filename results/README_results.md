@@ -34,16 +34,17 @@
 このようなCPUアフィニティの分散は`arm64`系プロセッサにおいて`vCPU=physical CPU`である場合は意味がをなさないが、両方のISAで対応できるようにこのような仕様にしている。
 
 ### How to distingush `<N>` in `<files>`
-スレッド数`<N>`でテストが実行された際は、ログが`<files>`中の`<N>-thread...`で始まるファイル名で保存されている。これらが指定した`<N>`に対してすべて揃っている状態でテスト完了とする。
+スレッド数`<N>`でテストが実行された際は、ログが`<files>`中の`<N>-thread...`で始まるファイル名で保存されている。これらが指定した`<N>`に対して[必須ファイル]がすべて揃っている状態でテスト完了とする。[オプションファイル]は出現しない場合もある。
 
-- `<N>-thread_freq_end.txt`:スレッド数`<N>`テスト終了時のCPUクロックリスト。
-- `<N>-thread_freq_end.txt`:スレッド数`<N>`テスト開始時のCPUクロックリスト。
-- `<N>-thread_perf_stats.txt`:スレッド数`<N>`テストのperf stat raw value。
-- `<N>-thread_perf_summary.json`:スレッド数`<N>`テストのperf stat summary。
-- `<N>-thread.csv`:すべてのスレッド数`<N>`テストのCSVまとめ。
-- `<N>-thread.json`:すべてのスレッド数`<N>`テストのJSONまとめ。
+- `<N>-thread_freq_end.txt`[必須ファイル]:スレッド数`<N>`テスト終了時のCPUクロックリスト。
+- `<N>-thread_freq_end.txt`[必須ファイル]:スレッド数`<N>`テスト開始時のCPUクロックリスト。
+- `<N>-thread_perf_stats.txt`[必須ファイル]:スレッド数`<N>`テストのperf stat raw value。
+- `<N>-thread_perf_summary.json`[オプションファイル]:スレッド数`<N>`テストのperf stat summary。
+- `<N>-thread.csv`[必須ファイル]:すべてのスレッド数`<N>`テストのCSVまとめ。
+- `<N>-thread.json`[必須ファイル]:すべてのスレッド数`<N>`テストのJSONまとめ。
+- `stdout.log`[必須ファイル]:テスト実施時のSTDOUT。
 
-[注意]そろっていない場合はテスト完了ではないので処理を行わない。
+[注意][必須ファイル]がそろっていない場合はテスト完了ではないので処理を行わない。
 
 ### summary file in `<files>`
 `<benchmark>`が完了している場合のみ`<files>`中に`summary.json`,`summary.log`が生成される。この2ファイルはフォーマットの違いだけであり内容に違いはない。
@@ -54,7 +55,33 @@
 次に`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`summary.json`についてデータの読み方を説明する。
 
 #### Multiple "test_name", "description" in one <benchmark>
-<benchmark>の中で複数の"test_name"が実行されているケースがある。この際は"description"を見て、それぞれの"test_name"の特徴を理解することが必要である。
+<benchmark>の中で複数の"test_name"が実行されているケースがある。この際、同じ"test_name"でも"description"が異なる場合は、別々のテスト結果として扱う必要がある。
+
+##### "test_name"のキー生成ルール
+`one_big_json.json`の`"test_name"`ノードのキーは以下のルールで生成する：
+1. `summary.json`内の`"test_name"`と`"description"`が両方とも同一の場合、同じキーとして扱う（上書き）
+2. `"test_name"`は同じだが`"description"`が異なる場合は、`"<test_name> - <description>"`という形式で別のキーとして登録する
+3. これにより、例えば"7-Zip Compression"という同じ`test_name`でも、"Test: Compression Rating"と"Test: Decompression Rating"という異なる`description`を持つ場合は、それぞれ別のノードとして登録される
+
+例：
+```json
+"test_name": {
+  "7-Zip Compression - Test: Compression Rating": {
+    "description": "Test: Compression Rating",
+    "values": 3951,
+    "unit": "MIPS",
+    "time": 12.5,
+    "cost": 0.0001
+  },
+  "7-Zip Compression - Test: Decompression Rating": {
+    "description": "Test: Decompression Rating",
+    "values": 3575,
+    "unit": "MIPS",
+    "time": 10.2,
+    "cost": 0.00008
+  }
+}
+```
 
 
 
@@ -223,11 +250,50 @@
 
 ##### "\<N\>":"test_name"
 
-一つの`<N>` に対して複数の`<test_name>`が存在しうる。`${BENCHMARK}/summary.json`より抽出する。
+一つの`<N>` に対して複数の`<test_name>`が存在しうる。`${BENCHMARK}/<N>-thread.json`より抽出する。
+
+###### データソース
+- **基本データ**: `${BENCHMARK}/<N>-thread.json`から取得
+- **実行時間**: `${BENCHMARK}/<N>-thread.json`の`test_run_times`配列から取得
+
+###### `test_run_times`とdescriptionのマッチング
+`<N>-thread.json`には複数のテスト結果が含まれ、それぞれに`test_run_times`配列が存在する。同じスレッド数`<N>`で同じ`test_name`でも`description`が異なる場合、正しい実行時間を選択する必要がある。
+
+**マッチングルール**:
+1. `<N>-thread.json`内の各テスト結果の`description`と、`summary.json`の`description`を比較
+2. 完全一致する`description`を持つエントリの`test_run_times`配列を使用
+3. `test_run_times`配列には複数の実行時間が記録されている場合、最初の値（`test_run_times[0]`）を使用
+
+##### "\<N\>":"test_name":"time"
+
+`time`は秒単位で記録される実行時間である。
+
+**取得方法**:
+1. `${BENCHMARK}/<N>-thread.json`を開く
+2. 該当する`test_name`と`description`の組み合わせに対応するエントリを探す
+3. そのエントリの`test_run_times`配列から最初の値（`test_run_times[0]`）を取得
+4. この値は既に秒単位なので、そのまま`time`フィールドに設定
+
+**例**: `test_run_times: [42.43, 40.53, 38.42, ...]` → `time: 42.43`
 
 ##### "\<N\>":"test_name":"cost"
 
-"\<N\>":"test_name":"cost"の計算は`<machinename>`毎に決定される1時間当たり単価`cost_hour[730h-mo]`に対して"\<N\>":"test_name":"time"を乗したものが入力される。ただ"\<N\>":"test_name":"time"は単位が秒なので、1/3600して単位をそろえて計算する。
+`cost`はテスト実行にかかったコストをドル単位で表す。
+
+**計算式**:
+```
+cost = cost_hour[730h-mo] × time / 3600
+```
+
+**計算手順**:
+1. `<machinename>`から決定される`cost_hour[730h-mo]`を取得（1時間あたりのコスト、ドル単位）
+2. 上記で取得した`time`（秒単位）を3600で割って時間単位に変換
+3. 両者を乗算してコストを算出
+
+**例**:
+- `cost_hour[730h-mo]` = 0.0683 ドル/時間
+- `time` = 42.43 秒
+- `cost` = 0.0683 × (42.43 / 3600) = 0.0683 × 0.01179 ≈ 0.000805 ドル
 
 # make_one_big_json.py specification
 ここでは、`one_big_json.json`を生成するPythonスクリプト`make_one_big_json.py`を実装する際の仕様について記す。
