@@ -47,9 +47,12 @@
 [注意][必須ファイル]がそろっていない場合はテスト完了ではないので処理を行わない。
 
 ### summary file in `<files>`
-`<benchmark>`が完了している場合のみ`<files>`中に`summary.json`,`summary.log`が生成される。この2ファイルはフォーマットの違いだけであり内容に違いはない。
+`<benchmark>`が完了している条件は3つのケースがありうる。
+1. `<files>`中に`summary.json`と`<N>-thread.json`の両方が存在
+2. `<files>`中に`<N>-thread.json`が存在
+3. `<files>`中に`<N>-thread_perf_summary.json`が存在
 
-[注意]そろっていない場合はテスト完了ではないので処理を行わない。
+[注意]これら3条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
 
 
 次に`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`summary.json`についてデータの読み方を説明する。
@@ -69,16 +72,20 @@
   "7-Zip Compression - Test: Compression Rating": {
     "description": "Test: Compression Rating",
     "values": 3951,
+    "raw_values": [4302, 3873, 3759, 3598, 5147, 3880, 3938, 4476, 3794, 3262, 3736, 3644],
     "unit": "MIPS",
-    "time": 12.5,
-    "cost": 0.0001
+    "time": 42.43,
+    "test_run_times": [42.43, 40.53, 38.42, 40.07, 39.75, 40.13, 41.04, 38.91, 43.08, 43.85, 40.96, 40.9],
+    "cost": 0.000805
   },
   "7-Zip Compression - Test: Decompression Rating": {
     "description": "Test: Decompression Rating",
     "values": 3575,
+    "raw_values": [3353, 3474, 4155, 3909, 3491, 3378, 3382, 3430, 3142, 3571, 3958, 3658],
     "unit": "MIPS",
-    "time": 10.2,
-    "cost": 0.00008
+    "time": 42.43,
+    "test_run_times": [42.43, 40.53, 38.42, 40.07, 39.75, 40.13, 41.04, 38.91, 43.08, 43.85, 40.96, 40.9],
+    "cost": 0.000805
   }
 }
 ```
@@ -162,8 +169,10 @@
                                             "<test_name>": {
                                                 "description": "<description>",
                                                 "values": "<values>",
+                                                "raw_values": [<raw_value_0>, <raw_value_1>, ...],
                                                 "unit": "<unit>",
                                                 "time": "<time>",
+                                                "test_run_times": [<time_0>, <time_1>, ...],
                                                 "cost": "<cost>"
                                             }
                                         }
@@ -250,31 +259,60 @@
 
 ##### "\<N\>":"test_name"
 
-一つの`<N>` に対して複数の`<test_name>`が存在しうる。`${BENCHMARK}/<N>-thread.json`より抽出する。
+一つの`<N>` に対して複数の`<test_name>`が存在しうる。**重要**: データは`${BENCHMARK}/<N>-thread.json`から直接取得する。`summary.json`は平均化されたデータなので使用しない。
 
 ###### データソース
-- **基本データ**: `${BENCHMARK}/<N>-thread.json`から取得
-- **実行時間**: `${BENCHMARK}/<N>-thread.json`の`test_run_times`配列から取得
+[summary file](### summary file in `<files>`)のケース１，２の場合、すべてのデータは`${BENCHMARK}/<N>-thread.json`から取得する:
+- **values**: ベンチマーク結果の代表値（通常は平均値）
+- **raw_values**: ベンチマーク実行の全生データ配列
+- **unit**: 単位（MIPS, MB/s等）
+- **test_run_times**: 各実行の実行時間の配列（秒単位）
+- **description**: テストの詳細説明
 
-###### `test_run_times`とdescriptionのマッチング
-`<N>-thread.json`には複数のテスト結果が含まれ、それぞれに`test_run_times`配列が存在する。同じスレッド数`<N>`で同じ`test_name`でも`description`が異なる場合、正しい実行時間を選択する必要がある。
+###### descriptionによるマッチング
+[summary file](### summary file in `<files>`)のケース１，２の場合は
+`<N>-thread.json`には複数のテスト結果が含まれ、同じスレッド数`<N>`で同じ`test_name`でも`description`が異なる場合がある。正しいデータを選択するためのマッチングルール:
 
 **マッチングルール**:
-1. `<N>-thread.json`内の各テスト結果の`description`と、`summary.json`の`description`を比較
-2. 完全一致する`description`を持つエントリの`test_run_times`配列を使用
-3. `test_run_times`配列には複数の実行時間が記録されている場合、最初の値（`test_run_times[0]`）を使用
+1. `<N>-thread.json`から`test_name`と`description`の組み合わせを取得
+2. `<N>-thread.json`内で同じ`test_name`と`description`を持つエントリを検索
+3. 一致したエントリから以下を取得:
+   - `raw_values`配列全体
+   - `test_run_times`配列全体
+   - `value`（代表値）
+   - `unit`（単位）
+4. `time`フィールドには`test_run_times[0]`（最初の値）を使用
 
-##### "\<N\>":"test_name":"time"
+##### "\<N\>":"test_name":"values", "raw_values", "time", "test_run_times"
 
-`time`は秒単位で記録される実行時間である。
+これらのフィールドはすべて`${BENCHMARK}/<N>-thread.json`から取得する。
 
 **取得方法**:
 1. `${BENCHMARK}/<N>-thread.json`を開く
 2. 該当する`test_name`と`description`の組み合わせに対応するエントリを探す
-3. そのエントリの`test_run_times`配列から最初の値（`test_run_times[0]`）を取得
-4. この値は既に秒単位なので、そのまま`time`フィールドに設定
+3. そのエントリから以下を取得:
+   - `values`: `value`フィールドの値（ベンチマークスコアの代表値）
+   - `raw_values`: `raw_values`配列全体（各実行のベンチマークスコア）
+   - `test_run_times`: `test_run_times`配列全体（各実行の実行時間、秒単位）
+   - `time`: `test_run_times[0]`（最初の実行時間、コスト計算に使用）
 
-**例**: `test_run_times: [42.43, 40.53, 38.42, ...]` → `time: 42.43`
+**例**:
+```json
+// <N>-thread.jsonから取得したデータ
+{
+  "value": 3951,
+  "raw_values": [4302, 3873, 3759, 3598, 5147, 3880, 3938, 4476, 3794, 3262, 3736, 3644],
+  "test_run_times": [42.43, 40.53, 38.42, 40.07, 39.75, 40.13, 41.04, 38.91, 43.08, 43.85, 40.96, 40.9]
+}
+
+// one_big_json.jsonへの出力
+{
+  "values": 3951,
+  "raw_values": [4302, 3873, 3759, 3598, 5147, 3880, 3938, 4476, 3794, 3262, 3736, 3644],
+  "test_run_times": [42.43, 40.53, 38.42, 40.07, 39.75, 40.13, 41.04, 38.91, 43.08, 43.85, 40.96, 40.9],
+  "time": 42.43  // test_run_times[0]
+}
+```
 
 ##### "\<N\>":"test_name":"cost"
 
