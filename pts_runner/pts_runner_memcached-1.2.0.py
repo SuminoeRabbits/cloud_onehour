@@ -50,8 +50,8 @@ class MemcachedRunner:
         self.quick_mode = quick_mode
 
         if threads_arg is None:
-            # Scaling mode: 1, 4, ..., vCPU
-            self.thread_list = self.get_scaling_thread_list()
+            # Scaling mode: 1 to vCPU
+            self.thread_list = list(range(1, self.vcpu_count + 1))
         else:
             # Fixed mode: cap at vcpu_count
             n = min(threads_arg, self.vcpu_count)
@@ -110,21 +110,6 @@ class MemcachedRunner:
             pass
             
         return "Unknown_OS"
-
-    def get_scaling_thread_list(self):
-        """Generate thread list for scaling test: 1, 4, ..., vCPU."""
-        threads = [1, 4]
-        if self.vcpu_count > 4:
-            current = 8
-            while current <= self.vcpu_count:
-                threads.append(current)
-                current *= 2
-        
-        # Ensure vCPU count is included if not already
-        if self.vcpu_count not in threads:
-            threads.append(self.vcpu_count)
-            
-        return sorted(list(set(threads)))
 
     def is_wsl(self):
         """

@@ -743,7 +743,8 @@ class ComplianceChecker:
 
     def check_thread_capping(self):
         """
-        Check if thread count is capped at vcpu_count (min(threads_arg, self.vcpu_count)).
+        Check if thread count is capped at vcpu_count (min(threads_arg, self.vcpu_count))
+        and scaling mode uses the correct pattern (list(range(1, self.vcpu_count + 1))).
 
         Exception: Single-threaded benchmarks (e.g., redis, phpbench, simdjson, tinymembench, apache)
         are allowed to use self.thread_list = [1] and ignore thread arguments.
@@ -767,18 +768,55 @@ class ComplianceChecker:
                 )
             return
 
-        # For multi-threaded benchmarks, check for proper thread capping
-        # Pattern 1: min(threads_arg, self.vcpu_count)
-        has_min_capping = re.search(r'min\(\s*(?:threads_arg|num_threads)\s*,\s*self\.vcpu_count\s*\)', self.content)
+        # For multi-threaded benchmarks, check for proper patterns
 
-        # Pattern 2: Direct assignment without capping (anti-pattern)
+        # Check 1: Scaling mode pattern (threads_arg is None)
+        # Expected: self.thread_list = list(range(1, self.vcpu_count + 1))
+        has_correct_scaling = re.search(
+            r'self\.thread_list\s*=\s*list\(\s*range\(\s*1\s*,\s*self\.vcpu_count\s*\+\s*1\s*\)\s*\)',
+            self.content
+        )
+
+        # Anti-pattern: Using custom scaling methods like get_scaling_thread_list()
+        has_custom_scaling = re.search(
+            r'self\.thread_list\s*=\s*self\.get_scaling_thread_list\(\)',
+            self.content
+        )
+
+        # Check 2: Fixed mode pattern (threads_arg is not None)
+        # Expected: min(threads_arg, self.vcpu_count)
+        has_min_capping = re.search(
+            r'min\(\s*(?:threads_arg|num_threads)\s*,\s*self\.vcpu_count\s*\)',
+            self.content
+        )
+
+        # Anti-pattern: Direct assignment without capping
         # Matches: self.thread_list = [threads_arg] or self.thread_list = [num_threads]
         has_uncapped_assignment = re.search(
             r'self\.thread_list\s*=\s*\[\s*(?:threads_arg|num_threads)\s*\]',
             self.content
         )
 
-        if has_min_capping:
+        # Evaluate results
+        issues = []
+
+        if not has_correct_scaling and not has_custom_scaling:
+            issues.append(
+                "Scaling mode pattern not found\n"
+                "   Expected: self.thread_list = list(range(1, self.vcpu_count + 1))"
+            )
+        elif has_custom_scaling:
+            self.errors.append(
+                "❌ CRITICAL: Custom scaling method detected\n"
+                "   Found: self.thread_list = self.get_scaling_thread_list()\n"
+                "   Expected: self.thread_list = list(range(1, self.vcpu_count + 1))\n"
+                "   Reference: CODE_TEMPLATE.md lines 232-237\n"
+                "   Issue: Should use standard continuous scaling pattern [1, 2, 3, ..., nproc]"
+            )
+
+        if has_min_capping and has_correct_scaling:
+            self.passed.append("✅ Thread handling correct: scaling mode uses range(1, vcpu+1), fixed mode uses min(threads_arg, vcpu)")
+        elif has_min_capping and not has_custom_scaling:
             self.passed.append("✅ Thread count properly capped at vcpu_count: min(threads_arg, self.vcpu_count)")
         elif has_uncapped_assignment:
             self.errors.append(
@@ -791,13 +829,13 @@ class ComplianceChecker:
         else:
             # Check if thread_list is set at all in __init__
             has_thread_list_setup = re.search(r'self\.thread_list\s*=', self.content)
-            if has_thread_list_setup:
+            if has_thread_list_setup and not has_custom_scaling:
                 self.warnings.append(
                     "⚠️  WARNING: Thread capping pattern unclear\n"
                     "   Should use: n = min(threads_arg, self.vcpu_count); self.thread_list = [n]\n"
                     "   Reference: CODE_TEMPLATE.md lines 232-237"
                 )
-            else:
+            elif not has_thread_list_setup:
                 self.warnings.append(
                     "⚠️  WARNING: self.thread_list not initialized in __init__"
                 )
