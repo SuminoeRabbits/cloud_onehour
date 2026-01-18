@@ -2,6 +2,52 @@
 ディレクトリ構造、ファイル構造、ファイル名の命名規則、データ内容を解説。
 その後のデータベース作成向けJSONファイル(one_big_json.json)実装仕様を説明する。
 
+# TOC
+- [about README\_results.md](#about-readme_resultsmd)
+- [TOC](#toc)
+- [Directory and structure](#directory-and-structure)
+- [TOC](#toc-1)
+- [File details](#file-details)
+  - [Common rule](#common-rule)
+    - [Number of threads in hardware and Thread count in `<benchmark>`](#number-of-threads-in-hardware-and-thread-count-in-benchmark)
+    - [relaionship between CPU affinity and `<N>`-Thread in ](#relaionship-between-cpu-affinity-and-n-thread-in-)
+    - [How to distingush `<N>` in `<files>`](#how-to-distingush-n-in-files)
+    - [summary file in `<files>`](#summary-file-in-files)
+      - [Multiple "test\_name", "description" in one ](#multiple-test_name-description-in-one-)
+        - ["test\_name"のキー生成ルール](#test_nameのキー生成ルール)
+  - [perf\_stat output](#perf_stat-output)
+    - [Performance summary file](#performance-summary-file)
+    - [Frequency file](#frequency-file)
+  - [pts output](#pts-output)
+    - [Benchmark summary file](#benchmark-summary-file)
+- [Extracting one big JSON](#extracting-one-big-json)
+  - [Definition of one big JSON structure](#definition-of-one-big-json-structure)
+  - [Definition data source](#definition-data-source)
+    - [Look-Up-Table](#look-up-table)
+    - [Cost at Look-Up-Table](#cost-at-look-up-table)
+      - ["machinename":"\<machinename\>"](#machinenamemachinename)
+      - ["total\_vcpu":"\<vcpu\>"](#total_vcpuvcpu)
+      - ["cpu\_name":"\<cpu\_name\>"](#cpu_namecpu_name)
+      - ["cpu\_isa":"\<cpu\_isa\>"](#cpu_isacpu_isa)
+      - ["CSP":"\<csp\>"](#cspcsp)
+      - ["os":"\<os\>"](#osos)
+      - ["testcategory":"\<testcategory\>"](#testcategorytestcategory)
+      - ["benchmark":"\<benchmark\>"](#benchmarkbenchmark)
+      - [data extract from "\<benchmark\>"](#data-extract-from-benchmark)
+        - ["threads":"\<N\>"](#threadsn)
+        - ["\<N\>":"perf\_stat"](#nperf_stat)
+        - ["\<N\>":"test\_name"](#ntest_name)
+          - [データソース](#データソース)
+          - [ケース３ データソース 例外処理](#ケース３-データソース-例外処理)
+          - [descriptionによるマッチング](#descriptionによるマッチング)
+        - ["\<N\>":"test\_name":"values", "raw\_values", "time", "test\_run\_times"](#ntest_namevalues-raw_values-time-test_run_times)
+        - ["\<N\>":"test\_name":"cost"](#ntest_namecost)
+- [make\_one\_big\_json.py specification](#make_one_big_jsonpy-specification)
+  - [requirement](#requirement)
+  - [script version info](#script-version-info)
+  - [argument parameters](#argument-parameters)
+
+
 # Directory and structure
 まず`${PROJECT_ROOT}`に対して
 `${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>/<files>`
@@ -117,8 +163,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 ここではPTSの標準ベンチマーク出力を説明する。
 ### Benchmark summary file
 - `results/<machinename>/<os>/<testcategory>/<benchmark>/summary.json`
-    すべての<N>-thread_perf_summary.jsonを<N>毎に1つにまとめたファイルであり、1つだけ存在。存在しない場合はテストが失敗している。
-    1つのベンチマークに複数の<test_name>が存在する場合があり、その時は<test_name>毎にベンチマーク結果が記載される。。
+    すべての<N>-thread_perf_summary.jsonを<N>毎に1つにまとめたファイルであり、1つだけ存在。ただし存在しない場合もある。
+    1つのベンチマークに複数の<test_name>が存在する場合があり、その時は<test_name>毎にベンチマーク結果が記載される。
 
 # Extracting one big JSON
 まずデータ構造を説明し、その後にそれぞれに入力されるべきデータを説明する。
@@ -257,24 +303,24 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 以下、`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`からのデータ抽出法である。このDirectoryを環境変数`${BENCHMARK}`と定義して参照する。
 
 ##### "threads":"\<N\>"
-まず`${BENCHMARK}`中に[How to distingush `<N>` in `<files>`](### How to distingush `<N>` in `<files>`)で`<N>`が特定されているとする。それぞれの `<N>` に対して個別に子ノードを生成する。
+まず`${BENCHMARK}`中に[How to distingush `<N>` in `<files>`](#how-to-distingush-n-in-files)で`<N>`が特定されているとする。それぞれの `<N>` に対して個別に子ノードを生成する。
 
 ##### "\<N\>":"perf_stat"
-[perf_stat output](## perf_stat output)を参照。
+[perf_stat output](#perf_stat-output)を参照。
 
 ##### "\<N\>":"test_name"
 
 一つの`<N>` に対して複数の`<test_name>`が存在しうる。**重要**: データは`${BENCHMARK}/<N>-thread.json`から直接取得する。`summary.json`は平均化されたデータなので使用しない。
 
 ###### データソース
-[summary file](### summary file in `<files>`)のケース１，２の場合、すべてのデータは`${BENCHMARK}/<N>-thread.json`から取得する:
+[summary file](#summary-file-in-files)のケース１，２の場合、すべてのデータは`${BENCHMARK}/<N>-thread.json`から取得する:
 - **values**: ベンチマーク結果の代表値（通常は平均値）
 - **raw_values**: ベンチマーク実行の全生データ配列
 - **unit**: 単位（MIPS, MB/s等）
 - **test_run_times**: 各実行の実行時間の配列（秒単位）
 - **description**: テストの詳細説明
 
-[summary file](### summary file in `<files>`)のケース3の場合、すべてのデータは`${BENCHMARK}/<N>-thread_perf_summary.json`と`${BENCHMARK}/<N>-thread.json`から取得する。基本異なるフォーマットが利用されているので、**test_run_times**以外はN/Aとして`<test_name>`以下の子ノードを生成する。:
+[summary file](#summary-file-in-files)のケース3の場合、すべてのデータは`${BENCHMARK}/<N>-thread_perf_summary.json`と`${BENCHMARK}/<N>-thread.json`から取得する。基本異なるフォーマットが利用されているので、**test_run_times**以外はN/Aとして`<test_name>`以下の子ノードを生成する。:
 - **values**: N/A
 - **raw_values**: N/A
 - **unit**: N/A
@@ -283,8 +329,43 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 
 データソースとして、ケース１，２，３のどれを適応させたか、`<test_name>`毎に明確にする。
 
+###### ケース３ データソース 例外処理
+ケース３でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
+
+- `<benchmark>="coremark-1.0.1"`: 
+    `<N>-thread.log`内の `Average: XXXX.XXXX Iterations/Sec`に注目。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Iterations/Sec"`
+    - **test_run_times**: `4-thread_perf_summary.json`内の"elapsed_time_sec"
+    - **description**: "Coremark 1.0"
+
+- `<benchmark>="build-gcc-1.5.0"`: 
+    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Seconds"`
+    - **test_run_times**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **description**: "Timed GCC Compilation 15.2"
+
+- `<benchmark>="build-linux-kernel-1.17.1"`: 
+    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Seconds"`
+    - **test_run_times**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **description**: "Timed Linux Kernel Compilation 6.15"
+
+- `<benchmark>="build-llvm-1.6.0"`: 
+    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Seconds"`
+    - **test_run_times**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **description**: "Timed LLVM Compilation 21.1"
+
 ###### descriptionによるマッチング
-[summary file](### summary file in `<files>`)のケース１，２の場合は
+[summary file](#summary-file-in-files)のケース１，２の場合は
 `<N>-thread.json`には複数のテスト結果が含まれ、同じスレッド数`<N>`で同じ`test_name`でも`description`が異なる場合がある。正しいデータを選択するためのマッチングルール:
 
 **マッチングルール**:

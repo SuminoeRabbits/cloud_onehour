@@ -662,13 +662,20 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         elif has_perf_summary:
             # Case 3: <N>-thread_perf_summary.json exists (with or without <N>-thread.json)
             # Per README_results.md Case 3:
-            # - values: N/A
-            # - raw_values: N/A
-            # - unit: N/A
+            # - values: N/A (default, overridden for specific benchmarks)
+            # - raw_values: N/A (default, overridden for specific benchmarks)
+            # - unit: N/A (default, overridden for specific benchmarks)
             # - test_run_times: [elapsed_time_sec] from <N>-thread_perf_summary.json
             # - description: from <N>-thread.json if available, else "perf stat only"
+            #
+            # Exception handling for specific benchmarks (per README_results.md):
+            # - coremark-1.0.1: Extract from <N>-thread.log "Average: XXXX.XXXX Iterations/Sec"
+            # - build-gcc-1.5.0: Extract from <N>-thread.log "Average: XXXX.XXXX Seconds"
+            # - build-linux-kernel-1.17.1: Extract from <N>-thread.log "Average: XXXX.XXXX Seconds"
+            # - build-llvm-1.6.0: Extract from <N>-thread.log "Average: XXXX.XXXX Seconds"
             perf_summary_file = benchmark_dir / f"{thread_num}-thread_perf_summary.json"
             pts_json = benchmark_dir / f"{thread_num}-thread.json"
+            thread_log = benchmark_dir / f"{thread_num}-thread.log"
 
             if perf_summary_file.exists():
                 try:
@@ -695,16 +702,61 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                         except (json.JSONDecodeError, IOError):
                             pass  # Use defaults
 
-                    # Calculate cost using elapsed_time_sec
-                    cost = cost_hour * elapsed_time_sec / 3600.0
+                    # Default values for Case 3
+                    values = "N/A"
+                    raw_values = "N/A"
+                    unit = "N/A"
+                    test_run_times = [elapsed_time_sec]
+
+                    # Exception handling for specific benchmarks
+                    benchmark_name = benchmark_dir.name
+                    if thread_log.exists():
+                        try:
+                            with open(thread_log, 'r') as f:
+                                log_content = f.read()
+
+                            if benchmark_name == "coremark-1.0.1":
+                                # Extract "Average: XXXX.XXXX Iterations/Sec"
+                                match = re.search(r'Average:\s+([\d.]+)\s+Iterations/Sec', log_content)
+                                if match:
+                                    value = float(match.group(1))
+                                    values = value
+                                    raw_values = [value]
+                                    unit = "Iterations/Sec"
+                                    description = "Coremark 1.0"
+
+                            elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
+                                # Extract "Average: XXXX.XXXX Seconds"
+                                match = re.search(r'Average:\s+([\d.]+)\s+Seconds', log_content)
+                                if match:
+                                    value = float(match.group(1))
+                                    values = value
+                                    raw_values = [value]
+                                    unit = "Seconds"
+                                    test_run_times = [value]
+
+                                    # Set appropriate description
+                                    if benchmark_name == "build-gcc-1.5.0":
+                                        description = "Timed GCC Compilation 15.2"
+                                    elif benchmark_name == "build-linux-kernel-1.17.1":
+                                        description = "Timed Linux Kernel Compilation 6.15"
+                                    elif benchmark_name == "build-llvm-1.6.0":
+                                        description = "Timed LLVM Compilation 21.1"
+
+                        except (IOError, ValueError) as e:
+                            print(f"Warning: Failed to parse {thread_log}: {e}", file=sys.stderr)
+
+                    # Calculate cost using elapsed_time_sec (or extracted value for build-* benchmarks)
+                    cost_time = test_run_times[0] if test_run_times else elapsed_time_sec
+                    cost = cost_hour * cost_time / 3600.0
 
                     test_results[test_name] = {
                         "description": description,
-                        "values": "N/A",
-                        "raw_values": "N/A",
-                        "unit": "N/A",
+                        "values": values,
+                        "raw_values": raw_values,
+                        "unit": unit,
                         "time": elapsed_time_sec,
-                        "test_run_times": [elapsed_time_sec],
+                        "test_run_times": test_run_times,
                         "cost": cost
                     }
                 except (json.JSONDecodeError, IOError) as e:
@@ -747,11 +799,14 @@ def build_json_structure(project_root: Path, cloud_instances: Dict[str, Any]) ->
         }
     }
     """
+    # Directories to skip during processing
+    SKIP_DIRS = {'__pycache__', '.pytest_cache', 'node_modules', '.git', '.venv', 'venv'}
+
     result = {}
 
     # Iterate through machinenames
     for machine_dir in sorted(project_root.iterdir()):
-        if not machine_dir.is_dir() or machine_dir.name.startswith('.'):
+        if not machine_dir.is_dir() or machine_dir.name.startswith('.') or machine_dir.name in SKIP_DIRS:
             continue
 
         machinename = machine_dir.name
