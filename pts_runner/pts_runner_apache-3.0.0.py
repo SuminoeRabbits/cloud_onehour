@@ -430,7 +430,7 @@ class ApacheRunner:
 
         This method modifies the test profile's install.sh to:
         1. Add 'no-asm' to OpenSSL build options (avoiding inline assembly errors with GCC-14)
-        2. Add '-Wno-error=implicit-function-declaration' to LuaJIT CFLAGS (fixing Ubuntu 24.04 ARM64 issues)
+        2. Pass XCFLAGS to make to suppress implicit-function-declaration errors in LuaJIT (ARM64)
         """
         install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
 
@@ -444,36 +444,60 @@ class ApacheRunner:
             with open(install_sh_path, 'r') as f:
                 content = f.read()
 
-            # Check if already patched
-            if 'no-asm' in content and 'GCC-14 compatibility' in content and 'Wno-error=implicit-function-declaration' in content:
-                print(f"  [OK] install.sh already patched")
-                return True
+            patched = False
 
-            # Add patches before 'make -j $NUM_CPU_CORES'
-            # Patch 1: OpenSSL no-asm for GCC-14
-            # Patch 2: LuaJIT CFLAGS for Ubuntu 24.04 ARM64 implicit function declaration
-            patch_lines = '''# GCC-14 compatibility: Add no-asm to OpenSSL build options to avoid inline assembly errors
-sed -i 's/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/' Makefile
-# Ubuntu 24.04 compatibility: Suppress implicit-function-declaration errors in LuaJIT for ARM64
-sed -i 's/CFLAGS += -O2/CFLAGS += -O2 -Wno-error=implicit-function-declaration/' Makefile
-'''
-
-            # Insert patch after 'cd wrk-4.2.0'
-            if 'cd wrk-4.2.0' in content:
-                patched_content = content.replace(
-                    'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES',
-                    f'cd wrk-4.2.0\n{patch_lines}make -j $NUM_CPU_CORES'
+            # Patch 1: Add 'no-asm' to OpenSSL build options (for GCC-14 compatibility)
+            # This prevents inline assembly errors in OpenSSL 1.1.1i
+            openssl_sed = "sed -i 's/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))/OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea no-asm --prefix=$(abspath $(ODIR))/' Makefile"
+            if openssl_sed not in content:
+                # Insert after 'cd wrk-4.2.0' line
+                content = content.replace(
+                    'cd wrk-4.2.0\n',
+                    f"cd wrk-4.2.0\n# GCC-14 compatibility: Add no-asm to OpenSSL build options\n{openssl_sed}\n"
                 )
-
-                # Write patched content
-                with open(install_sh_path, 'w') as f:
-                    f.write(patched_content)
-
-                print(f"  [OK] install.sh patched successfully")
-                return True
+                patched = True
+                print(f"  [OK] Added OpenSSL no-asm patch")
             else:
-                print(f"  [WARN] Could not find 'cd wrk-4.2.0' in install.sh")
-                return False
+                print(f"  [INFO] OpenSSL no-asm patch already applied")
+
+            # Patch 2: Add XCFLAGS to wrk make command to suppress implicit-function-declaration errors
+            # This is needed for LuaJIT on ARM64 with Ubuntu 24.04 where __clear_cache is implicitly declared
+            # XCFLAGS is passed through to LuaJIT's build system
+            old_make_pattern = 'make -j $NUM_CPU_CORES\necho $? > ~/install-exit-status\ncd ~\necho "#!/bin/sh'
+            new_make_with_xcflags = 'make -j $NUM_CPU_CORES XCFLAGS="-Wno-error=implicit-function-declaration"\necho $? > ~/install-exit-status\ncd ~\necho "#!/bin/sh'
+
+            if 'XCFLAGS="-Wno-error=implicit-function-declaration"' not in content:
+                if old_make_pattern in content:
+                    content = content.replace(old_make_pattern, new_make_with_xcflags)
+                    patched = True
+                    print(f"  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility")
+                else:
+                    # Fallback: try to find just the make line in wrk section
+                    # Look for the second 'make -j $NUM_CPU_CORES' (the one for wrk, not httpd)
+                    lines = content.split('\n')
+                    in_wrk_section = False
+                    new_lines = []
+                    for line in lines:
+                        if 'cd wrk-4.2.0' in line:
+                            in_wrk_section = True
+                        if in_wrk_section and line.strip() == 'make -j $NUM_CPU_CORES':
+                            line = 'make -j $NUM_CPU_CORES XCFLAGS="-Wno-error=implicit-function-declaration"'
+                            patched = True
+                            print(f"  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility (fallback)")
+                            in_wrk_section = False  # Only patch the first make after cd wrk
+                        new_lines.append(line)
+                    content = '\n'.join(new_lines)
+            else:
+                print(f"  [INFO] XCFLAGS patch already applied")
+
+            if patched:
+                with open(install_sh_path, 'w') as f:
+                    f.write(content)
+                print(f"  [OK] install.sh patched successfully")
+            else:
+                print(f"  [INFO] install.sh already fully patched")
+
+            return True
 
         except Exception as e:
             print(f"  [ERROR] Failed to patch install.sh: {e}")
