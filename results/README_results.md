@@ -108,6 +108,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - `<benchmark>="build-linux-kernel-1.17.1"`
     - `<benchmark>="build-llvm-1.6.0"`
     - `<benchmark>="coremark-1.0.1"`
+    - `<benchmark>="sysbench-1.1.0"`
+    - `<benchmark>="java-jmh-1.0.1"`
 
 [注意]これら４条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
 
@@ -372,6 +374,30 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **unit**: `"Iterations/Sec"`
     - **test_run_times**: "N/A"
     - **description**: "Coremark 1.0"
+
+- `<benchmark>="sysbench-1.1.0"`:
+  - "test_name": "RAM_Memory"
+    `<N>-thread.log`内の `Average: XXXX.XXXX MiB/sec`に注目。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"MiB/sec"`
+    - **test_run_times**: "N/A"
+    - **description**: "Sysbench 1.0.20 Memory"
+  - "test_name": "CPU"
+    `<N>-thread.log`内の `Average: XXXX.XXXX Events Per Second`に注目。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Events Per Second"`
+    - **test_run_times**: "N/A"
+    - **description**: "Sysbench 1.0.20 CPU"
+
+- `<benchmark>="java-jmh-1.0.1"`:
+    `<N>-thread.log`内の `Average: XXXX.XXXX Ops/s`に注目。
+    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **unit**: `"Ops/s"`
+    - **test_run_times**: "N/A"
+    - **description**: "Java JMH"
 
 ###### descriptionによるマッチング
 [summary file](#summary-file-in-files)のケース１，２の場合は

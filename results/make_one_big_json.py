@@ -577,7 +577,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     benchmark_name = benchmark_dir.name
 
     # Case 4 special benchmarks (per README_results.md)
-    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1"]
+    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1", "sysbench-1.1.0", "java-jmh-1.0.1"]
     is_case4 = benchmark_name in case4_benchmarks
 
     # Find all thread counts from <N>-thread.json files (Case 1 & 2)
@@ -897,7 +897,104 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                 first_line = excerpt_lines[0]
                                 hex_dump = ' '.join(f'{ord(c):02x}' for c in first_line[:50])
                                 print(f"  First line hex (first 50 chars): {hex_dump}", file=sys.stderr)
-                    else:
+
+                    elif benchmark_name == "sysbench-1.1.0":
+                        # Per README_results.md Case 4 - sysbench-1.1.0:
+                        # Has two test_names: "RAM_Memory" and "CPU"
+                        # - RAM_Memory: Extract "Average: XXXX.XXXX MiB/sec"
+                        # - CPU: Extract "Average: XXXX.XXXX Events Per Second"
+
+                        # Try to extract RAM_Memory test (MiB/sec)
+                        memory_patterns = [
+                            r'Average[:\s]+([\d.]+)\s+MiB/sec',
+                            r'Average:\s*([\d.]+)\s*MiB/sec',
+                            r'^\s*Average:\s*([\d.]+)\s*MiB/sec',
+                        ]
+                        memory_match = None
+                        for pattern in memory_patterns:
+                            memory_match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
+                            if memory_match:
+                                break
+
+                        if memory_match:
+                            value = float(memory_match.group(1))
+                            test_results["RAM_Memory"] = {
+                                "description": "Sysbench 1.0.20 Memory",
+                                "values": value,
+                                "raw_values": [value],
+                                "unit": "MiB/sec",
+                                "time": "N/A",
+                                "test_run_times": ["N/A"],
+                                "cost": "N/A"
+                            }
+
+                        # Try to extract CPU test (Events Per Second)
+                        cpu_patterns = [
+                            r'Average[:\s]+([\d.]+)\s+Events?\s+Per\s+Second',
+                            r'Average:\s*([\d.]+)\s*Events?\s+Per\s+Second',
+                            r'^\s*Average:\s*([\d.]+)\s*Events?\s+Per\s+Second',
+                        ]
+                        cpu_match = None
+                        for pattern in cpu_patterns:
+                            cpu_match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
+                            if cpu_match:
+                                break
+
+                        if cpu_match:
+                            value = float(cpu_match.group(1))
+                            test_results["CPU"] = {
+                                "description": "Sysbench 1.0.20 CPU",
+                                "values": value,
+                                "raw_values": [value],
+                                "unit": "Events Per Second",
+                                "time": "N/A",
+                                "test_run_times": ["N/A"],
+                                "cost": "N/A"
+                            }
+
+                        if not memory_match and not cpu_match:
+                            # Enhanced debugging
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'mib' in line.lower() or 'events' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
+                            print(f"Warning: Could not find sysbench patterns in {thread_log}", file=sys.stderr)
+                            print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                            print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+
+                    elif benchmark_name == "java-jmh-1.0.1":
+                        # Per README_results.md Case 4 - java-jmh-1.0.1:
+                        # Extract "Average: XXXX.XXXX Ops/s"
+                        patterns = [
+                            r'Average[:\s]+([\d.]+)\s+Ops/s',
+                            r'Average:\s*([\d.]+)\s*Ops/s',
+                            r'^\s*Average:\s*([\d.]+)\s*Ops/s',
+                        ]
+
+                        match = None
+                        for pattern in patterns:
+                            match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
+                            if match:
+                                break
+
+                        if match:
+                            value = float(match.group(1))
+                            test_results["Java JMH"] = {
+                                "description": "Java JMH",
+                                "values": value,
+                                "raw_values": [value],
+                                "unit": "Ops/s",
+                                "time": "N/A",
+                                "test_run_times": ["N/A"],
+                                "cost": "N/A"
+                            }
+                        else:
+                            # Enhanced debugging
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'ops' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
+                            print(f"Warning: Could not find 'Average: X Ops/s' pattern in {thread_log}", file=sys.stderr)
+                            print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                            print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+
+                    elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
                         # Extract "Average: XXXX.XXXX Seconds" from log (very flexible regex)
                         # Try multiple patterns to handle various formats, including leading whitespace
                         patterns = [
