@@ -463,30 +463,45 @@ class ApacheRunner:
             # Patch 2: Add XCFLAGS to wrk make command to suppress implicit-function-declaration errors
             # This is needed for LuaJIT on ARM64 with Ubuntu 24.04 where __clear_cache is implicitly declared
             # XCFLAGS is passed through to LuaJIT's build system
-            old_make_pattern = 'make -j $NUM_CPU_CORES\necho $? > ~/install-exit-status\ncd ~\necho "#!/bin/sh'
-            new_make_with_xcflags = 'make -j $NUM_CPU_CORES XCFLAGS="-Wno-error=implicit-function-declaration"\necho $? > ~/install-exit-status\ncd ~\necho "#!/bin/sh'
+            #
+            # Strategy: Find the 'make -j $NUM_CPU_CORES' line that comes AFTER 'cd wrk-4.2.0'
+            # and add XCFLAGS to it. This is the wrk build, not the httpd build.
 
             if 'XCFLAGS="-Wno-error=implicit-function-declaration"' not in content:
-                if old_make_pattern in content:
-                    content = content.replace(old_make_pattern, new_make_with_xcflags)
-                    patched = True
-                    print(f"  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility")
-                else:
-                    # Fallback: try to find just the make line in wrk section
-                    # Look for the second 'make -j $NUM_CPU_CORES' (the one for wrk, not httpd)
-                    lines = content.split('\n')
-                    in_wrk_section = False
-                    new_lines = []
-                    for line in lines:
-                        if 'cd wrk-4.2.0' in line:
-                            in_wrk_section = True
-                        if in_wrk_section and line.strip() == 'make -j $NUM_CPU_CORES':
-                            line = 'make -j $NUM_CPU_CORES XCFLAGS="-Wno-error=implicit-function-declaration"'
-                            patched = True
-                            print(f"  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility (fallback)")
-                            in_wrk_section = False  # Only patch the first make after cd wrk
-                        new_lines.append(line)
+                # Use regex to find and replace the make command in the wrk section
+                # Pattern: After 'cd wrk-4.2.0' section, find 'make -j $NUM_CPU_CORES' (without XCFLAGS)
+                # This handles cases where the line may or may not have a sed command before it
+
+                # Split content and process line by line for precise control
+                lines = content.split('\n')
+                in_wrk_section = False
+                xcflags_patched = False
+                new_lines = []
+
+                for i, line in enumerate(lines):
+                    # Detect entering wrk section
+                    if 'cd wrk-4.2.0' in line:
+                        in_wrk_section = True
+
+                    # In wrk section, find the make command (not gmake, not with XCFLAGS already)
+                    if in_wrk_section and not xcflags_patched:
+                        # Match 'make -j $NUM_CPU_CORES' at start of line (possibly with leading whitespace)
+                        # but NOT 'gmake' and NOT already containing XCFLAGS
+                        stripped = line.strip()
+                        if stripped == 'make -j $NUM_CPU_CORES':
+                            # Preserve original indentation
+                            indent = line[:len(line) - len(line.lstrip())]
+                            line = f'{indent}make -j $NUM_CPU_CORES XCFLAGS="-Wno-error=implicit-function-declaration"'
+                            xcflags_patched = True
+                            print(f"  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility")
+
+                    new_lines.append(line)
+
+                if xcflags_patched:
                     content = '\n'.join(new_lines)
+                    patched = True
+                else:
+                    print(f"  [WARN] Could not find wrk make command to patch for XCFLAGS")
             else:
                 print(f"  [INFO] XCFLAGS patch already applied")
 

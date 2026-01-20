@@ -462,6 +462,67 @@ class X265Runner:
 
         return ','.join(cpu_list)
 
+    def patch_install_script(self):
+        """
+        Patch the install.sh script to fix x265 build issues on Ubuntu 24.04 with GCC-14.
+
+        Problem: x265 4.1 uses CMake which doesn't pick up CFLAGS/CXXFLAGS from environment.
+        Also, -march=native on newer AMD CPUs (Zen 4/5) can generate instructions that
+        x265's assembly code doesn't handle properly.
+
+        Solution:
+        1. Pass CMAKE_C_COMPILER and CMAKE_CXX_COMPILER explicitly
+        2. Use -march=x86-64-v3 instead of -march=native for broader compatibility
+           (x86-64-v3 includes AVX2 but not AVX-512 which can cause issues)
+        3. Add -Wno-error flags to suppress GCC-14 warnings-as-errors
+        """
+        install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+
+        if not install_sh_path.exists():
+            print(f"  [WARN] install.sh not found at {install_sh_path}")
+            return False
+
+        print(f"  [INFO] Patching install.sh for GCC-14 and Ubuntu 24.04 compatibility...")
+
+        try:
+            with open(install_sh_path, 'r') as f:
+                content = f.read()
+
+            patched = False
+
+            # Patch: Replace cmake command with proper flags for GCC-14
+            # Original: cmake -DCMAKE_BUILD_TYPE=Release ../source
+            # New: cmake with explicit compiler and flags
+            old_cmake = 'cmake -DCMAKE_BUILD_TYPE=Release ../source'
+            new_cmake = '''cmake -DCMAKE_BUILD_TYPE=Release \\
+  -DCMAKE_C_COMPILER=gcc-14 \\
+  -DCMAKE_CXX_COMPILER=g++-14 \\
+  -DCMAKE_C_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -Wno-error" \\
+  -DCMAKE_CXX_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -Wno-error" \\
+  ../source'''
+
+            if old_cmake in content and 'CMAKE_C_COMPILER=gcc-14' not in content:
+                content = content.replace(old_cmake, new_cmake)
+                patched = True
+                print(f"  [OK] Added CMake GCC-14 and x86-64-v3 compatibility patch")
+            elif 'CMAKE_C_COMPILER=gcc-14' in content:
+                print(f"  [INFO] CMake patch already applied")
+            else:
+                print(f"  [WARN] Could not find cmake command to patch")
+
+            if patched:
+                with open(install_sh_path, 'w') as f:
+                    f.write(content)
+                print(f"  [OK] install.sh patched successfully")
+            else:
+                print(f"  [INFO] install.sh already fully patched or no changes needed")
+
+            return True
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch install.sh: {e}")
+            return False
+
     def install_benchmark(self):
         """
         Install x265-1.5.0 with GCC-14 native compilation.
@@ -474,13 +535,16 @@ class X265Runner:
         # --- Pre-download large files (Pattern 5) ---
         print(f"\\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
-        
+
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
         print(f"\\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         print(f"\\n>>> Installing {self.benchmark_full}...")
+
+        # Patch install.sh for GCC-14 and Ubuntu 24.04 compatibility
+        self.patch_install_script()
 
 
         # Remove existing installation first
