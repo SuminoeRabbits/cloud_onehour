@@ -7,7 +7,7 @@ from tabulate import tabulate
 
 # --- 設定エリア ---
 AWS_REGION = "ap-northeast-1"
-GCP_REGION_KEY = "asia-northeast1"
+# GCPとOCIは全リージョン検索のため設定不要
 # ----------------
 
 def run_command(cmd):
@@ -51,9 +51,9 @@ def get_all_instances(csp_filter=None):
                         # [cloud, location, name, display_id, full_id, state]
                         all_instances.append(["AWS", AWS_REGION, name, inst["InstanceId"], inst["InstanceId"], inst["State"]["Name"]])
 
-    # --- GCP ---
+    # --- GCP --- (全リージョン・全ゾーン検索)
     if 'gcp' in enabled_csps:
-        success, data, _ = run_command(["gcloud", "compute", "instances", "list", f"--filter=zone ~ {GCP_REGION_KEY}", "--format=json"])
+        success, data, _ = run_command(["gcloud", "compute", "instances", "list", "--format=json"])
         if success and data:
             for inst in data:
                 zone = inst.get("zone", "").split("/")[-1]

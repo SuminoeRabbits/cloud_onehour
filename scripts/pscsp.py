@@ -6,7 +6,7 @@ from tabulate import tabulate
 
 # --- 設定エリア ---
 AWS_REGION = "ap-northeast-1"
-GCP_REGION_KEY = "asia-northeast1"
+# GCPとOCIは全リージョン検索のため設定不要
 # ----------------
 
 def run_command(cmd):
@@ -39,18 +39,19 @@ def get_aws_instances(region):
             rows.append(["AWS", region, name, inst["InstanceId"], inst["State"]["Name"]])
     return rows if rows else [["AWS", region, "(No Instances Found)", "-", "-"]]
 
-def get_gcp_instances(region_keyword):
-    cmd = ["gcloud", "compute", "instances", "list", f"--filter=zone ~ {region_keyword}", "--format=json"]
+def get_gcp_instances():
+    # 全リージョン・全ゾーンを検索（フィルターなし）
+    cmd = ["gcloud", "compute", "instances", "list", "--format=json"]
     success, data, err = run_command(cmd)
     if not success:
         # 認証エラー(Expired)などの場合、errにメッセージが入る
-        return [["GCP", region_keyword, "ERROR", "N/A", err]]
-    
+        return [["GCP", "ALL", "ERROR", "N/A", err]]
+
     rows = []
     for inst in data:
         zone = inst.get("zone", "").split("/")[-1]
         rows.append(["GCP", zone, inst.get("name"), inst.get("id"), inst.get("status")])
-    return rows if rows else [["GCP", region_keyword, "(No Instances Found)", "-", "-"]]
+    return rows if rows else [["GCP", "ALL", "(No Instances Found)", "-", "-"]]
 
 def get_oci_instances():
     # 1. テナンシーID（ルートコンパートメント）を取得
@@ -82,7 +83,7 @@ def main():
     
     all_data = []
     all_data.extend(get_aws_instances(AWS_REGION))
-    all_data.extend(get_gcp_instances(GCP_REGION_KEY))
+    all_data.extend(get_gcp_instances())
     all_data.extend(get_oci_instances())
 
     headers = ["Cloud", "Region/Zone", "Name", "ID", "Status/Error"]
