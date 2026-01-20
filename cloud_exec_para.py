@@ -3215,9 +3215,9 @@ Examples:
         print(f"{'='*80}\n")
         sys.exit(0)
 
-    # Setup log directory
+    # Setup log directory (include CSP name to avoid collision when running multiple CSPs simultaneously)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    log_dir = Path(config['common']['host_reports_dir']) / 'logs' / timestamp
+    log_dir = Path(config['common']['host_reports_dir']) / 'logs' / f"{timestamp}_{args.csp}"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize Dashboard
