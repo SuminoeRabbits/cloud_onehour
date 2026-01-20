@@ -357,6 +357,177 @@ class ApacheRunner:
             print(f"         Running in LIMITED mode without per-CPU metrics")
             return 2
 
+    def dump_error_diagnostics(self, num_threads, log_file):
+        """
+        Dump diagnostic information when benchmark fails.
+
+        Collects:
+        1. PTS test-logs from ~/.phoronix-test-suite/test-results/
+        2. Apache error logs (if available)
+        3. Port 80/443 usage status
+        4. Recent system dmesg output
+        5. Installed test directory contents
+
+        Args:
+            num_threads: Number of threads used in the failed test
+            log_file: Path to the benchmark log file
+        """
+        print(f"\n{'='*80}")
+        print(f">>> Dumping error diagnostics")
+        print(f"{'='*80}")
+
+        diag_file = self.results_dir / f"{num_threads}-thread_error_diag.txt"
+        pts_home = Path.home() / ".phoronix-test-suite"
+
+        with open(diag_file, 'w') as f:
+            f.write("="*80 + "\n")
+            f.write(f"ERROR DIAGNOSTICS - {self.benchmark} ({num_threads} threads)\n")
+            f.write(f"Timestamp: {subprocess.run(['date'], capture_output=True, text=True).stdout.strip()}\n")
+            f.write("="*80 + "\n\n")
+
+            # 1. PTS test-logs
+            f.write("-"*80 + "\n")
+            f.write("[1] PTS Test Logs\n")
+            f.write("-"*80 + "\n")
+
+            test_results_dir = pts_home / "test-results"
+            if test_results_dir.exists():
+                # Find recent test result directories
+                for result_dir in sorted(test_results_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:3]:
+                    test_logs_dir = result_dir / "test-logs"
+                    if test_logs_dir.exists():
+                        f.write(f"\n[Result: {result_dir.name}]\n")
+                        for log in test_logs_dir.glob("**/*"):
+                            if log.is_file():
+                                f.write(f"\n--- {log.relative_to(test_logs_dir)} ---\n")
+                                try:
+                                    content = log.read_text(errors='ignore')
+                                    # Limit to last 100 lines per log
+                                    lines = content.split('\n')
+                                    if len(lines) > 100:
+                                        f.write(f"[...truncated, showing last 100 lines...]\n")
+                                        f.write('\n'.join(lines[-100:]))
+                                    else:
+                                        f.write(content)
+                                except Exception as e:
+                                    f.write(f"[Error reading file: {e}]\n")
+            else:
+                f.write("No test-results directory found\n")
+
+            # 2. Installed test logs
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[2] Installed Test Directory\n")
+            f.write("-"*80 + "\n")
+
+            installed_dir = pts_home / "installed-tests" / "pts" / self.benchmark
+            if installed_dir.exists():
+                # List directory contents
+                result = subprocess.run(
+                    ['ls', '-la', str(installed_dir)],
+                    capture_output=True, text=True
+                )
+                f.write(f"\nDirectory listing: {installed_dir}\n")
+                f.write(result.stdout)
+
+                # Check for any log files in installed test
+                for log in installed_dir.glob("**/*.log"):
+                    f.write(f"\n--- {log.relative_to(installed_dir)} ---\n")
+                    try:
+                        content = log.read_text(errors='ignore')
+                        lines = content.split('\n')
+                        if len(lines) > 50:
+                            f.write(f"[...truncated, showing last 50 lines...]\n")
+                            f.write('\n'.join(lines[-50:]))
+                        else:
+                            f.write(content)
+                    except Exception as e:
+                        f.write(f"[Error reading file: {e}]\n")
+            else:
+                f.write(f"Installed test directory not found: {installed_dir}\n")
+
+            # 3. Apache/httpd status and port check
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[3] Apache/HTTP Service Status\n")
+            f.write("-"*80 + "\n")
+
+            # Check if apache2/httpd is running
+            for service in ['apache2', 'httpd']:
+                result = subprocess.run(
+                    ['systemctl', 'status', service],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0 or 'Active:' in result.stdout:
+                    f.write(f"\n[systemctl status {service}]\n")
+                    f.write(result.stdout[:2000])  # Limit output
+
+            # Check port 80 usage
+            f.write("\n[Port 80 usage (ss -tlnp)]\n")
+            result = subprocess.run(
+                ['ss', '-tlnp'],
+                capture_output=True, text=True
+            )
+            for line in result.stdout.split('\n'):
+                if ':80 ' in line or 'LISTEN' in line[:20]:
+                    f.write(line + "\n")
+
+            # 4. Apache error log (system)
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[4] System Apache Error Logs\n")
+            f.write("-"*80 + "\n")
+
+            apache_logs = [
+                '/var/log/apache2/error.log',
+                '/var/log/httpd/error_log',
+            ]
+            for log_path in apache_logs:
+                if Path(log_path).exists():
+                    f.write(f"\n[{log_path} - last 50 lines]\n")
+                    result = subprocess.run(
+                        ['tail', '-50', log_path],
+                        capture_output=True, text=True
+                    )
+                    f.write(result.stdout if result.stdout else "(empty or permission denied)\n")
+
+            # 5. dmesg (last 30 lines)
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[5] Recent dmesg Output\n")
+            f.write("-"*80 + "\n")
+
+            result = subprocess.run(
+                ['dmesg', '--time-format=reltime'],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                f.write('\n'.join(lines[-30:]))
+            else:
+                # Try without --time-format for older systems
+                result = subprocess.run(['dmesg'], capture_output=True, text=True)
+                lines = result.stdout.split('\n')
+                f.write('\n'.join(lines[-30:]))
+
+            # 6. Memory and disk status
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[6] System Resources\n")
+            f.write("-"*80 + "\n")
+
+            f.write("\n[free -h]\n")
+            result = subprocess.run(['free', '-h'], capture_output=True, text=True)
+            f.write(result.stdout)
+
+            f.write("\n[df -h /]\n")
+            result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True)
+            f.write(result.stdout)
+
+            f.write("\n" + "="*80 + "\n")
+            f.write("END OF DIAGNOSTICS\n")
+            f.write("="*80 + "\n")
+
+        print(f"  [DIAG] Error diagnostics saved: {diag_file}")
+
+        # Also print key info to stdout
+        print(f"  [INFO] Check {diag_file} for detailed diagnostics")
+        return diag_file
 
     def ensure_upload_disabled(self):
         """
@@ -968,7 +1139,26 @@ class ApacheRunner:
         else:
             print(f"  [OK] End frequency recorded")
 
-        if returncode == 0:
+        # Check for PTS-reported test failures in the log (even if returncode is 0)
+        pts_test_failed = False
+        if log_file.exists():
+            try:
+                log_content = log_file.read_text(errors='ignore')
+                # PTS reports failures with these messages
+                failure_patterns = [
+                    'quit with a non-zero exit status',
+                    'failed to properly run',
+                    'The following tests failed',
+                ]
+                for pattern in failure_patterns:
+                    if pattern.lower() in log_content.lower():
+                        pts_test_failed = True
+                        print(f"\n[WARN] PTS reported test failure: '{pattern}' found in log")
+                        break
+            except Exception as e:
+                print(f"  [WARN] Could not check log for failures: {e}")
+
+        if returncode == 0 and not pts_test_failed:
             print(f"\n[OK] Benchmark completed successfully")
             print(f"     Thread log: {log_file}")
             print(f"     Stdout log: {stdout_log}")
@@ -991,6 +1181,28 @@ class ApacheRunner:
                 print(f"  [ERROR] Failed to parse perf stats: {e}")
                 print(f"  [INFO] Benchmark results are still valid, continuing...")
 
+        elif pts_test_failed:
+            # PTS completed but some tests failed
+            print(f"\n[WARN] Benchmark completed with some test failures")
+            print(f"     Thread log: {log_file}")
+            print(f"     Stdout log: {stdout_log}")
+
+            # Dump detailed error diagnostics for failed tests
+            self.dump_error_diagnostics(num_threads, log_file)
+
+            # Still try to parse perf stats
+            try:
+                perf_summary = self.parse_perf_stats_and_freq(
+                    perf_stats_file,
+                    freq_start_file,
+                    freq_end_file,
+                    cpu_list
+                )
+                with open(perf_summary_file, 'w') as f:
+                    json.dump(perf_summary, f, indent=2)
+            except Exception:
+                pass  # Ignore perf parsing errors for failed tests
+
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
             err_file = self.results_dir / f"{num_threads}-thread.err"
@@ -998,6 +1210,9 @@ class ApacheRunner:
                 f.write(f"Benchmark failed with return code {returncode}\n")
                 f.write(f"See {log_file} for details.\n")
             print(f"     Error log: {err_file}")
+
+            # Dump detailed error diagnostics
+            self.dump_error_diagnostics(num_threads, log_file)
             return False
 
         return True
