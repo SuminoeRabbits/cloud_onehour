@@ -2438,12 +2438,12 @@ class OCIProvider(CloudProvider):
         """Initialize OCI shared resources (Compartment, Subnet, AD) from environment variables."""
         import os
 
-        # Priority: environment variables > config file
+        # Priority: environment variables > config file (except region: config file > env var)
         # This allows for secure credential management without hardcoding
         compartment_id = os.getenv('OCI_COMPARTMENT_ID') or self.csp_config.get('compartment_id')
         subnet_id = os.getenv('OCI_SUBNET_ID') or self.csp_config.get('subnet_id')
         availability_domain = os.getenv('OCI_AVAILABILITY_DOMAIN') or self.csp_config.get('availability_domain')
-        region = os.getenv('OCI_REGION') or self.csp_config.get('region', 'us-ashburn-1')
+        region = self.csp_config.get('region') or os.getenv('OCI_REGION') or 'us-ashburn-1'
 
         # Validate required parameters
         if not compartment_id:

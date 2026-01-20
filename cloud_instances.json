@@ -134,7 +134,7 @@
   },
   "oci": {
     "enable": true,
-    "region": "ap-tokyo-1",
+    "region": "us-ashburn-1",
     "instances": [
       {
         "enable": false,
@@ -165,7 +165,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": true,
+        "enable": false,
         "testloads": false,
         "type": "VM.Standard.A1.Flex",
         "arch": "arm64",
@@ -179,9 +179,9 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
-        "type": "A2.Flex",
+        "type": "VM.Standard.A2.Flex",
         "arch": "arm64",
         "hostname": "oci-a2-flex-arm64",
         "ocpus": 4,
@@ -193,9 +193,9 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
-        "type": "A4.Flex",
+        "type": "VM.Standard.A4.Flex",
         "arch": "arm64",
         "hostname": "oci-a4-flex-arm64",
         "ocpus": 4,
