@@ -582,7 +582,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     benchmark_name = benchmark_dir.name
 
     # Case 4 special benchmarks (per README_results.md)
-    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1", "sysbench-1.1.0", "java-jmh-1.0.1"]
+    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1", "sysbench-1.1.0", "java-jmh-1.0.1", "ffmpeg-7.0.1"]
     is_case4 = benchmark_name in case4_benchmarks
 
     # Find all thread counts from <N>-thread.json files (Case 1 & 2)
@@ -625,8 +625,14 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         thread_data = process_thread_data(benchmark_dir, thread_num)
         if thread_data is None:
             # thread_data can be None if required files are missing
-            # Try to process anyway with minimal perf_stat
+            # For Case 4, try to read freq files if they exist
             thread_data = {"perf_stat": {}}
+            freq_start = benchmark_dir / f"{thread_num}-thread_freq_start.txt"
+            freq_end = benchmark_dir / f"{thread_num}-thread_freq_end.txt"
+            if freq_start.exists():
+                thread_data["perf_stat"]["start_freq"] = read_freq_file(freq_start)
+            if freq_end.exists():
+                thread_data["perf_stat"]["end_freq"] = read_freq_file(freq_end)
 
         # Extract test results (README_results.md準拠)
         # Case 1: summary.jsonと<N>-thread.jsonの両方が存在
@@ -997,6 +1003,61 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'ops' in line.lower()]
                             excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
                             print(f"Warning: Could not find 'Average: X Ops/s' pattern in {thread_log}", file=sys.stderr)
+                            print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                            print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+
+                    elif benchmark_name == "ffmpeg-7.0.1":
+                        # Per README_results.md Case 4 - ffmpeg-7.0.1:
+                        # FFmpeg has multiple tests with format: "Encoder: <encoder> - Scenario: <scenario>"
+                        # Each test outputs "Average: XX.XX FPS"
+                        # Example patterns in log:
+                        #   Encoder: libx264 - Scenario: Live:
+                        #       101.08726726911
+                        #   Average: 101.09 FPS
+
+                        # Find all test blocks with Encoder/Scenario and Average FPS
+                        # Pattern to match test header lines like "Encoder: libx264 - Scenario: Live"
+                        test_header_pattern = r'Encoder:\s*(\w+)\s*-\s*Scenario:\s*([^:\n]+)'
+                        fps_pattern = r'Average[:\s]+([\d.]+)\s+FPS'
+
+                        # Find all test headers
+                        test_headers = list(re.finditer(test_header_pattern, log_content, re.IGNORECASE))
+                        fps_matches = list(re.finditer(fps_pattern, log_content, re.IGNORECASE))
+
+                        if test_headers and fps_matches:
+                            # Match each header with its corresponding FPS value
+                            for i, header_match in enumerate(test_headers):
+                                encoder = header_match.group(1)
+                                scenario = header_match.group(2).strip()
+
+                                # Find the FPS value that comes after this header
+                                header_pos = header_match.end()
+                                next_header_pos = test_headers[i + 1].start() if i + 1 < len(test_headers) else len(log_content)
+
+                                # Look for FPS match between this header and the next
+                                for fps_match in fps_matches:
+                                    if header_pos < fps_match.start() < next_header_pos:
+                                        fps_value = float(fps_match.group(1))
+
+                                        # Create test key like "FFmpeg 7.0 - Encoder: libx264 - Scenario: Live"
+                                        test_key = f"FFmpeg 7.0 - Encoder: {encoder} - Scenario: {scenario}"
+                                        description = f"Encoder: {encoder} - Scenario: {scenario}"
+
+                                        test_results[test_key] = {
+                                            "description": description,
+                                            "values": fps_value,
+                                            "raw_values": [fps_value],
+                                            "unit": "FPS",
+                                            "time": "N/A",
+                                            "test_run_times": ["N/A"],
+                                            "cost": "N/A"
+                                        }
+                                        break  # Found the matching FPS, move to next header
+                        else:
+                            # Enhanced debugging
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'fps' in line.lower() or 'encoder' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:10]) if excerpt_lines else "(no relevant lines found)"
+                            print(f"Warning: Could not find FFmpeg test patterns in {thread_log}", file=sys.stderr)
                             print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
                             print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
 
