@@ -1217,13 +1217,13 @@ def check_json_syntax(json_file: Path) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description='Generate one_big_json.json from results directory')
-    parser.add_argument('--dir', type=str, action='append',
+    parser.add_argument('--dir', '-D', type=str, action='append',
                         help='Path to project root (can be specified multiple times). Default: current directory')
-    parser.add_argument('--output', type=str, default='one_big_json.json',
+    parser.add_argument('--output', '-O', type=str, default='one_big_json.json',
                         help='Output JSON file path (default: one_big_json.json)')
-    parser.add_argument('--instance_source', type=str, default='../',
+    parser.add_argument('--instance_source', '-I', type=str, default='../',
                         help='Directory containing cloud_instances.json (default: ../)')
-    parser.add_argument('--merge', nargs='+', metavar='JSON_FILE',
+    parser.add_argument('--merge', '-M', nargs='+', metavar='JSON_FILE',
                         help='Merge multiple JSON files instead of building from directories. Requires --output to be specified.')
 
     args = parser.parse_args()
