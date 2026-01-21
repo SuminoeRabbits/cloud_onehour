@@ -83,12 +83,12 @@ FAILURE_PATTERNS = [
     "timeout",
 ]
 
-# 必須ファイルの定義
+# 必須ファイルの定義（README_results.md準拠）
+# <N>-thread.csv と <N>-thread.json は必須ファイルから除外
 REQUIRED_FILES_PER_THREAD = [
     "{N}-thread_freq_end.txt",
     "{N}-thread_freq_start.txt",
     "{N}-thread_perf_stats.txt",
-    "{N}-thread.csv",
     "{N}-thread.json",
 ]
 
@@ -100,7 +100,8 @@ OPTIONAL_FILES_PER_THREAD = [
 # stdout.logは<benchmark>ディレクトリ直下に必須
 REQUIRED_FILE_BENCHMARK_DIR = "stdout.log"
 
-# ケース4の特殊ベンチマーク（<N>-thread.jsonが不要）
+# ケース4の特殊ベンチマーク
+# （<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しないがテスト完了）
 SPECIAL_BENCHMARKS_CASE4 = [
     "build-gcc-1.5.0",
     "build-linux-kernel-1.17.1",
@@ -219,21 +220,20 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
     is_special_benchmark = benchmark_name in SPECIAL_BENCHMARKS_CASE4
 
     # ケース4の特殊ベンチマークの場合
+    # ケース4は summary.json, <N>-thread_perf_summary.json, <N>-thread.json が
+    # すべて存在しないがテスト完了している特殊例
+    # 必須: <N>-thread.log（結果抽出に必要）, freq_start, freq_end
+    # perf_stats.txt は存在しない場合がある
     if is_special_benchmark:
-        # 必須: freq_start, freq_end, perf_stats
-        required_for_case4 = [
-            f"{n}-thread_freq_start.txt",
-            f"{n}-thread_freq_end.txt",
-            f"{n}-thread_perf_stats.txt",
-        ]
+        # ケース4の必須ファイル（logファイルが必須）
+        thread_log = benchmark_path / f"{n}-thread.log"
+        thread_log_subdir = benchmark_path / f"{n}-thread" / f"{n}-thread.log"
 
-        for req_file in required_for_case4:
-            # ファイルはディレクトリ直下または<N>-thread/サブディレクトリにある可能性
-            file_in_dir = benchmark_path / req_file
-            file_in_subdir = benchmark_path / f"{n}-thread" / req_file
+        if not thread_log.exists() and not thread_log_subdir.exists():
+            missing_files.append(f"{n}-thread.log")
 
-            if not file_in_dir.exists() and not file_in_subdir.exists():
-                missing_files.append(req_file)
+        # freq_start, freq_end はオプション扱い（存在すれば読み込む）
+        # ただし存在チェックは行わない（ケース4の特殊性）
 
         if not missing_files:
             completion_case = 4
@@ -243,12 +243,12 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
 
     # 通常のベンチマーク（ケース1, 2, 3）
 
-    # 必須ファイルのチェック（ケース4以外では<N>-thread.jsonが必須）
+    # 必須ファイルのチェック（README_results.md準拠）
+    # freq_end, freq_start, perf_stats, json が必須
     required_files_to_check = [
         f"{n}-thread_freq_end.txt",
         f"{n}-thread_freq_start.txt",
         f"{n}-thread_perf_stats.txt",
-        f"{n}-thread.csv",
         f"{n}-thread.json",
     ]
 
@@ -262,7 +262,7 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
     if missing_files:
         return False, missing_files, None
 
-    # 完了ケースを判定
+    # 完了ケースを判定（README_results.md準拠）
     summary_json = benchmark_path / "summary.json"
     n_thread_json = benchmark_path / f"{n}-thread.json"
     n_thread_json_subdir = benchmark_path / f"{n}-thread" / f"{n}-thread.json"
@@ -276,11 +276,11 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
     # ケース1: summary.jsonと<N>-thread.jsonの両方が存在
     if has_summary and has_n_thread_json:
         completion_case = 1
-    # ケース2: <N>-thread.jsonが存在
-    elif has_n_thread_json:
+    # ケース2: summary.jsonはないが<N>-thread.jsonが存在
+    elif not has_summary and has_n_thread_json:
         completion_case = 2
-    # ケース3: <N>-thread_perf_summary.jsonが存在
-    elif has_perf_summary:
+    # ケース3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
+    elif not has_n_thread_json and has_perf_summary:
         completion_case = 3
 
     return True, [], completion_case

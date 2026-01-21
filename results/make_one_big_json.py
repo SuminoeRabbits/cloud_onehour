@@ -464,7 +464,6 @@ def process_thread_data(benchmark_dir: Path, thread_num: str) -> Optional[Dict[s
     - <N>-thread_freq_start.txt
     - <N>-thread_freq_end.txt
     - <N>-thread_perf_stats.txt
-    - <N>-thread.csv
     - <N>-thread.json
 
     Optional files:
@@ -474,14 +473,13 @@ def process_thread_data(benchmark_dir: Path, thread_num: str) -> Optional[Dict[s
     freq_start = benchmark_dir / f"{thread_num}-thread_freq_start.txt"
     freq_end = benchmark_dir / f"{thread_num}-thread_freq_end.txt"
     perf_stats = benchmark_dir / f"{thread_num}-thread_perf_stats.txt"
-    thread_csv = benchmark_dir / f"{thread_num}-thread.csv"
     thread_json = benchmark_dir / f"{thread_num}-thread.json"
 
     # Optional file
     perf_summary = benchmark_dir / f"{thread_num}-thread_perf_summary.json"
 
     # Skip if any REQUIRED file is missing
-    required_files = [freq_start, freq_end, perf_stats, thread_csv, thread_json]
+    required_files = [freq_start, freq_end, perf_stats, thread_json]
     if not all(f.exists() for f in required_files):
         return None
 
@@ -565,10 +563,17 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 
     Per README_results.md specification:
         Benchmark completion conditions (4 cases):
-        Case 1: Both summary.json and <N>-thread.json exist
-        Case 2: <N>-thread.json exists (without summary.json)
-        Case 3: <N>-thread_perf_summary.json exists
-        Case 4: Special case for build-* benchmarks without perf_summary.json
+        Case 1: summary.jsonと<N>-thread.jsonの両方が存在
+        Case 2: summary.jsonはないが<N>-thread.jsonが存在
+        Case 3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
+        Case 4: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも
+                存在しないがテスト完了している特殊ベンチマーク:
+                - build-gcc-1.5.0
+                - build-linux-kernel-1.17.1
+                - build-llvm-1.6.0
+                - coremark-1.0.1
+                - sysbench-1.1.0
+                - java-jmh-1.0.1
 
         cost = cost_hour[730h-mo] * time / 3600
         where time is in seconds, so divide by 3600 to convert to hours
@@ -623,11 +628,11 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
             # Try to process anyway with minimal perf_stat
             thread_data = {"perf_stat": {}}
 
-        # Extract test results
-        # Case 1: If summary.json exists with <N>-thread.json, use both
-        # Case 2: If only <N>-thread.json exists (no summary.json), extract directly from it
-        # Case 3: If <N>-thread_perf_summary.json exists, use it (with or without <N>-thread.json)
-        # Case 4: Special case for build-* benchmarks (use <N>-thread.log)
+        # Extract test results (README_results.md準拠)
+        # Case 1: summary.jsonと<N>-thread.jsonの両方が存在
+        # Case 2: summary.jsonはないが<N>-thread.jsonが存在
+        # Case 3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
+        # Case 4: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しない特殊ベンチマーク
         test_results = {}
         has_thread_log = thread_num in log_thread_nums
 
@@ -671,8 +676,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                         "cost": cost
                     }
 
-        elif has_thread_json:
-            # Case 2: No summary.json, extract directly from <N>-thread.json
+        elif has_thread_json and not summary_data:
+            # Case 2: summary.jsonはないが<N>-thread.jsonが存在
             pts_json = benchmark_dir / f"{thread_num}-thread.json"
             if pts_json.exists():
                 try:
@@ -715,17 +720,16 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                 except (json.JSONDecodeError, IOError) as e:
                     print(f"Warning: Failed to read {pts_json}: {e}", file=sys.stderr)
 
-        elif has_perf_summary:
-            # Case 3: <N>-thread_perf_summary.json exists (with or without <N>-thread.json)
+        elif has_perf_summary and not has_thread_json:
+            # Case 3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
             # Per README_results.md Case 3:
             # - values: N/A (default, overridden for specific benchmarks)
             # - raw_values: N/A (default, overridden for specific benchmarks)
             # - unit: N/A (default, overridden for specific benchmarks)
             # - test_run_times: [elapsed_time_sec] from <N>-thread_perf_summary.json
-            # - description: from <N>-thread.json if available, else "perf stat only"
+            # - description: "perf stat only"
             #
             # Exception handling for specific benchmarks (per README_results.md):
-            # - coremark-1.0.1: Extract from <N>-thread.log "Average: XXXX.XXXX Iterations/Sec"
             # - build-gcc-1.5.0: Extract from <N>-thread.log "Average: XXXX.XXXX Seconds"
             # - build-linux-kernel-1.17.1: Extract from <N>-thread.log "Average: XXXX.XXXX Seconds"
             # - build-llvm-1.6.0: Extract from <N>-thread.log "Average: XXXX.XXXX Seconds"
@@ -836,11 +840,13 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                 except (json.JSONDecodeError, IOError) as e:
                     print(f"Warning: Failed to read {perf_summary_file}: {e}", file=sys.stderr)
 
-        elif is_case4 and has_thread_log:
-            # Case 4: Special case for benchmarks without perf_summary.json (use <N>-thread.log)
+        elif is_case4 and has_thread_log and not has_thread_json and not has_perf_summary:
+            # Case 4: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しない特殊ベンチマーク
             # Per README_results.md Case 4:
             # - coremark-1.0.1: Extract "Average: XXXX.XXXX Iterations/Sec" from <N>-thread.log
             # - build-*: Extract "Average: XXXX.XXXX Seconds" from <N>-thread.log
+            # - sysbench-1.1.0: Extract RAM_Memory (MiB/sec) and CPU (Events Per Second)
+            # - java-jmh-1.0.1: Extract "Average: XXXX.XXXX Ops/s"
             thread_log = benchmark_dir / f"{thread_num}-thread.log"
 
             if thread_log.exists():

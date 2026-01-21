@@ -92,7 +92,6 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `<N>-thread_freq_end.txt`[必須ファイル]:スレッド数`<N>`テスト開始時のCPUクロックリスト。
 - `<N>-thread_perf_stats.txt`[必須ファイル]:スレッド数`<N>`テストのperf stat raw value。
 - `<N>-thread_perf_summary.json`[オプションファイル]:スレッド数`<N>`テストのperf stat summary。
-- `<N>-thread.csv`[必須ファイル]:すべてのスレッド数`<N>`テストのCSVまとめ。
 - `<N>-thread.json`[必須ファイル]:すべてのスレッド数`<N>`テストのJSONまとめ。
 - `stdout.log`[必須ファイル]:テスト実施時のSTDOUT。
 
@@ -101,9 +100,9 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 ### summary file in `<files>`
 `<benchmark>`が完了している条件は４つのケースがありうる。
 1. `<files>`中に`summary.json`と`<N>-thread.json`の両方が存在
-2. `<files>`中に`<N>-thread.json`が存在
-3. `<files>`中に`<N>-thread_perf_summary.json`が存在
-4. `<files>`中に`<N>-thread_perf_summary.json`が存在しないがテストが完了している特殊例。このケース４の特殊例は
+2. `<files>`中に`summary.json`はないが`<N>-thread.json`が存在
+3. `<files>`中に`<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在
+4. `<files>`中に`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しないがテストが完了している特殊例。ただし本当に終了した。このケース４の特殊例は
     - `<benchmark>="build-gcc-1.5.0"`
     - `<benchmark>="build-linux-kernel-1.17.1"`
     - `<benchmark>="build-llvm-1.6.0"`
@@ -344,7 +343,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 ケース４でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
 
 - `<benchmark>="build-gcc-1.5.0"`:
-    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
+    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`が存在しなければならない。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"Seconds"`
@@ -352,7 +351,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **description**: "Timed GCC Compilation 15.2"
 
 - `<benchmark>="build-linux-kernel-1.17.1"`:
-    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
+    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`が存在しなければならない。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"Seconds"`
@@ -360,7 +359,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **description**: "Timed Linux Kernel Compilation 6.15"
 
 - `<benchmark>="build-llvm-1.6.0"`:
-    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`に注目。`<N>`が複数あるのでそれらすべてに適応。
+    `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`が存在しなければならない。`<N>`が複数あるのでそれらすべてに適応。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"Seconds"`
@@ -368,7 +367,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **description**: "Timed LLVM Compilation 21.1"
 
 - `<benchmark>="coremark-1.0.1"`:
-    `<N>-thread.log`内の `Average: XXXX.XXXX Iterations/Sec`に注目。
+    `<N>-thread.log`内の `Average: XXXX.XXXX Iterations/Sec`が存在しなければならない。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"Iterations/Sec"`
@@ -377,7 +376,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 
 - `<benchmark>="sysbench-1.1.0"`:
   - "test_name": "RAM_Memory"
-    `<N>-thread.log`内の `Average: XXXX.XXXX MiB/sec`に注目。
+    `<N>-thread.log`内の `Average: XXXX.XXXX MiB/sec`が存在しなければならない。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"MiB/sec"`
@@ -392,7 +391,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **description**: "Sysbench 1.0.20 CPU"
 
 - `<benchmark>="java-jmh-1.0.1"`:
-    `<N>-thread.log`内の `Average: XXXX.XXXX Ops/s`に注目。
+    `<N>-thread.log`内の `Average: XXXX.XXXX Ops/s`が存在しなければならない。
     - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
     - **unit**: `"Ops/s"`
