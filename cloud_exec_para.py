@@ -1197,9 +1197,10 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     os_version = config['common']['os_version'] # e.g. "22.04"
     arch_filter = "Canonical Ubuntu" 
     # For OCI, we need to search carefully. Canonical images usually have "Canonical-Ubuntu-22.04-..." names.
-    # Architecture: "VM.Standard.A1.Flex" -> we need aarch64 image. "VM.Standard.E*" -> x86_64.
-    
-    is_arm = "A1" in inst['type'] or "Ampere" in inst['type'] or inst.get('arch') == 'arm64'
+    # Architecture: "VM.Standard.A1.Flex", "VM.Standard.A4.Flex" -> we need aarch64 image. "VM.Standard.E*" -> x86_64.
+    # OCI ARM shapes have ".A" in the type name (e.g., VM.Standard.A1.Flex, VM.Standard.A4.Flex)
+    # Use regex to match ".A" followed by digit to catch current and future ARM shapes (A1, A4, A5, etc.)
+    is_arm = bool(re.search(r'\.A\d', inst['type'])) or "Ampere" in inst['type'] or inst.get('arch') == 'arm64'
     op_sys = "Canonical Ubuntu"
     
     # OCI image search is tricky via CLI with just flags. Use list and grep/query.
@@ -1224,13 +1225,23 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     image_id = run_cmd(image_query, logger=logger)
     
     if not image_id or image_id == "None":
-        # Fallback: try searching without shape filter (sometimes shape compatibility check filters too much)
-        image_query_fallback = (
-            f"oci compute image list --compartment-id {compartment_id} "
-            f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
-            f"--sort-by TIMECREATED --sort-order DESC "
-            f"--query 'data[0].id' --raw-output"
-        )
+        # Fallback: try searching without shape filter but with architecture filter
+        # For ARM shapes (A1, A4), we need aarch64 images
+        if is_arm:
+            # Search for aarch64 images specifically
+            image_query_fallback = (
+                f"oci compute image list --compartment-id {compartment_id} "
+                f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+                f"--sort-by TIMECREATED --sort-order DESC "
+                f"--query \"data[?contains(\\\"display-name\\\", 'aarch64')] | [0].id\" --raw-output"
+            )
+        else:
+            image_query_fallback = (
+                f"oci compute image list --compartment-id {compartment_id} "
+                f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+                f"--sort-by TIMECREATED --sort-order DESC "
+                f"--query 'data[0].id' --raw-output"
+            )
         image_id = run_cmd(image_query_fallback, logger=logger)
 
     if not image_id or image_id == "None":

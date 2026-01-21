@@ -60,10 +60,18 @@ def get_oci_instances():
     try:
         cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
         if cid_proc.returncode != 0:
-            return [["OCI", "N/A", "ERROR", "N/A", "Auth failed or Config missing"]]
+            # 詳細なエラーメッセージを取得
+            err_msg = cid_proc.stderr.strip().split('\n')[0] if cid_proc.stderr else "Unknown error"
+            return [["OCI", "N/A", "ERROR", "N/A", f"Auth/Config error: {err_msg[:40]}..."]]
         compartment_id = cid_proc.stdout.strip()
-    except Exception:
+        if not compartment_id:
+            return [["OCI", "N/A", "ERROR", "N/A", "No compartment found"]]
+    except FileNotFoundError:
         return [["OCI", "N/A", "ERROR", "N/A", "OCI CLI not installed"]]
+    except subprocess.TimeoutExpired:
+        return [["OCI", "N/A", "ERROR", "N/A", "Timeout (Network unreachable)"]]
+    except Exception as e:
+        return [["OCI", "N/A", "ERROR", "N/A", f"Exception: {str(e)[:40]}"]]
 
     # 2. インスタンス取得
     cmd = ["oci", "compute", "instance", "list", "--compartment-id", compartment_id, "--output", "json"]
@@ -74,8 +82,15 @@ def get_oci_instances():
     rows = []
     for inst in data.get("data", []):
         # TERMINATEDインスタンスは除外
-        if inst.get("lifecycle-state") != "TERMINATED":
-            rows.append(["OCI", inst.get("region", "N/A"), inst.get("display-name"), inst.get("id")[-10:], inst.get("lifecycle-state")])
+        lifecycle_state = inst.get("lifecycle-state", "UNKNOWN")
+        if lifecycle_state != "TERMINATED":
+            rows.append([
+                "OCI",
+                inst.get("region", "N/A"),
+                inst.get("display-name", "N/A"),
+                inst.get("id", "")[-10:],
+                lifecycle_state
+            ])
     return rows if rows else [["OCI", "N/A", "(No Instances Found)", "-", "-"]]
 
 def main():
