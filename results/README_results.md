@@ -86,29 +86,60 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 このようなCPUアフィニティの分散は`arm64`系プロセッサにおいて`vCPU=physical CPU`である場合は意味がをなさないが、両方のISAで対応できるようにこのような仕様にしている。
 
 ### How to distingush `<N>` in `<files>`
-スレッド数`<N>`でテストが実行された際は、ログが`<files>`中の`<N>-thread...`で始まるファイル名で保存されている。これらが指定した`<N>`に対して[必須ファイル]がすべて揃っている状態でテスト完了とする。[オプションファイル]は出現しない場合もある。
+スレッド数`<N>`でテストが実行された際は、ログが`<files>`中の`<N>-thread...`で始まるファイル名で保存されている。
 
-- `<N>-thread_freq_end.txt`[必須ファイル]:スレッド数`<N>`テスト終了時のCPUクロックリスト。
-- `<N>-thread_freq_end.txt`[必須ファイル]:スレッド数`<N>`テスト開始時のCPUクロックリスト。
-- `<N>-thread_perf_stats.txt`[必須ファイル]:スレッド数`<N>`テストのperf stat raw value。
-- `<N>-thread_perf_summary.json`[オプションファイル]:スレッド数`<N>`テストのperf stat summary。
-- `<N>-thread.json`[必須ファイル]:すべてのスレッド数`<N>`テストのJSONまとめ。
-- `stdout.log`[必須ファイル]:テスト実施時のSTDOUT。
+#### ファイル一覧
+- `<N>-thread_freq_end.txt`:スレッド数`<N>`テスト終了時のCPUクロックリスト。
+- `<N>-thread_freq_start.txt`:スレッド数`<N>`テスト開始時のCPUクロックリスト。
+- `<N>-thread_perf_stats.txt`:スレッド数`<N>`テストのperf stat raw value。
+- `<N>-thread_perf_summary.json`:スレッド数`<N>`テストのperf stat summary。
+- `<N>-thread.json`:すべてのスレッド数`<N>`テストのJSONまとめ。
+- `<N>-thread.log`:スレッド数`<N>`テストの実行ログ。
+- `stdout.log`:テスト実施時のSTDOUT。
 
-[注意][必須ファイル]がそろっていない場合はテスト完了ではないので処理を行わない。
+[注意]上記ファイルの必須/オプションの区別は下記ケース毎に異なる。
 
 ### summary file in `<files>`
-`<benchmark>`が完了している条件は４つのケースがありうる。
-1. `<files>`中に`summary.json`と`<N>-thread.json`の両方が存在
-2. `<files>`中に`summary.json`はないが`<N>-thread.json`が存在
-3. `<files>`中に`<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在
-4. `<files>`中に`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しないがテストが完了している特殊例。ただし本当に終了した。このケース４の特殊例は
-    - `<benchmark>="build-gcc-1.5.0"`
-    - `<benchmark>="build-linux-kernel-1.17.1"`
-    - `<benchmark>="build-llvm-1.6.0"`
-    - `<benchmark>="coremark-1.0.1"`
-    - `<benchmark>="sysbench-1.1.0"`
-    - `<benchmark>="java-jmh-1.0.1"`
+`<benchmark>`が完了している条件は４つのケースがありうる。必須ファイルはケース毎に異なる。
+
+#### ケース1: `summary.json`と`<N>-thread.json`の両方が存在
+**必須ファイル:**
+- `<N>-thread_freq_end.txt`
+- `<N>-thread_freq_start.txt`
+- `<N>-thread_perf_stats.txt`
+- `<N>-thread.json`
+- `summary.json`
+
+#### ケース2: `summary.json`はないが`<N>-thread.json`が存在
+**必須ファイル:**
+- `<N>-thread_freq_end.txt`
+- `<N>-thread_freq_start.txt`
+- `<N>-thread_perf_stats.txt`
+- `<N>-thread.json`
+
+#### ケース3: `<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在
+**必須ファイル:**
+- `<N>-thread_freq_end.txt`
+- `<N>-thread_freq_start.txt`
+- `<N>-thread_perf_stats.txt`
+- `<N>-thread_perf_summary.json`
+
+#### ケース4: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）
+以下のベンチマークはPTSの出力形式が異なるため、`<N>-thread.log`から直接結果を抽出する。
+- `<benchmark>="build-gcc-1.5.0"`
+- `<benchmark>="build-linux-kernel-1.17.1"`
+- `<benchmark>="build-llvm-1.6.0"`
+- `<benchmark>="coremark-1.0.1"`
+- `<benchmark>="sysbench-1.1.0"`
+- `<benchmark>="java-jmh-1.0.1"`
+- `<benchmark>="ffmpeg-7.0.1"`
+
+**必須ファイル:**
+- `<N>-thread.log`（結果抽出に必須）
+
+**オプションファイル:**
+- `<N>-thread_freq_end.txt`（存在すれば読み込む）
+- `<N>-thread_freq_start.txt`（存在すれば読み込む）
 
 [注意]これら４条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
 
@@ -397,6 +428,25 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **unit**: `"Ops/s"`
     - **test_run_times**: "N/A"
     - **description**: "Java JMH"
+
+- `<benchmark>="ffmpeg-7.0.1"`:
+    `<N>-thread.log`内に複数のテストが存在する。各テストは`Encoder: <encoder> - Scenario: <scenario>`の形式でヘッダーがあり、その後に`Average: XXXX.XX FPS`の形式で結果が出力される。
+    - **test_name**: `"FFmpeg 7.0 - Encoder: <encoder> - Scenario: <scenario>"`（複数存在）
+    - **values**: `<N>-thread.log`から`XXXX.XX` を抽出
+    - **raw_values**: `<N>-thread.log`から`XXXX.XX` を抽出
+    - **unit**: `"FPS"`
+    - **test_run_times**: "N/A"
+    - **description**: `"Encoder: <encoder> - Scenario: <scenario>"`
+
+    例えば以下のテストが存在する：
+    - "FFmpeg 7.0 - Encoder: libx264 - Scenario: Live"
+    - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Live"
+    - "FFmpeg 7.0 - Encoder: libx264 - Scenario: Upload"
+    - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Upload"
+    - "FFmpeg 7.0 - Encoder: libx264 - Scenario: Platform"
+    - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Platform"
+    - "FFmpeg 7.0 - Encoder: libx264 - Scenario: Video On Demand"
+    - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Video On Demand"
 
 ###### descriptionによるマッチング
 [summary file](#summary-file-in-files)のケース１，２の場合は

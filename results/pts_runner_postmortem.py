@@ -109,6 +109,7 @@ SPECIAL_BENCHMARKS_CASE4 = [
     "coremark-1.0.1",
     "sysbench-1.1.0",
     "java-jmh-1.0.1",
+    "ffmpeg-7.0.1",
 ]
 
 
