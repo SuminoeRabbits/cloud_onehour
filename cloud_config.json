@@ -48,7 +48,8 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tinymembench-1.0.2.py 1 --quick > /tmp/pts_runner_tinymembench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_memcached-1.2.0.py --quick > /tmp/pts_runner_memcached.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_numpy-1.2.1.py > /tmp/pts_runner_numpy.log 2>&1"
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_numpy-1.2.1.py > /tmp/pts_runner_numpy.log 2>&1",
+      "cd ~/cloud_onehour/results && ./pts_runner_postmortem.py"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
