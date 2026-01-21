@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
 one_big_json_analytics.py
-Version: v1.0.0
-Generated: 2026-01-18
+Version: v1.2.1
+Generated: 2026-01-21
 
 This script analyzes one_big_json.json and generates four types of comparisons:
 1. Performance comparison - Absolute performance across different machines
 2. Cost comparison - Cost efficiency across different machines
 3. Thread scaling comparison - Thread scaling characteristics within same machine
 4. CSP instance comparison - Cost efficiency within same CSP
+5. Benchmark configuration analysis - Classification of benchmarks based on thread usage
 """
 
 import json
@@ -27,9 +28,9 @@ def get_version_info() -> str:
             ['git', 'rev-parse', '--short', 'HEAD'],
             stderr=subprocess.DEVNULL
         ).decode('utf-8').strip()
-        return f"v1.0.0-g{git_hash}"
+        return f"v1.1.0-g{git_hash}"
     except:
-        return "v1.0.0-gunknown"
+        return "v1.1.0-gunknown"
 
 
 def validate_json_syntax(file_path: Path) -> bool:
@@ -83,13 +84,10 @@ def is_values_based(test_data: Dict[str, Any]) -> bool:
     return "values" in test_data and test_data["values"] != "N/A"
 
 
-def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+def performance_comparison(data: Dict[str, Any], ref_machine: str, ref_os: str) -> Dict[str, Any]:
     """
-    Generate performance comparison with aws-m8a-2xlarge-amd64/Ubuntu_25_04 as reference (100)
+    Generate performance comparison with specified machine/OS as reference (100)
     """
-    ref_machine = "aws-m8a-2xlarge-amd64"
-    ref_os = "Ubuntu_25_04"
-
     # Find reference values
     if ref_machine not in data:
         return {
@@ -140,13 +138,8 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             "version_info": get_version_info(),
             "date": datetime.now().strftime("%Y%m%d-%H%M%S")
         },
-        "description": "Performance comparison",
-        "reference": {
-            "machine": ref_machine,
-            "os": ref_os,
-            "value": 100
-        },
-        "machines": {}
+        "description": "Performance comparison by machine_name",
+        "workload": {}
     }
 
     for machine_name, machine_data in data.items():
@@ -214,15 +207,14 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                                 # Time-based, lower is better, so invert
                                 score = round((ref_info["value"] / perf_val) * 100, 2)
 
-                        workload_key = f"{testcat}/{benchmark}/{test_name}"
-                        result["machines"][machine_key]["workload"][workload_key] = score
-
-            # Check for missing tests in this machine
-            for key in reference_values.keys():
-                testcat, benchmark, test_name = key
-                workload_key = f"{testcat}/{benchmark}/{test_name}"
-                if workload_key not in result["machines"][machine_key]["workload"]:
-                    result["machines"][machine_key]["workload"][workload_key] = "unknown"
+                        # Build nested structure per specification:
+                        # workload > category > benchmark > test_name > os > machinename
+                        if testcat not in result["workload"]: result["workload"][testcat] = {}
+                        if benchmark not in result["workload"][testcat]: result["workload"][testcat][benchmark] = {}
+                        if test_name not in result["workload"][testcat][benchmark]: result["workload"][testcat][benchmark][test_name] = {}
+                        if os_name not in result["workload"][testcat][benchmark][test_name]: result["workload"][testcat][benchmark][test_name][os_name] = {}
+                        
+                        result["workload"][testcat][benchmark][test_name][os_name][machine_name] = score
 
     return result
 
@@ -473,11 +465,6 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
         # Generate comparison for all machines in this CSP
         result["csps"][csp] = {
-            "reference": {
-                "machine": ref_machine_name,
-                "os": ref_os,
-                "value": 100
-            },
             "machines": {}
         }
 
@@ -494,8 +481,6 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                         "machinename": machine_name,
                         "os": os_name,
                         "CSP": csp,
-                        "cpu_name": machine_data.get("cpu_name", "unknown"),
-                        "cost_hour": hourly_cost
                     },
                     "workload": {}
                 }
@@ -648,6 +633,81 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def benchmark_configuration_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Analyze benchmark configurations based on thread counts and vCPU.
+    Classifies benchmarks into:
+    - Scaling (N={1..vCPU}): Supports both scale-up and scale-out
+    - Multi-thread (N=vCPU): Fixed thread count, scale-out only
+    - Single-thread (N=1): Fixed thread count, scale-up only
+    - Fixed-thread (Other): Fixed thread count != 1 and != vCPU
+    """
+    result = {
+        "generation_log": {
+            "version_info": get_version_info(),
+            "date": datetime.now().strftime("%Y%m%d-%H%M%S")
+        },
+        "description": "Benchmark configuration analysis",
+        "machines": {}
+    }
+
+    for machine_name, machine_data in data.items():
+        if machine_name == "generation_log":
+            continue
+
+        if "os" not in machine_data:
+            continue
+
+        total_vcpu = machine_data.get("total_vcpu", 0)
+
+        for os_name, os_data in machine_data["os"].items():
+            machine_key = f"{machine_name}/{os_name}"
+            result["machines"][machine_key] = {
+                "header": {
+                    "machinename": machine_name,
+                    "os": os_name,
+                    "total_vcpu": total_vcpu
+                },
+                "configurations": {}
+            }
+
+            if "testcategory" not in os_data:
+                continue
+
+            for testcat, testcat_data in os_data["testcategory"].items():
+                if "benchmark" not in testcat_data:
+                    continue
+                for benchmark, bench_data in testcat_data["benchmark"].items():
+                    if "thread" not in bench_data:
+                        continue
+
+                    thread_counts = sorted([int(t) for t in bench_data["thread"].keys()])
+                    
+                    if not thread_counts:
+                        config_type = "Unknown (No threads)"
+                    elif len(thread_counts) > 1:
+                        # Case 3: <N>={1,2,3...,vCPU}
+                        config_type = f"Scaling (Threads: {min(thread_counts)}..{max(thread_counts)})"
+                        if max(thread_counts) != total_vcpu and total_vcpu > 0:
+                            config_type += f" [Warning: Max thread {max(thread_counts)} != vCPU {total_vcpu}]"
+                    else:
+                        # Fixed thread count
+                        thread_count = thread_counts[0]
+                        if thread_count == total_vcpu:
+                            # Case 1: <N>=vCPU
+                            config_type = "Multi-thread (Scale-out only)"
+                        elif thread_count == 1:
+                            # Case 2: <N>=1
+                            config_type = "Single-thread (Scale-up only)"
+                        else:
+                            config_type = f"Fixed-thread (N={thread_count})"
+
+                    workload_key = f"{testcat}/{benchmark}"
+                    result["machines"][machine_key]["configurations"][workload_key] = config_type
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Analyze one_big_json.json and generate performance comparisons'
@@ -662,13 +722,19 @@ def main():
                         help='Generate thread scaling comparison only')
     parser.add_argument('--csp', action='store_true',
                         help='Generate CSP instance comparison only')
+    parser.add_argument('--config', action='store_true',
+                        help='Generate benchmark configuration analysis only')
     parser.add_argument('--all', action='store_true',
                         help='Generate all comparisons (default if no option specified)')
+    parser.add_argument('--ref', type=str, default='aws-m8a-2xlarge-amd64',
+                        help='Reference machine name for normalization (default: aws-m8a-2xlarge-amd64)')
+    parser.add_argument('--ref-os', type=str, default='Ubuntu_25_04',
+                        help='Reference OS name for normalization (default: Ubuntu_25_04)')
 
     args = parser.parse_args()
 
     # If no specific option, default to --all
-    if not (args.perf or args.cost or args.th or args.csp or args.all):
+    if not (args.perf or args.cost or args.th or args.csp or args.config or args.all):
         args.all = True
 
     # Validate script syntax (basic check)
@@ -685,16 +751,29 @@ def main():
     if data is None:
         sys.exit(1)
 
+    # Determine reference machine/OS if not in data
+    ref_machine = args.ref
+    ref_os = args.ref_os
+    
+    if ref_machine not in data:
+        # Fallback to the first available machine in the data (excluding generation_log)
+        available_machines = [m for m in data.keys() if m != "generation_log"]
+        if available_machines:
+            ref_machine = available_machines[0]
+            if "os" in data[ref_machine] and data[ref_machine]["os"]:
+                ref_os = list(data[ref_machine]["os"].keys())[0]
+            print(f"Warning: Specified reference '{args.ref}' not found. Using '{ref_machine}/{ref_os}' as fallback.", file=sys.stderr)
+
     # Generate requested comparisons
     results = {}
 
     if args.perf or args.all:
         print("Generating performance comparison...", file=sys.stderr)
-        results["performance_comparison"] = performance_comparison(data)
+        results["performance_comparison"] = performance_comparison(data, ref_machine, ref_os)
 
     if args.cost or args.all:
         print("Generating cost comparison...", file=sys.stderr)
-        results["cost_comparison"] = cost_comparison(data)
+        results["cost_comparison"] = cost_comparison(data, ref_machine, ref_os)
 
     if args.th or args.all:
         print("Generating thread scaling comparison...", file=sys.stderr)
@@ -703,6 +782,10 @@ def main():
     if args.csp or args.all:
         print("Generating CSP instance comparison...", file=sys.stderr)
         results["csp_instance_comparison"] = csp_instance_comparison(data)
+
+    if args.config or args.all:
+        print("Generating benchmark configuration analysis...", file=sys.stderr)
+        results["benchmark_configuration_analysis"] = benchmark_configuration_analysis(data)
 
     # Output to stdout
     print(json.dumps(results, indent=2, ensure_ascii=False))

@@ -4,6 +4,7 @@
 # TOC
 
 - [about README\_analytics](#about-readme_analytics)
+- [TOC](#toc)
 - [Performance comparison](#performance-comparison)
   - [set reference point](#set-reference-point)
   - [output metrix](#output-metrix)
@@ -32,57 +33,73 @@
 - "test_name"に"values"値が存在しない場合は"time"を性能値とする。この場合は低いほど良い。
 
 ## set reference point
-性能値は`"aws-m8a-2xlarge-amd64":"os":"Ubuntu_25_04": `を基準値`100`とし、各workload毎の値を`<benchmark_score>`とする。
+性能値は各workload毎の値を`<benchmark_score>`とする。
 
 ## output metrix
 {
-    description:"Performance comparison",
-    header:{
-        <machinename>,<os>,<testcategocy>,<benchmark>
-    },
+    description:"Performance comparison by machine_name",
     workload:{
-        <test_name>:"<benchmark_score>"
+        <testcategocy>:
+        {
+            <benchmark>:
+            {
+                <test_name>:
+                {
+                    <os>:{
+                        <machinename>:"<benchmark_score>",
+                        <machinename>:"<benchmark_score>",   
+                        .....
+
+                    }
+                    .....
+                }
+                .....
+            }
+            .....
+        }
         .....
     }
 }
 
 ## exception handling
-まず最初に基準値を生成し、その後にworkloadの生成を行う。
-    - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
-    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
-    - 他の<machinename>で存在し基準値に存在しない項目が出てきた場合、Warningを出力し次に進む。
-    - 基準値または比較対象の性能値が`0`の場合、除算エラーを避けるため`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
-    - Warningの際は入力JSONファイルの比較部分の行数を明記する。
-
+例外がある場合はここに記す。
 
 # Cost comparison
 コスト比較の目的は同一のWorkloadを異なる`<machinename>`で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。各workload毎の値を`<benchmark_score>`とする。
 
 ## set reference point
-性能値は`"aws-m8a-2xlarge-amd64":"os":"Ubuntu_25_04": `を基準値`100`とする。
+性能値は`<benchmark_score>`とする。
 
 ## output metrix
 {
-    description:"Cost comparison",
-    header:{
-        <machinename>,<os>,<testcategocy>,<benchmark>
-    },
+    description:"Cost comparison by machine_name",
     workload:{
-        <test_name>:"<benchmark_score>"
+        <testcategocy>:
+        {
+            <benchmark>:
+            {
+                <test_name>:
+                {
+                    <os>:{
+                        <machinename>:"<benchmark_score>",
+                        <machinename>:"<benchmark_score>",   
+                        .....
+                    }
+                    .....
+                }
+                .....
+            }
+            .....
+        }
         .....
     }
 }
 
 ## exception handling
-まず最初に基準値を生成し、その後にworkloadの生成を行う。
-    - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
-    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
-    - 他の<machinename>で存在し基準値に存在しない項目が出てきた場合、Warningを出力し次に進む。
-    - 基準値または比較対象の性能値が`0`の場合、除算エラーを避けるため`"unknown"`と記載しWarningを出力し次に進む。
-    - Warningの際は入力JSONファイルの比較部分の行数を明記する。
+例外がある場合はここに記す。
 
 # Thread scaling comparison
-スレッドスケーリング比較の目的は、同一のWorkloadを同一の`<machinename>`で利用するスレッド数`<N>`を変化させながら実施した際に、その`<machinename>`におけるスレッドスケーリングの特徴を知る事である。各workload毎の値を`<benchmark_score>`とする。
+スレッドスケーリング比較の目的は、同一のWorkloadを同一の`<machinename>`で利用するスレッド数`<N>`を変化させながら実施した際に、その`<machinename>`におけるスレッドスケーリングの特徴を知る事である。各workload毎の値を`<benchmark_score>`とする。スレッド数`<N>`が1通りしか存在しない場合は記載しない。
 
 ## set reference point
 性能値は同一`<machinename>`、同一`<test_name>`でスレッド数が最大値`nproc`時の実行時間を基準値`100`とする。
@@ -91,7 +108,8 @@
 {
     description:"Thread scaling comparison",
     header:{
-        <machinename>,<os>
+        "machinename":<machinename>,
+        "os":<os>
     },
     workload:{
         <testcategocy>,
