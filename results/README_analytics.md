@@ -23,6 +23,7 @@
   - [output metrics](#output-metrics-3)
   - [exception handling](#exception-handling-3)
 - [one\_big\_json\_analytics.py specification](#one_big_json_analyticspy-specification)
+  - [input data format](#input-data-format)
   - [requirement](#requirement)
   - [script version info](#script-version-info)
   - [argument parameters](#argument-parameters)
@@ -34,7 +35,7 @@
 - "test_name"に"values"値が存在しない場合は"time"を性能値とする。この場合は低いほど良い。
 
 ## set reference point
-性能値は各workload毎のRaw data値を`<benchmark_score>`とし、経過時間[s]を`<time>`とする。`<time>`が不明もしくは空白時は"unknown"とする。
+各workload毎の`<values>`値を`<benchmark_score>`とする。経過時間[s]を`<time>`とする。`<time>`が不明もしくは空白時は"unknown"とする。
 
 ## output metrics
 {
@@ -49,11 +50,13 @@
                     <os>:{
                         <machinename>:{
                             "time_score":"<time_score>",
-                            "benchmark_score":"<benchmark_score>"
+                            "benchmark_score":"<benchmark_score>",
+                            "unit":"<unit>"
                             },
                         <machinename>:{
                             "time_score":"<time_score>",
-                            "benchmark_score":"<benchmark_score>"
+                            "benchmark_score":"<benchmark_score>",
+                            "unit":"<unit>"
                             },
                         .....
                     }
@@ -74,7 +77,7 @@
 コスト比較の目的は同一のWorkloadを異なる`<machinename>`で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。
 
 ## set reference point
-各workload毎のRaw data値を`<benchmark_score>`とし、上記で定義される計算機利用料を`<cost_score>`とする。`<cost_score>`が不明な場合は"unknown"とする。
+各workload毎の`<values>`値を`<benchmark_score>`とする。上記で定義される計算機利用料を`<cost_score>`とする。`<cost_score>`が不明な場合は"unknown"とする。
 
 ### cost_scoreの計算式
 `<cost_score>` = `<time>` × `<hourly_rate>`
@@ -95,11 +98,13 @@
                     <os>:{
                         <machinename>:{
                             "cost_score":"<cost_score>",
-                            "benchmark_score":"<benchmark_score>"
+                            "benchmark_score":"<benchmark_score>",
+                            "unit":"<unit>"
                             },
                         <machinename>:{
                             "cost_score":"<cost_score>",
-                            "benchmark_score":"<benchmark_score>"
+                            "benchmark_score":"<benchmark_score>",
+                            "unit":"<unit>"
                             },
                         .....
                     }
@@ -117,9 +122,10 @@
 例外がある場合はここに記す。
 
 # Thread scaling comparison
-スレッドスケーリング比較の目的は、同一のWorkloadを同一の`<machinename>`で利用するスレッド数`<N>`を変化させながら実施した際に、その`<machinename>`におけるスレッドスケーリングの特徴を知る事である。各workload毎の値を`<benchmark_score>`とする。スレッド数`<N>`が1通りしか存在しない場合は記載しない。
+スレッドスケーリング比較の目的は、同一のWorkloadを同一の`<machinename>`で利用するスレッド数`<N>`を変化させながら実施した際に、その`<machinename>`におけるスレッドスケーリングの特徴を知る事である。
 
 ## set reference point
+各workload毎の`<values>`値を`<benchmark_score>`とする。スレッド数`<N>`が1通りしか存在しない場合は記載しない。
 性能値は同一`<machinename>`、同一`<test_name>`でスレッド数`<N>`が最大値時の実行時間を基準値`100`とする。
 
 ## output metrics
@@ -133,9 +139,11 @@
         <testcategory>,
         <benchmark>,
         <test_name>:{
-            "<N>" : "<benchmark_score>"
-            "<N>" : "<benchmark_score>"
-            ....  : ....
+            "unit":"<unit>"{
+                "<N>" : "<benchmark_score>"
+                "<N>" : "<benchmark_score>"
+                ....  : ....
+            }
         }
         .....
     }
