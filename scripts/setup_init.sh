@@ -13,6 +13,7 @@ sudo apt-get -y install sysstat htop aria2 curl
 sudo apt-get -y install flex bison libssl-dev libelf-dev libevent-dev
 sudo apt-get install -y python3-tabulate libexpat1-dev
 sudo apt-get install -y cl-ppcre libpcre3-dev
+sudo apt-get install -y python3-pip
 # 1. Architecture Detection
 ARCH=$(uname -m)
 OS_ID=$(lsb_release -is)
