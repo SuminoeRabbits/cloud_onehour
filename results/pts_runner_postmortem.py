@@ -85,11 +85,11 @@ FAILURE_PATTERNS = [
 
 # 必須ファイルの定義（README_results.md準拠）
 # <N>-thread.csv と <N>-thread.json は必須ファイルから除外
+# （<N>-thread.json の有無はケース1/2/3判定で処理する）
 REQUIRED_FILES_PER_THREAD = [
     "{N}-thread_freq_end.txt",
     "{N}-thread_freq_start.txt",
     "{N}-thread_perf_stats.txt",
-    "{N}-thread.json",
 ]
 
 # オプションファイルの定義
@@ -245,12 +245,12 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
     # 通常のベンチマーク（ケース1, 2, 3）
 
     # 必須ファイルのチェック（README_results.md準拠）
-    # freq_end, freq_start, perf_stats, json が必須
+    # freq_end, freq_start, perf_stats が必須
+    # <N>-thread.json の有無はケース判定で処理する
     required_files_to_check = [
         f"{n}-thread_freq_end.txt",
         f"{n}-thread_freq_start.txt",
         f"{n}-thread_perf_stats.txt",
-        f"{n}-thread.json",
     ]
 
     for req_file in required_files_to_check:
@@ -283,6 +283,9 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
     # ケース3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
     elif not has_n_thread_json and has_perf_summary:
         completion_case = 3
+    else:
+        # <N>-thread.jsonも<N>-thread_perf_summary.jsonも存在しない場合はincomplete
+        return False, [f"{n}-thread.json or {n}-thread_perf_summary.json"], None
 
     return True, [], completion_case
 
