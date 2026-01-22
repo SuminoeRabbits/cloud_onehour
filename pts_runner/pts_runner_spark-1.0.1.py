@@ -630,26 +630,50 @@ class SparkRunner:
 
             # 6. Python 3.13+ compatibility (typing.io / typing.re / pipes removal)
             if self.py_version >= (3, 13):
-                print(f"  [FIX] Applying Python 3.13+ compatibility patches to Spark/PySpark...")
+                print(f"  [FIX] Python 3.13+ detected. Starting robust compatibility patches...")
                 
                 # Ensure all files are writable before patching
                 subprocess.run(['chmod', '-R', '+w', str(install_sh.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                # Extract PySpark zips into the 'python' directory
+                # 6a. Shadowing Check: Remove any local 'typing.py' that shadows the stdlib
+                # This is the primary cause of "'typing' is not a package"
+                shadow_files = list(install_sh.parent.rglob("typing.py*"))
+                if shadow_files:
+                    print(f"  [FIX] Found {len(shadow_files)} shadowing 'typing' files. Removing them...")
+                    for sf in shadow_files:
+                        print(f"    [DEL] {sf.relative_to(install_sh.parent)}")
+                        try:
+                            if sf.is_file(): sf.unlink()
+                            elif sf.is_dir(): shutil.rmtree(sf)
+                        except Exception as e:
+                            print(f"    [ERR] Failed to delete {sf.name}: {e}")
+
+                # 6b. Extract PySpark zips into the 'python' directory
+                # This ensures the extracted 'pyspark' folder is in the PYTHONPATH
+                found_spark_dir = False
                 for spark_dir in install_sh.parent.glob("spark-3.3.0*"):
+                    found_spark_dir = True
                     python_dir = spark_dir / "python"
                     lib_dir = python_dir / "lib"
+                    print(f"  [FIX] Processing Spark directory: {spark_dir.name}")
                     if lib_dir.exists():
                         for zip_file in lib_dir.glob("*.zip"):
-                            print(f"  [FIX] Extracting {zip_file.name} into {python_dir.name}...")
+                            print(f"    [ZIP] Extracting {zip_file.name} into {python_dir.name}...")
                             try:
-                                # Use unzip -o to overwrite and ensure reliability
-                                subprocess.run(['unzip', '-o', str(zip_file), '-d', str(python_dir)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                zip_file.unlink() # Remove zip to force use of patched directory
+                                # Use unzip -o for reliability over shutil
+                                res = subprocess.run(['unzip', '-o', str(zip_file), '-d', str(python_dir)], capture_output=True, text=True)
+                                if res.returncode == 0:
+                                    zip_file.unlink() # Remove zip to force use of patched directory
+                                else:
+                                    print(f"    [ERR] Unzip failed: {res.stderr}")
                             except Exception as e:
-                                print(f"  [WARN] Failed to extract {zip_file.name}: {e}")
+                                print(f"    [WARN] Failed to extract {zip_file.name}: {e}")
+                
+                if not found_spark_dir:
+                    print(f"  [WARN] No 'spark-3.3.0*' directory found in {install_sh.parent}")
 
-                # Patch ALL files and clear pycache to force re-evaluation
+                # 6c. Patch ALL files and clear pycache to force re-evaluation
+                print(f"  [FIX] Running sed replacements for typing.io and pipes...")
                 patch_cmds = [
                     f"find -L {install_sh.parent} -type f -exec sed -i 's/typing\\.io/typing/g; s/typing\\.re/typing/g' {{}} +",
                     f"find -L {install_sh.parent} -type f -exec sed -i 's/\\bimport[[:space:]]\\+pipes\\b/import shlex as pipes/g; s/\\bfrom[[:space:]]\\+pipes[[:space:]]\\+import[[:space:]]\\+quote\\b/from shlex import quote/g; s/\\bpipes\\.quote\\b/shlex.quote/g' {{}} +",
@@ -658,14 +682,24 @@ class SparkRunner:
                     f"find -L {install_sh.parent} -name '*.pyc' -type f -delete"
                 ]
                 for cmd in patch_cmds:
-                    subprocess.run(['bash', '-c', f"LC_ALL=C {cmd}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(['bash', '-c', f"LC_ALL=C {cmd}"], stdout=subprocess.DEVNULL)
                 
-                # Verification step: check if any typing.io remains in .py files
-                check = subprocess.run(['grep', '-r', 'typing.io', str(install_sh.parent)], capture_output=True)
+                # 6d. Verification step with detailed output
+                print(f"  [FIX] Verifying patches...")
+                check = subprocess.run(['grep', '-r', 'typing.io', str(install_sh.parent)], capture_output=True, text=True)
                 if not check.stdout:
-                    print(f"  [OK] Python 3.13 compatibility patches applied and verified.")
+                    print(f"  [OK] No 'typing.io' found. Patch verified.")
                 else:
-                    print(f"  [WARN] Some 'typing.io' occurrences might still remain. Check permissions.")
+                    print(f"  [WARN] 'typing.io' still exists in the following files (first 5):")
+                    for line in check.stdout.splitlines()[:5]:
+                        print(f"    [REMAIN] {line}")
+                
+                # Final check for any remaining typing.py
+                final_shadow = list(install_sh.parent.rglob("typing.py*"))
+                if final_shadow:
+                    print(f"  [CRITICAL] Shadowing files still exist: {final_shadow}")
+                
+                sys.stdout.flush()
 
             if modified:
                 with open(install_sh, 'w') as f:
