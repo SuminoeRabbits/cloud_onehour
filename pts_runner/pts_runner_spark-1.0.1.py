@@ -632,27 +632,40 @@ class SparkRunner:
             if self.py_version >= (3, 13):
                 print(f"  [FIX] Applying Python 3.13+ compatibility patches to Spark/PySpark...")
                 
-                # Extract PySpark zips first, otherwise sed won't find the files inside them
-                for spark_dir in install_sh.parent.glob("spark-3.3.0*"):
-                    if spark_dir.is_dir():
-                        lib_dir = spark_dir / "python" / "lib"
-                        if lib_dir.exists():
-                            for zip_file in lib_dir.glob("*.zip"):
-                                print(f"  [FIX] Extracting {zip_file.name} for patching...")
-                                try:
-                                    shutil.unpack_archive(str(zip_file), str(lib_dir))
-                                    zip_file.unlink() # Remove zip so Spark uses the extracted directory
-                                except Exception as e:
-                                    print(f"  [WARN] Failed to extract {zip_file.name}: {e}")
+                # Ensure all files are writable before patching
+                subprocess.run(['chmod', '-R', '+w', str(install_sh.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                # Patch all .py files (including newly extracted ones)
+                # Extract PySpark zips into the 'python' directory
+                for spark_dir in install_sh.parent.glob("spark-3.3.0*"):
+                    python_dir = spark_dir / "python"
+                    lib_dir = python_dir / "lib"
+                    if lib_dir.exists():
+                        for zip_file in lib_dir.glob("*.zip"):
+                            print(f"  [FIX] Extracting {zip_file.name} into {python_dir.name}...")
+                            try:
+                                # Use unzip -o to overwrite and ensure reliability
+                                subprocess.run(['unzip', '-o', str(zip_file), '-d', str(python_dir)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                zip_file.unlink() # Remove zip to force use of patched directory
+                            except Exception as e:
+                                print(f"  [WARN] Failed to extract {zip_file.name}: {e}")
+
+                # Patch ALL files and clear pycache to force re-evaluation
                 patch_cmds = [
-                    f"find {install_sh.parent} -name '*.py' -exec sed -i 's/typing\\.io/typing/g; s/typing\\.re/typing/g' {{}} +",
-                    f"find {install_sh.parent} -name '*.py' -exec sed -i 's/\\bimport pipes\\b/import shlex as pipes/g; s/\\bfrom pipes import quote\\b/from shlex import quote/g; s/\\bpipes\\.quote\\b/shlex.quote/g' {{}} +"
+                    f"find -L {install_sh.parent} -type f -exec sed -i 's/typing\\.io/typing/g; s/typing\\.re/typing/g' {{}} +",
+                    f"find -L {install_sh.parent} -type f -exec sed -i 's/\\bimport[[:space:]]\\+pipes\\b/import shlex as pipes/g; s/\\bfrom[[:space:]]\\+pipes[[:space:]]\\+import[[:space:]]\\+quote\\b/from shlex import quote/g; s/\\bpipes\\.quote\\b/shlex.quote/g' {{}} +",
+                    # Delete all pycache to force Python to re-read the patched source files
+                    f"find -L {install_sh.parent} -name '__pycache__' -type d -exec rm -rf {{}} +",
+                    f"find -L {install_sh.parent} -name '*.pyc' -type f -delete"
                 ]
                 for cmd in patch_cmds:
-                    subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                print(f"  [OK] Python 3.13 compatibility patches applied.")
+                    subprocess.run(['bash', '-c', f"LC_ALL=C {cmd}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                # Verification step: check if any typing.io remains in .py files
+                check = subprocess.run(['grep', '-r', 'typing.io', str(install_sh.parent)], capture_output=True)
+                if not check.stdout:
+                    print(f"  [OK] Python 3.13 compatibility patches applied and verified.")
+                else:
+                    print(f"  [WARN] Some 'typing.io' occurrences might still remain. Check permissions.")
 
             if modified:
                 with open(install_sh, 'w') as f:
