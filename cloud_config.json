@@ -49,13 +49,14 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_memcached-1.2.0.py --quick > /tmp/pts_runner_memcached.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_numpy-1.2.1.py > /tmp/pts_runner_numpy.log 2>&1",
-      "cd ~/cloud_onehour/results && ./pts_runner_postmortem.py"
+      "cd ~/cloud_onehour/results && ./pts_runner_postmortem.py > /tmp/pts_runner_postmortem.log 2>&1",
+      "cd ~/cloud_onehour/results && ./make_one_big_json.py > /tmp/make_one_big_json.log 2>&1"
     ],
     "cloud_reports_dir": "~/cloud_onehour/results",
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "workload_timeout": 8000,
+    "workload_timeout": 9000,
     "ssh_strict_host_key_checking": false,
     "debug_stdout": true,
     "long_running_indicators": [
