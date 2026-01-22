@@ -629,13 +629,23 @@ class SparkRunner:
             content = '\n'.join(new_lines)
 
             # 6. Python 3.13+ compatibility (typing.io / typing.re / pipes removal)
-            # These modules/submodules were removed in Python 3.13.
-            # Spark 3.3.0 (PySpark) relies on these in some internal utilities.
             if self.py_version >= (3, 13):
                 print(f"  [FIX] Applying Python 3.13+ compatibility patches to Spark/PySpark...")
-                # 1. Replace typing.io/re with typing (symbols moved to main typing module)
-                # 2. Replace pipes.quote with shlex.quote (pipes module removed)
-                # 3. Replace 'import pipes' with 'import shlex as pipes' for minimal code change
+                
+                # Extract PySpark zips first, otherwise sed won't find the files inside them
+                for spark_dir in install_sh.parent.glob("spark-3.3.0*"):
+                    if spark_dir.is_dir():
+                        lib_dir = spark_dir / "python" / "lib"
+                        if lib_dir.exists():
+                            for zip_file in lib_dir.glob("*.zip"):
+                                print(f"  [FIX] Extracting {zip_file.name} for patching...")
+                                try:
+                                    shutil.unpack_archive(str(zip_file), str(lib_dir))
+                                    zip_file.unlink() # Remove zip so Spark uses the extracted directory
+                                except Exception as e:
+                                    print(f"  [WARN] Failed to extract {zip_file.name}: {e}")
+
+                # Patch all .py files (including newly extracted ones)
                 patch_cmds = [
                     f"find {install_sh.parent} -name '*.py' -exec sed -i 's/typing\\.io/typing/g; s/typing\\.re/typing/g' {{}} +",
                     f"find {install_sh.parent} -name '*.py' -exec sed -i 's/\\bimport pipes\\b/import shlex as pipes/g; s/\\bfrom pipes import quote\\b/from shlex import quote/g; s/\\bpipes\\.quote\\b/shlex.quote/g' {{}} +"
