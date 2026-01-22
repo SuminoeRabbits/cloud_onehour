@@ -406,20 +406,48 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - **description**: "Coremark 1.0"
 
 - `<benchmark>="sysbench-1.1.0"`:
-  - "test_name": "RAM_Memory"
-    `<N>-thread.log`内の `Average: XXXX.XXXX MiB/sec`が存在しなければならない。
-    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
-    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    このベンチマークは1つの`<N>-thread.log`内に**2つの独立したテスト**が含まれる。
+    それぞれを別の`<test_name>`として登録する。
+
+    **テスト1: RAM_Memory**
+    - ログ内のセクション: `Test: RAM / Memory:`
+    - パターン: `Average: XXXX.XXXX MiB/sec`
+    - **values**: `XXXX.XXXX` を抽出
+    - **raw_values**: `XXXX.XXXX` を抽出
     - **unit**: `"MiB/sec"`
-    - **test_run_times**: "N/A"
-    - **description**: "Sysbench 1.0.20 Memory"
-  - "test_name": "CPU"
-    `<N>-thread.log`内の `Average: XXXX.XXXX Events Per Second`に注目。
-    - **values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
-    - **raw_values**: `<N>-thread.log`から`XXXX.XXXX` を抽出
+    - **test_run_times**: `"N/A"`
+    - **description**: `"Sysbench 1.0.20 Memory"`
+
+    **テスト2: CPU**
+    - ログ内のセクション: `Test: CPU:`
+    - パターン: `Average: XXXX.XXXX Events Per Second`
+    - **values**: `XXXX.XXXX` を抽出
+    - **raw_values**: `XXXX.XXXX` を抽出
     - **unit**: `"Events Per Second"`
-    - **test_run_times**: "N/A"
-    - **description**: "Sysbench 1.0.20 CPU"
+    - **test_run_times**: `"N/A"`
+    - **description**: `"Sysbench 1.0.20 CPU"`
+
+    **出力例**:
+    ```json
+    "test_name": {
+        "RAM_Memory": {
+            "description": "Sysbench 1.0.20 Memory",
+            "values": 5293.59,
+            "raw_values": [5289.24, 5298.85, 5292.69],
+            "unit": "MiB/sec",
+            "test_run_times": "N/A",
+            "cost": 0.000XXX
+        },
+        "CPU": {
+            "description": "Sysbench 1.0.20 CPU",
+            "values": 826.48,
+            "raw_values": [829.78, 827.55, 822.12],
+            "unit": "Events Per Second",
+            "test_run_times": "N/A",
+            "cost": 0.000XXX
+        }
+    }
+    ```
 
 - `<benchmark>="java-jmh-1.0.1"`:
     `<N>-thread.log`内の `Average: XXXX.XXXX Ops/s`が存在しなければならない。

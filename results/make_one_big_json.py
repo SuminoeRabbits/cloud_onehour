@@ -912,62 +912,82 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 
                     elif benchmark_name == "sysbench-1.1.0":
                         # Per README_results.md Case 4 - sysbench-1.1.0:
-                        # Has two test_names: "RAM_Memory" and "CPU"
-                        # - RAM_Memory: Extract "Average: XXXX.XXXX MiB/sec"
-                        # - CPU: Extract "Average: XXXX.XXXX Events Per Second"
+                        # This benchmark contains TWO independent tests in one <N>-thread.log:
+                        #
+                        # Test 1: RAM_Memory
+                        #   - Log section: "Test: RAM / Memory:"
+                        #   - Pattern: "Average: XXXX.XXXX MiB/sec"
+                        #   - raw_values: Individual values before Average line
+                        #
+                        # Test 2: CPU
+                        #   - Log section: "Test: CPU:"
+                        #   - Pattern: "Average: XXXX.XXXX Events Per Second"
+                        #   - raw_values: Individual values before Average line
 
-                        # Try to extract RAM_Memory test (MiB/sec)
-                        memory_patterns = [
-                            r'Average[:\s]+([\d.]+)\s+MiB/sec',
-                            r'Average:\s*([\d.]+)\s*MiB/sec',
-                            r'^\s*Average:\s*([\d.]+)\s*MiB/sec',
-                        ]
-                        memory_match = None
-                        for pattern in memory_patterns:
-                            memory_match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
-                            if memory_match:
-                                break
+                        # Extract RAM_Memory test
+                        # Find the "Test: RAM / Memory:" section and extract values
+                        ram_section_pattern = r'Test:\s*RAM\s*/\s*Memory:\s*\n([\s\S]*?)Average[:\s]+([\d.]+)\s+MiB/sec'
+                        ram_match = re.search(ram_section_pattern, log_content, re.IGNORECASE)
 
-                        if memory_match:
-                            value = float(memory_match.group(1))
+                        if ram_match:
+                            # Extract individual raw values from the section
+                            raw_values_text = ram_match.group(1)
+                            raw_values = []
+                            for line in raw_values_text.strip().split('\n'):
+                                line = line.strip()
+                                if line and re.match(r'^[\d.]+$', line):
+                                    raw_values.append(float(line))
+
+                            avg_value = float(ram_match.group(2))
+
+                            # If no raw values found, use the average as single value
+                            if not raw_values:
+                                raw_values = [avg_value]
+
                             test_results["RAM_Memory"] = {
                                 "description": "Sysbench 1.0.20 Memory",
-                                "values": value,
-                                "raw_values": [value],
+                                "values": avg_value,
+                                "raw_values": raw_values,
                                 "unit": "MiB/sec",
                                 "time": "N/A",
-                                "test_run_times": ["N/A"],
+                                "test_run_times": "N/A",
                                 "cost": "N/A"
                             }
 
-                        # Try to extract CPU test (Events Per Second)
-                        cpu_patterns = [
-                            r'Average[:\s]+([\d.]+)\s+Events?\s+Per\s+Second',
-                            r'Average:\s*([\d.]+)\s*Events?\s+Per\s+Second',
-                            r'^\s*Average:\s*([\d.]+)\s*Events?\s+Per\s+Second',
-                        ]
-                        cpu_match = None
-                        for pattern in cpu_patterns:
-                            cpu_match = re.search(pattern, log_content, re.IGNORECASE | re.MULTILINE)
-                            if cpu_match:
-                                break
+                        # Extract CPU test
+                        # Find the "Test: CPU:" section and extract values
+                        cpu_section_pattern = r'Test:\s*CPU:\s*\n([\s\S]*?)Average[:\s]+([\d.]+)\s+Events?\s+Per\s+Second'
+                        cpu_match = re.search(cpu_section_pattern, log_content, re.IGNORECASE)
 
                         if cpu_match:
-                            value = float(cpu_match.group(1))
+                            # Extract individual raw values from the section
+                            raw_values_text = cpu_match.group(1)
+                            raw_values = []
+                            for line in raw_values_text.strip().split('\n'):
+                                line = line.strip()
+                                if line and re.match(r'^[\d.]+$', line):
+                                    raw_values.append(float(line))
+
+                            avg_value = float(cpu_match.group(2))
+
+                            # If no raw values found, use the average as single value
+                            if not raw_values:
+                                raw_values = [avg_value]
+
                             test_results["CPU"] = {
                                 "description": "Sysbench 1.0.20 CPU",
-                                "values": value,
-                                "raw_values": [value],
+                                "values": avg_value,
+                                "raw_values": raw_values,
                                 "unit": "Events Per Second",
                                 "time": "N/A",
-                                "test_run_times": ["N/A"],
+                                "test_run_times": "N/A",
                                 "cost": "N/A"
                             }
 
-                        if not memory_match and not cpu_match:
+                        if not ram_match and not cpu_match:
                             # Enhanced debugging
-                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'mib' in line.lower() or 'events' in line.lower()]
-                            excerpt = '\n    '.join(excerpt_lines[:5]) if excerpt_lines else "(no relevant lines found)"
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'mib' in line.lower() or 'events' in line.lower() or 'test:' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:10]) if excerpt_lines else "(no relevant lines found)"
                             print(f"Warning: Could not find sysbench patterns in {thread_log}", file=sys.stderr)
                             print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
                             print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
