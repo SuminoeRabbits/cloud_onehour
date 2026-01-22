@@ -181,6 +181,10 @@ class SparkRunner:
         self.vcpu_count = os.cpu_count() or 1
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
         self.os_name = self.get_os_name()
+        
+        # Python version info for compatibility checks
+        self.py_version = sys.version_info
+        print(f"  [INFO] Running on Python {self.py_version.major}.{self.py_version.minor}.{self.py_version.micro}")
 
         # Determine thread execution mode
         if threads_arg is None:
@@ -624,6 +628,21 @@ class SparkRunner:
                     new_lines.append(line)
             content = '\n'.join(new_lines)
 
+            # 6. Python 3.13+ compatibility (typing.io / typing.re / pipes removal)
+            # These modules/submodules were removed in Python 3.13.
+            # Spark 3.3.0 (PySpark) relies on these in some internal utilities.
+            if self.py_version >= (3, 13):
+                print(f"  [FIX] Applying Python 3.13+ compatibility patches to Spark/PySpark...")
+                # 1. Replace typing.io/re with typing (symbols moved to main typing module)
+                # 2. Replace pipes.quote with shlex.quote (pipes module removed)
+                # 3. Replace 'import pipes' with 'import shlex as pipes' for minimal code change
+                patch_cmds = [
+                    f"find {install_sh.parent} -name '*.py' -exec sed -i 's/typing\\.io/typing/g; s/typing\\.re/typing/g' {{}} +",
+                    f"find {install_sh.parent} -name '*.py' -exec sed -i 's/\\bimport pipes\\b/import shlex as pipes/g; s/\\bfrom pipes import quote\\b/from shlex import quote/g; s/\\bpipes\\.quote\\b/shlex.quote/g' {{}} +"
+                ]
+                for cmd in patch_cmds:
+                    subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"  [OK] Python 3.13 compatibility patches applied.")
 
             if modified:
                 with open(install_sh, 'w') as f:
@@ -1063,6 +1082,7 @@ class SparkRunner:
 
         self.clean_pts_cache()
         self.install_benchmark()
+        self.fix_benchmark_specific_issues()
 
         failed = []
         for num_threads in self.thread_list:
