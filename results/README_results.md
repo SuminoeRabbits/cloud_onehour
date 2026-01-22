@@ -6,20 +6,27 @@
 - [about README\_results.md](#about-readme_resultsmd)
 - [TOC](#toc)
 - [Directory and structure](#directory-and-structure)
-- [TOC](#toc-1)
 - [File details](#file-details)
   - [Common rule](#common-rule)
     - [Number of threads in hardware and Thread count in `<benchmark>`](#number-of-threads-in-hardware-and-thread-count-in-benchmark)
     - [relaionship between CPU affinity and `<N>`-Thread in ](#relaionship-between-cpu-affinity-and-n-thread-in-)
     - [How to distingush `<N>` in `<files>`](#how-to-distingush-n-in-files)
+      - [ファイル一覧](#ファイル一覧)
     - [summary file in `<files>`](#summary-file-in-files)
+      - [ケース1: `summary.json`と`<N>-thread.json`の両方が存在](#ケース1-summaryjsonとn-threadjsonの両方が存在)
+      - [ケース2: `summary.json`はないが`<N>-thread.json`が存在](#ケース2-summaryjsonはないがn-threadjsonが存在)
+      - [ケース3: `<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在](#ケース3-n-threadjsonはないがn-thread_perf_summaryjsonが存在)
+      - [ケース4: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）](#ケース4-特殊ベンチマークsummaryjsonもn-thread_perf_summaryjsonもn-threadjsonも存在しない)
       - [Multiple "test\_name", "description" in one ](#multiple-test_name-description-in-one-)
         - ["test\_name"のキー生成ルール](#test_nameのキー生成ルール)
   - [perf\_stat output](#perf_stat-output)
     - [Performance summary file](#performance-summary-file)
+    - [Performance summary file format](#performance-summary-file-format)
     - [Frequency file](#frequency-file)
+    - [Frequency file format](#frequency-file-format)
   - [pts output](#pts-output)
     - [Benchmark summary file](#benchmark-summary-file)
+    - [N-thread.json format](#n-threadjson-format)
 - [Extracting one big JSON](#extracting-one-big-json)
   - [Definition of one big JSON structure](#definition-of-one-big-json-structure)
   - [Definition data source](#definition-data-source)
@@ -63,9 +70,6 @@
 ```
 find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 ```
-
-# TOC
-<ここにTOCを記載してほしい>。
 
 # File details
 本件は`Phoronix Test Suite v10.8.4`をベースラインのインフラとして利用しプログラムを実行、結果をまとめて表示している。ここでは主に<files>の詳細について記載する。
@@ -185,17 +189,99 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 ここでは独自拡張したOSの`perf stat`の出力ファイルを説明する。
 
 ### Performance summary file
-- `results/<machinename>/<os>/<testcategory>/<benchmark>/<N>-thread_perf_summary.json`　
+- `results/<machinename>/<os>/<testcategory>/<benchmark>/<N>-thread_perf_summary.json`
     <N>スレッド毎にファイルが存在する。
     もしこのファイルが特定の<N>だけ存在しない場合は、そのスレッド数のテストは行っていない、もしくは失敗していることを意味する。
 
+### Performance summary file format
+`<N>-thread_perf_summary.json`のフォーマットは以下の通り。キーはCPUコア番号（文字列）で、値は数値。
+```json
+{
+  "avg_frequency_ghz": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0
+  },
+  "start_frequency_ghz": {
+    "0": 3.193,
+    "1": 3.193,
+    "2": 3.193,
+    "3": 3.193
+  },
+  "end_frequency_ghz": {
+    "0": 3.193,
+    "1": 3.193,
+    "2": 3.193,
+    "3": 3.193
+  },
+  "ipc": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0
+  },
+  "total_cycles": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0
+  },
+  "total_instructions": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0
+  },
+  "cpu_utilization_percent": 100.0,
+  "elapsed_time_sec": 1383.7
+}
+```
+
+**フィールド説明:**
+- `avg_frequency_ghz`: 各CPUコアの平均周波数（GHz）
+- `start_frequency_ghz`: テスト開始時の各CPUコアの周波数（GHz）
+- `end_frequency_ghz`: テスト終了時の各CPUコアの周波数（GHz）
+- `ipc`: 各CPUコアのIPC（Instructions Per Cycle）
+- `total_cycles`: 各CPUコアの総サイクル数
+- `total_instructions`: 各CPUコアの総命令数
+- `cpu_utilization_percent`: CPU使用率（%）
+- `elapsed_time_sec`: 経過時間（秒）
+
+**one_big_json.jsonへのマッピング:**
+`<N>-thread_perf_summary.json`から`one_big_json.json`の`perf_stat`ノードへは以下のようにマッピングする:
+- `start_freq.freq_<i>`: `start_frequency_ghz["<i>"]` × 1000000000（GHzからHzに変換）
+- `end_freq.freq_<i>`: `end_frequency_ghz["<i>"]` × 1000000000（GHzからHzに変換）
+- `ipc.ipc_<i>`: `ipc["<i>"]`
+- `total_cycles.total_cycles_<i>`: `total_cycles["<i>"]`
+- `total_instructions.total_instructions_<i>`: `total_instructions["<i>"]`
+- `cpu_utilization_percent`: `cpu_utilization_percent`
+- `elapsed_time_sec`: `elapsed_time_sec`
+
 ### Frequency file
-- `results/<machinename>/<os>/<testcategory>/<benchmark>/<N>-thread_freq_*.txt`　
+- `results/<machinename>/<os>/<testcategory>/<benchmark>/<N>-thread_freq_*.txt`
     <N>スレッド毎にファイルが存在する。
     ファイルが存在していてもテストは失敗していることがあるので注意。
-    ベンチマーク開始地点は<N>-threa_freq_start.txt。
-    ベンチマーク終了地点は<N>-threa_freq_end.txt。
-    CPUアフィニティ順に[Hz]単位で記録されている。
+    ベンチマーク開始地点は`<N>-thread_freq_start.txt`。
+    ベンチマーク終了地点は`<N>-thread_freq_end.txt`。
+    CPUアフィニティ順に[KHz]単位で記録されている。
+
+### Frequency file format
+`<N>-thread_freq_start.txt`および`<N>-thread_freq_end.txt`のフォーマットは以下の通り。
+各行がCPUコア（0から順番）の周波数（KHz単位）を表す。
+```
+3192614
+3192614
+3192614
+3192614
+
+```
+
+**注意:**
+- ファイル末尾に空行が含まれることがある
+- 行数はvCPU数と一致する
+- 単位はKHz（キロヘルツ）
+- `<N>-thread_perf_summary.json`が存在する場合、そちらの`start_frequency_ghz`/`end_frequency_ghz`を優先して使用する（GHz単位で記録されているため変換が容易）
 
 ## pts output
 ここではPTSの標準ベンチマーク出力を説明する。
@@ -203,6 +289,70 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `results/<machinename>/<os>/<testcategory>/<benchmark>/summary.json`
     すべての<N>-thread_perf_summary.jsonを<N>毎に1つにまとめたファイルであり、1つだけ存在。ただし存在しない場合もある。
     1つのベンチマークに複数の<test_name>が存在する場合があり、その時は<test_name>毎にベンチマーク結果が記載される。
+
+### N-thread.json format
+`<N>-thread.json`はPhoronix Test Suiteが出力する詳細な結果ファイルである。以下にフォーマットを示す。
+
+```json
+{
+    "title": "nginx-3.0.1-4threads",
+    "last_modified": "2026-01-17 17:33:42",
+    "description": "wsl testing on Ubuntu 22.04 via the Phoronix Test Suite.",
+    "systems": {
+        "<system_identifier>": {
+            "identifier": "<system_identifier>",
+            "hardware": {
+                "Processor": "Intel Core i5-4460 (4 Cores)",
+                "Memory": "8GB",
+                "Disk": "...",
+                "Graphics": "llvmpipe"
+            },
+            "software": {
+                "OS": "Ubuntu 22.04",
+                "Kernel": "6.6.87.2-microsoft-standard-WSL2 (x86_64)",
+                "Compiler": "GCC 14.2.0 + Clang 14.0.0-1ubuntu1.1",
+                "File-System": "ext4"
+            },
+            "user": "snakajim",
+            "timestamp": "2026-01-17 17:21:30",
+            "client_version": "10.8.4"
+        }
+    },
+    "results": {
+        "<result_hash>": {
+            "identifier": "pts/<benchmark_name>",
+            "title": "<test_title>",
+            "app_version": "<version>",
+            "arguments": "<test_arguments>",
+            "description": "<test_description>",
+            "scale": "<unit>",
+            "proportion": "HIB|LIB",
+            "display_format": "BAR_GRAPH",
+            "results": {
+                "<system_identifier>": {
+                    "value": 2195.02,
+                    "raw_values": [2195.02, 2200.15, 2189.88],
+                    "test_run_times": [86.99, 85.50, 87.20],
+                    "details": {}
+                }
+            }
+        }
+    }
+}
+```
+
+**重要なフィールド:**
+- `results.<result_hash>.title`: テスト名（`test_name`として使用）
+- `results.<result_hash>.description`: テストの説明（`description`として使用）
+- `results.<result_hash>.scale`: 単位（`unit`として使用）
+- `results.<result_hash>.results.<system_identifier>.value`: 代表値（`values`として使用）
+- `results.<result_hash>.results.<system_identifier>.raw_values`: 生データ配列（存在しない場合は`value`を配列として使用）
+- `results.<result_hash>.results.<system_identifier>.test_run_times`: 各実行の実行時間配列
+
+**注意:**
+- `raw_values`が存在しない場合、`value`の値を単一要素の配列`[value]`として使用する
+- `test_run_times`が存在しない場合、`<N>-thread_perf_summary.json`の`elapsed_time_sec`を使用する
+- 同じ`<N>-thread.json`内に複数のテスト結果（異なる`<result_hash>`）が存在することがある
 
 # Extracting one big JSON
 まずデータ構造を説明し、その後にそれぞれに入力されるべきデータを説明する。
@@ -297,12 +447,19 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 |"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.4057 |
 |"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.4231 |
 |"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.3869 |
-|"VM.Standard.E5.Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1727 |
-|"VM.Standard.E6.Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1927 |
-|"VM.Standard.A1.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1367 |
+|"VM.Standard.E5.Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1925 |
+|"VM.Standard.E6.Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1925 |
+|"VM.Standard.A1.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.0599 |
+|"VM.Standard.A2.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1845 |
+|"VM.Standard.A4.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.2053 |
+
 
 ### Cost at Look-Up-Table
-"cost_hour[730h-mo]":"<cost>"は1時間当たりの利用コストである。cloud_instances.json内の"cpu_cost_hour[730h-mo]"と"extra_150g_storage_cost_hour"の和で算出される。もしcloud_instances.jsonで定義されていない場合は、"0.0"とする。
+`"cost_hour[730h-mo]":"<cost>"`は1時間当たりの利用コストである（USD/時間）。この値はLook-Up-Tableから直接取得する。Look-Up-Tableに記載がない`<machinename>`の場合は`0.0`とする。
+
+**コスト計算の注意:**
+- Look-Up-Tableの`cost_hour[730h-mo]`はCPUコストと追加ストレージコストの合計値として事前計算されている
+- 新しいインスタンスタイプを追加する場合は、Look-Up-Tableに直接エントリを追加すること
 
 #### "machinename":"\<machinename\>"
 `${PROJECT_ROOT}`直下にあるディレクトリ名が`<machinename>`に相当する。複数ある場合はアルファベット順に登録する。
@@ -368,7 +525,37 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 データソースとして、ケース１，２，３のどれを適応させたか、`<test_name>`毎に明確にする。
 
 ###### ケース３ データソース 例外処理
-ケース３でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。TBF。
+ケース３でのデータソース例外処理について説明する。
+
+ケース３は`<N>-thread.json`が存在せず、`<N>-thread_perf_summary.json`のみが存在する状況である。
+この場合、ベンチマーク結果の詳細情報（values, raw_values, unit等）は取得できないため、以下のように処理する：
+
+**処理方法:**
+1. `test_name`は`<benchmark>`名から生成する（例: `openssl-3.6.0` → `"OpenSSL"`）
+2. `description`は`"Benchmark: <benchmark>"`形式とする
+3. `values`, `raw_values`, `unit`は`"N/A"`とする
+4. `test_run_times`は`<N>-thread_perf_summary.json`の`elapsed_time_sec`を単一要素配列`[elapsed_time_sec]`として使用
+5. `time`は`elapsed_time_sec`をそのまま使用
+6. `cost`は通常通り計算する
+
+**例:**
+```json
+"test_name": {
+  "OpenSSL": {
+    "description": "Benchmark: openssl-3.6.0",
+    "values": "N/A",
+    "raw_values": "N/A",
+    "unit": "N/A",
+    "time": 1383.7,
+    "test_run_times": [1383.7],
+    "cost": 0.026234
+  }
+}
+```
+
+**注意:**
+- ケース３が発生するのは、PTSが正常に結果JSONを出力しなかったが、perf statの計測は完了した場合
+- このケースでは性能値は取得できないが、実行時間とコストは計算可能
 
 ###### ケース４ データソース 例外処理
 ケース４でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
@@ -564,10 +751,9 @@ Python3.10で動作すること。`make_one_big_json.py`自分自身と出力フ
 - `--dir` or `-D`(省略可能) :　
     `${PROJECT_ROOT}`を指定する。なおここで指定される`${PROJECT_ROOT}`は複数あっても構わない。その場合でも`one_big_json.json`内でマージされることとする。省略された場合は`${PROJECT_ROOT}=${PWD}`と解釈する。
 - `--output` or `-O`(省略可能):
-    生成される`one_big_json.json`のDirectoryとファイル名を変更したいときに利用する。省略された場合は`${PWD}/one_big_json.json`と解釈され、もしすでに同名のファイルが存在する場合は上書き保存するかを確認する。
-- `--instance_source` or `-I`(省略可能)：
-    `one_big_json.json`内の"<cost>"を計算する際の情報ファイルである`cloud_instances.json`のDirectoryを指定する。省略された場合は`${PWD}../`と解釈する。もし`cloud_instances.json`が指定のDirectoryに見つからない場合はエラーメッセージを出して終了する。
- - `--merge` or `-M`（省略可能）:
+    生成される`one_big_json.json`のDirectoryとファイル名を変更したいときに利用する。省略された場合は`${PWD}/one_big_json_${HOSTNAME}.json`と解釈され、もしすでに同名のファイルが存在する場合は上書き保存するかを確認する。なおHOSTNAME=`hostname`とする。
+- `--merge` or `-M`（省略可能）:
     `one_big_json.json`をDiretoryから生成するのではなく、複数のJSONをマージして１つのＪＳＯＮを作成する。マージの際は与えられた各ＪＳＯＮファイルの階層が一致するようにマージする。このオプションが指定された際は`--output`によりマージ先ファイルがデフォルト以外に指定されなければならない。よって利用方法は、例えば下記の様になる。
     make_one_big_json.py --merge ./1.JSON ./2.JSON .... --output ./New.JSON
     マージされるJSON同士はスクリプトの`"version info":<version>`が一致していなければならない。一致していない場合はErrorを出して終了する。
+    マージされるJSONが指定されていない場合は、`${PWD}/one_big_json_*.json`のリストを引数とする。

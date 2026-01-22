@@ -12,7 +12,7 @@ before parsing. This ensures consistent regex matching across different environm
 
 Usage:
     # Build from directories:
-    python3 make_one_big_json.py [--dir PATH] [--output PATH] [--instance_source PATH]
+    python3 make_one_big_json.py [--dir PATH] [--output PATH]
 
     # Merge multiple JSON files:
     python3 make_one_big_json.py --merge FILE1.json FILE2.json ... --output OUTPUT.json
@@ -125,8 +125,8 @@ def check_version_compatibility(version1: str, version2: str) -> bool:
 
 
 # Look-Up-Table from README_results.md
-# Note: cost_hour[730h-mo] will be calculated from cloud_instances.json
-# as cpu_cost_hour[730h-mo] + extra_150g_storage_cost_hour
+# cost_hour[730h-mo] is pre-calculated (CPU cost + storage cost) and stored directly in this table
+# Per README_results.md: All machine info is obtained from this Look-Up-Table only
 MACHINE_LOOKUP = {
     "rpi5": {
         "CSP": "local",
@@ -210,115 +210,67 @@ MACHINE_LOOKUP = {
         "total_vcpu": 8,
         "cpu_name": "AMD EPYC 9J14 (Zen 4 \"Genoa\")",
         "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.1727
+        "cost_hour[730h-mo]": 0.1925
     },
     "VM.Standard.E6.Flex": {
         "CSP": "OCI",
         "total_vcpu": 8,
         "cpu_name": "AMD EPYC 9J45 (Zen 5 \"Turin\")",
         "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.1927
+        "cost_hour[730h-mo]": 0.1925
     },
     "VM.Standard.A1.Flex": {
         "CSP": "OCI",
         "total_vcpu": 8,
         "cpu_name": "Ampere one (v8.6A)",
         "cpu_isa": "Armv8.6 (NEON-128)",
-        "cost_hour[730h-mo]": 0.1367
+        "cost_hour[730h-mo]": 0.0599
+    },
+    "VM.Standard.A2.Flex": {
+        "CSP": "OCI",
+        "total_vcpu": 8,
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "cost_hour[730h-mo]": 0.1845
+    },
+    "VM.Standard.A4.Flex": {
+        "CSP": "OCI",
+        "total_vcpu": 8,
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "cost_hour[730h-mo]": 0.2053
     }
 }
 
 
-def load_cloud_instances(instance_source: Path) -> Dict[str, Any]:
-    """
-    Load cloud_instances.json from the specified directory.
-    Returns the parsed JSON data, or empty dict if file not found.
-    """
-    cloud_instances_file = instance_source / "cloud_instances.json"
-
-    if not cloud_instances_file.exists():
-        print(f"Error: cloud_instances.json not found in {instance_source}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        with open(cloud_instances_file, 'r') as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"Error: Failed to parse cloud_instances.json: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-def get_cost_from_instances(machinename: str, cloud_instances: Dict[str, Any]) -> float:
-    """
-    Get cost_hour[730h-mo] from cloud_instances.json.
-    Cost is calculated as: cpu_cost_hour[730h-mo] + extra_150g_storage_cost_hour.
-
-    According to README_results.md specification:
-    - Sum of cpu_cost_hour[730h-mo] and extra_150g_storage_cost_hour
-    - If not found in cloud_instances.json, returns the default value from MACHINE_LOOKUP
-    - If not in MACHINE_LOOKUP either, returns 0.0
-    """
-    # Search through all CSPs and instances
-    for csp, csp_data in cloud_instances.items():
-        if not isinstance(csp_data, dict) or "instances" not in csp_data:
-            continue
-
-        for instance in csp_data["instances"]:
-            # Check if this instance matches the machinename
-            # Try matching by hostname or name field
-            if (instance.get("hostname") == machinename or
-                instance.get("name") == machinename or
-                instance.get("type", "").replace(".", "-") in machinename):
-
-                cpu_cost = instance.get("cpu_cost_hour[730h-mo]", 0.0)
-                storage_cost = instance.get("extra_150g_storage_cost_hour", 0.0)
-
-                return cpu_cost + storage_cost
-
-    # Not found in cloud_instances.json, use default from MACHINE_LOOKUP
-    return None
-
-
-def get_machine_info(machinename: str, cloud_instances: Dict[str, Any]) -> Dict[str, Any]:
+def get_machine_info(machinename: str) -> Dict[str, Any]:
     """
     Get machine info from Look-Up-Table based on machinename.
     Searches for partial matches (e.g., "t3" and "medium" for "t3_medium").
 
-    Cost calculation priority (per README_results.md):
-    1. First try to get cost from cloud_instances.json
-    2. If not found, use the default value from MACHINE_LOOKUP
-    3. If not in MACHINE_LOOKUP either, use 0.0
+    Per README_results.md specification:
+    - All machine info is obtained from Look-Up-Table only
+    - If not in Look-Up-Table, cost defaults to 0.0 and other fields to "unknown"
     """
     # Direct match
     if machinename in MACHINE_LOOKUP:
-        info = MACHINE_LOOKUP[machinename].copy()
-        cost_from_json = get_cost_from_instances(machinename, cloud_instances)
-        if cost_from_json is not None:
-            info["cost_hour[730h-mo]"] = cost_from_json
-        # else: keep the default value from MACHINE_LOOKUP
-        return info
+        return MACHINE_LOOKUP[machinename].copy()
 
     # Partial match for compound names
     machinename_lower = machinename.lower()
     for key, value in MACHINE_LOOKUP.items():
         parts = key.replace("-", "_").split("_")
         if all(part in machinename_lower for part in parts):
-            info = value.copy()
-            cost_from_json = get_cost_from_instances(machinename, cloud_instances)
-            if cost_from_json is not None:
-                info["cost_hour[730h-mo]"] = cost_from_json
-            # else: keep the default value from MACHINE_LOOKUP
-            return info
+            return value.copy()
 
     # Default fallback - not in lookup table at all
     print(f"Warning: Machine '{machinename}' not found in lookup table. Using defaults.", file=sys.stderr)
-    cost_from_json = get_cost_from_instances(machinename, cloud_instances)
     return {
         "CSP": "unknown",
         "total_vcpu": 0,
         "cpu_name": "unknown",
         "cpu_isa": "unknown",
-        "cost_hour[730h-mo]": cost_from_json if cost_from_json is not None else 0.0
+        "cost_hour[730h-mo]": 0.0
     }
 
 
@@ -1155,7 +1107,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     return benchmark_result if benchmark_result else None
 
 
-def build_json_structure(project_root: Path, cloud_instances: Dict[str, Any]) -> Dict[str, Any]:
+def build_json_structure(project_root: Path) -> Dict[str, Any]:
     """
     Build the complete JSON structure by traversing the directory tree.
     Structure per README_results.md:
@@ -1195,7 +1147,7 @@ def build_json_structure(project_root: Path, cloud_instances: Dict[str, Any]) ->
             continue
 
         machinename = machine_dir.name
-        machine_info = get_machine_info(machinename, cloud_instances)
+        machine_info = get_machine_info(machinename)
 
         machine_data = {
             "CSP": machine_info["CSP"],
@@ -1308,8 +1260,6 @@ def main():
                         help='Path to project root (can be specified multiple times). Default: current directory')
     parser.add_argument('--output', '-O', type=str, default='one_big_json.json',
                         help='Output JSON file path (default: one_big_json.json)')
-    parser.add_argument('--instance_source', '-I', type=str, default='../',
-                        help='Directory containing cloud_instances.json (default: ../)')
     parser.add_argument('--merge', '-M', nargs='+', metavar='JSON_FILE',
                         help='Merge multiple JSON files instead of building from directories. Requires --output to be specified.')
 
@@ -1407,11 +1357,6 @@ def main():
     # If --dir is not specified, use current directory
     project_roots = args.dir if args.dir else ['.']
 
-    # Load cloud_instances.json
-    instance_source = Path(args.instance_source).resolve()
-    print(f"Loading cloud_instances.json from: {instance_source}")
-    cloud_instances = load_cloud_instances(instance_source)
-
     # Check if output file exists and confirm overwrite
     if output_file.exists():
         response = input(f"Output file '{output_file}' already exists. Overwrite? [y/N]: ")
@@ -1431,7 +1376,7 @@ def main():
         print(f"Processing results from: {project_root}")
 
         # Build JSON structure
-        json_data = build_json_structure(project_root, cloud_instances)
+        json_data = build_json_structure(project_root)
 
         # Merge with existing data
         merged_data = merge_json_data(merged_data, json_data)
