@@ -178,9 +178,13 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                     <test_name>: {
                         <os>: {
                             <machinename>: {
-                                "time_score": <time_score>,
-                                "benchmark_score": <benchmark_score>,
-                                "unit": <unit>
+                                "thread": {
+                                    "<N>": {
+                                        "time_score": <time_score>,
+                                        "benchmark_score": <benchmark_score>,
+                                        "unit": <unit>
+                                    }
+                                }
                             }
                         }
                     }
@@ -196,13 +200,14 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
     workloads = extract_workloads(data)
 
-    # Group by testcategory -> benchmark -> test_name -> os -> machinename
+    # Group by testcategory -> benchmark -> test_name -> os -> machinename -> thread
     for w in workloads:
         testcategory = w["testcategory"]
         benchmark = w["benchmark"]
         test_name = w["test_name"]
         os_name = w["os"]
         machinename = w["machinename"]
+        thread = w["thread"]
         test_data = w["test_data"]
 
         benchmark_score, time_score, _, unit = get_benchmark_score(test_data)
@@ -216,8 +221,12 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             result["workload"][testcategory][benchmark][test_name] = {}
         if os_name not in result["workload"][testcategory][benchmark][test_name]:
             result["workload"][testcategory][benchmark][test_name][os_name] = {}
+        if machinename not in result["workload"][testcategory][benchmark][test_name][os_name]:
+            result["workload"][testcategory][benchmark][test_name][os_name][machinename] = {
+                "thread": {}
+            }
 
-        result["workload"][testcategory][benchmark][test_name][os_name][machinename] = {
+        result["workload"][testcategory][benchmark][test_name][os_name][machinename]["thread"][thread] = {
             "time_score": time_score,
             "benchmark_score": benchmark_score,
             "unit": unit
@@ -239,10 +248,14 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 <benchmark>: {
                     <test_name>: {
                         <os>: {
-                            <machinename>: {
-                                "cost_score": <cost_score>,
-                                "benchmark_score": <benchmark_score>,
-                                "unit": <unit>
+                            "thread": {
+                                "<N>": {
+                                    <machinename>: {
+                                        "time_score": <time_score>,
+                                        "cost_score": <cost_score>,
+                                        "unit": <unit>
+                                    }
+                                }
                             }
                         }
                     }
@@ -264,10 +277,11 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         test_name = w["test_name"]
         os_name = w["os"]
         machinename = w["machinename"]
+        thread = w["thread"]
         test_data = w["test_data"]
         machine_data = w["machine_data"]
 
-        benchmark_score, _, _, unit = get_benchmark_score(test_data)
+        benchmark_score, time_score, _, unit = get_benchmark_score(test_data)
 
         # Calculate cost_score
         hourly_rate = machine_data.get("cost_hour[730h-mo]", 0)
@@ -282,7 +296,7 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 except (ValueError, TypeError):
                     cost_score = "unknown"
 
-        # Build nested structure
+        # Build nested structure: thread -> machinename
         if testcategory not in result["workload"]:
             result["workload"][testcategory] = {}
         if benchmark not in result["workload"][testcategory]:
@@ -290,11 +304,15 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         if test_name not in result["workload"][testcategory][benchmark]:
             result["workload"][testcategory][benchmark][test_name] = {}
         if os_name not in result["workload"][testcategory][benchmark][test_name]:
-            result["workload"][testcategory][benchmark][test_name][os_name] = {}
+            result["workload"][testcategory][benchmark][test_name][os_name] = {
+                "thread": {}
+            }
+        if thread not in result["workload"][testcategory][benchmark][test_name][os_name]["thread"]:
+            result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread] = {}
 
-        result["workload"][testcategory][benchmark][test_name][os_name][machinename] = {
+        result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread][machinename] = {
+            "time_score": time_score,
             "cost_score": cost_score,
-            "benchmark_score": benchmark_score,
             "unit": unit
         }
 

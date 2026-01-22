@@ -47,18 +47,18 @@
             {
                 <test_name>:
                 {
-                    <os>:{
-                        <machinename>:{
-                            "time_score":"<time_score>",
-                            "benchmark_score":"<benchmark_score>",
-                            "unit":"<unit>"
-                            },
-                        <machinename>:{
-                            "time_score":"<time_score>",
-                            "benchmark_score":"<benchmark_score>",
-                            "unit":"<unit>"
-                            },
-                        .....
+                    <os>:
+                    {
+                        "thread": "<N>": 
+                        {                        
+                            <machinename>:{
+                                "time_score":"<time_score>",
+                                "benchmark_score":"<benchmark_score>",
+                                "unit":"<unit>"
+                            }
+                            ....
+                        }
+                        ....
                     }
                     .....
                 }
@@ -95,18 +95,18 @@
             {
                 <test_name>:
                 {
-                    <os>:{
-                        <machinename>:{
-                            "cost_score":"<cost_score>",
-                            "benchmark_score":"<benchmark_score>",
-                            "unit":"<unit>"
-                            },
-                        <machinename>:{
-                            "cost_score":"<cost_score>",
-                            "benchmark_score":"<benchmark_score>",
-                            "unit":"<unit>"
-                            },
-                        .....
+                    <os>:
+                    {
+                        "thread": "<N>": 
+                        {                        
+                            <machinename>:{
+                                "time_score":"<time_score>",
+                                "cost_score":"<cost_score>",
+                                "unit":"<unit>"
+                            }
+                            ....
+                        }
+                        ....
                     }
                     .....
                 }
