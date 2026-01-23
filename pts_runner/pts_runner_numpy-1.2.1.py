@@ -512,25 +512,9 @@ class NumpyBenchmarkRunner:
         else:
             print(f"  [OK] Python dependencies installed successfully")
 
-        # Patch numpy execution script to handle missing $LOG_FILE
-        print(f"\n  [INFO] Patching numpy execution script...")
-        numpy_script = install_dir / 'numpy'
-        if numpy_script.exists():
-            with open(numpy_script, 'r') as f:
-                script_content = f.read()
-            
-            # Replace the problematic lines with conditional output
-            # Old: cat numpy_log > $LOG_FILE
-            # New: cat numpy_log
-            patched_content = script_content.replace(
-                'cat numpy_log > $LOG_FILE\npython3 ../result_parser.py numpy_log >> $LOG_FILE',
-                'cat numpy_log\npython3 ../result_parser.py numpy_log'
-            )
-            
-            with open(numpy_script, 'w') as f:
-                f.write(patched_content)
-            
-            print(f"  [OK] numpy script patched to output to stdout")
+        # Note: Do NOT patch numpy script - PTS requires $LOG_FILE output for result parsing
+        # The original script writes to $LOG_FILE which PTS uses to extract benchmark results
+        print(f"\n  [INFO] Keeping original numpy script (PTS requires $LOG_FILE output)")
 
         # Secondary check: PTS recognition
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
