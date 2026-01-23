@@ -1119,7 +1119,44 @@ echo "Exit code: $?"  # 0 であるべき
 ### Q3: WSLでperfが動かない
 **A**: `get_perf_events()`が自動的にSWイベントにフォールバックします。perfなしでもベンチマークは実行可能です。
 
-### Q3: GCC-14でコンパイルエラー
+### Q4: Ubuntu 24.04でPythonパッケージのインストールに失敗する（PEP 668）
+**A**: `pip3 install`に`--break-system-packages`を追加してください。
+
+**症状**:
+- インストールログに`error: externally-managed-environment`エラー
+- テスト実行時に`Python unsupported`エラー
+- numpyやscipyなどのパッケージがインストールされない
+
+**原因**:
+Ubuntu 24.04以降はPEP 668により、システムPythonへの直接的な`pip install`が制限されています。
+
+**解決策 (推奨: 方法1)**:
+install_benchmark()メソッド内で、PTSインストール後に手動でpipを実行:
+```python
+def install_benchmark(self):
+    # ... PTS通常インストール ...
+    
+    # Manual pip install with --break-system-packages for Ubuntu 24.04+
+    print(f"\n  [INFO] Installing Python dependencies with --break-system-packages...")
+    pip_cmd = 'pip3 install --user --break-system-packages scipy numpy'
+    pip_result = subprocess.run(['bash', '-c', pip_cmd], capture_output=True, text=True)
+    
+    if pip_result.returncode != 0:
+        print(f"  [ERROR] pip install failed:")
+        print(pip_result.stderr)
+        sys.exit(1)
+    else:
+        print(f"  [OK] Python dependencies installed successfully")
+```
+
+**解決策 (代替: 方法2)**:
+test-profiles内のinstall.shを直接編集（PTSアップデート時に上書きされるリスクあり）
+
+**影響範囲**:
+- Python依存のベンチマーク: numpy-1.2.1など
+- Ubuntu 24.04以降のディストリビューション
+
+### Q6: GCC-14でコンパイルエラー
 **A**: `patch_install_script()`を実装し、`install_benchmark()`内で呼び出してください。
 
 ### Q4: perf_event_paranoidエラー

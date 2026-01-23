@@ -840,6 +840,136 @@ class ComplianceChecker:
                     "⚠️  WARNING: self.thread_list not initialized in __init__"
                 )
 
+    def check_log_file_handling(self):
+        """
+        Check if benchmark's PTS install.sh or execution scripts use $LOG_FILE variable
+        and verify that the Runner script implements proper patching to handle it.
+
+        Background:
+            Some PTS install.sh or execution scripts redirect output to $LOG_FILE variable:
+                echo "test" > $LOG_FILE
+                echo "data" >> $LOG_FILE 2>&1
+
+            When $LOG_FILE is not set in environment, bash produces error:
+                "ambiguous redirect"
+
+            This causes "test run did not produce a result" failures.
+
+        Solution Pattern:
+            Runner's install_benchmark() should patch the execution script:
+                script_path = Path(f"~/.phoronix-test-suite/installed-tests/pts/{self.benchmark}")
+                script_file = script_path / "script-name.sh"
+                content = script_file.read_text()
+                content = re.sub(r'>\\s*\\$LOG_FILE', '', content)  # Remove > $LOG_FILE
+                content = re.sub(r'>>\\s*\\$LOG_FILE\\s*2>&1', '', content)  # Remove >> $LOG_FILE 2>&1
+                script_file.write_text(content)
+
+        See: CODE_TEMPLATE.md Q5 for detailed solution
+        """
+        # Extract benchmark name from filename (pts_runner_<benchmark>.py)
+        benchmark_match = re.match(r'pts_runner_(.+)\.py', self.filepath.name)
+        if not benchmark_match:
+            return
+
+        benchmark_name = benchmark_match.group(1)
+
+        # Construct expected benchmark directory path
+        from pathlib import Path
+        import os
+
+        pts_dir = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / benchmark_name
+        
+        install_found = False
+        has_log_file_usage = False
+        script_files_checked = []
+
+        if pts_dir.exists():
+            # Check all shell scripts in the benchmark directory (not recursive, just top level)
+            for script_file in pts_dir.glob("*.sh"):
+                script_files_checked.append(script_file.name)
+                install_found = True
+                script_content = script_file.read_text()
+                
+                # Check if $LOG_FILE is used
+                if re.search(r'\$LOG_FILE', script_content):
+                    has_log_file_usage = True
+                    break
+            
+            # Also check scripts without .sh extension (like 'numpy', 'pgbench', etc.)
+            for script_file in pts_dir.iterdir():
+                if script_file.is_file() and os.access(script_file, os.X_OK):
+                    # Executable file - check if it's a shell script
+                    try:
+                        first_line = script_file.read_text().split('\n')[0]
+                        if first_line.startswith('#!') and ('sh' in first_line or 'bash' in first_line):
+                            script_files_checked.append(script_file.name)
+                            install_found = True
+                            script_content = script_file.read_text()
+                            
+                            # Check if $LOG_FILE is used
+                            if re.search(r'\$LOG_FILE', script_content):
+                                has_log_file_usage = True
+                                break
+                    except:
+                        pass
+
+        # Check if Runner script implements patching
+        # Look for patterns that indicate LOG_FILE handling
+        has_patch_implementation = False
+        
+        # Simple check: Does the file contain both "LOG_FILE" and patching keywords?
+        if 'LOG_FILE' in self.content:
+            # Check for patching keywords
+            patch_keywords = [
+                'patch',  # "Patch pgbench execution script"
+                're.sub',  # regex substitution
+                '.replace',  # string replacement
+            ]
+            
+            for keyword in patch_keywords:
+                if keyword in self.content:
+                    has_patch_implementation = True
+                    break
+
+        # Evaluate results
+        if not install_found:
+            # Cannot verify - benchmark not installed
+            self.warnings.append(
+                f"⚠️  INFO: Cannot verify $LOG_FILE handling - benchmark not installed\n"
+                f"   Install {benchmark_name} first: phoronix-test-suite install {benchmark_name}\n"
+                f"   Then re-run compliance check"
+            )
+        elif has_log_file_usage and has_patch_implementation:
+            self.passed.append(
+                f"✅ $LOG_FILE handling: Scripts use $LOG_FILE, Runner patches it correctly"
+            )
+        elif has_log_file_usage and not has_patch_implementation:
+            self.errors.append(
+                f"❌ CRITICAL: $LOG_FILE problem detected but not handled\n"
+                f"   Found: Script(s) use $LOG_FILE variable: {', '.join(script_files_checked)}\n"
+                f"   Missing: Runner script does not patch execution scripts\n"
+                f"   Impact: Will fail with 'ambiguous redirect' error\n"
+                f"   Solution: Add script patching in install_benchmark() method\n"
+                f"   Reference: CODE_TEMPLATE.md Q5\n"
+                f"   Example pattern:\n"
+                f"       script_file = Path(...) / '{benchmark_name}'\n"
+                f"       content = script_file.read_text()\n"
+                f"       content = re.sub(r'>\\\\s*\\\\$LOG_FILE', '', content)\n"
+                f"       content = re.sub(r'>>\\\\s*\\\\$LOG_FILE\\\\s*2>&1', '', content)\n"
+                f"       script_file.write_text(content)"
+            )
+        elif not has_log_file_usage and has_patch_implementation:
+            self.warnings.append(
+                f"⚠️  WARNING: Runner implements $LOG_FILE patching but scripts don't use it\n"
+                f"   Checked: {', '.join(script_files_checked)}\n"
+                f"   This is harmless but may be unnecessary code"
+            )
+        else:
+            # No $LOG_FILE usage, no patching - this is fine
+            self.passed.append(
+                f"✅ $LOG_FILE handling: Not needed (checked {len(script_files_checked)} script(s))"
+            )
+
     def print_results(self):
 
         """Print all check results"""
@@ -988,6 +1118,18 @@ Warning Checks:
 
    
 
+    parser.add_argument(
+
+        '--install-and-check',
+
+        action='store_true',
+
+        help='Install benchmarks before checking (use with --all to verify $LOG_FILE handling)'
+
+    )
+
+   
+
     args = parser.parse_args()
 
    
@@ -1037,6 +1179,62 @@ Warning Checks:
             print(f"ERROR: File not found: {filepath}")
 
             continue
+
+       
+
+        # Install benchmark if --install-and-check is specified
+
+        if args.install_and_check:
+
+            # Extract benchmark name from filename (pts_runner_<benchmark>.py)
+
+            import re
+
+            benchmark_match = re.match(r'pts_runner_(.+)\.py', filepath.name)
+
+            if benchmark_match:
+
+                benchmark_name = benchmark_match.group(1)
+
+                
+
+                # Check if already installed
+
+                pts_dir = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / benchmark_name
+
+                if not pts_dir.exists():
+
+                    print(f"\n{'='*80}")
+
+                    print(f"Installing: {benchmark_name}")
+
+                    print(f"{'='*80}")
+
+                    
+
+                    import subprocess
+
+                    result = subprocess.run(
+
+                        ['phoronix-test-suite', 'install', benchmark_name],
+
+                        capture_output=False,
+
+                        text=True
+
+                    )
+
+                    
+
+                    if result.returncode != 0:
+
+                        print(f"⚠️  WARNING: Failed to install {benchmark_name}")
+
+                        print(f"   Continuing with compliance check anyway...")
+
+                else:
+
+                    print(f"\n[INFO] {benchmark_name} already installed, skipping installation")
 
        
 
