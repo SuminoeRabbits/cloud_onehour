@@ -566,6 +566,19 @@ class ApacheRunner:
             print(f"  [CLEAN] Removing installed test: {installed_dir}")
             shutil.rmtree(installed_dir)
 
+        # Also clean the extracted source directories if they exist
+        # This fixes the "ln: failed to create symbolic link 'libapr-1.so': File exists" error
+        # that occurs when APR is partially built from a previous failed installation
+        source_dirs_to_clean = [
+            pts_home / 'installed-tests' / 'pts' / self.benchmark / 'httpd-2.4.56',
+            pts_home / 'installed-tests' / 'pts' / self.benchmark / 'apr-1.7.2',
+            pts_home / 'installed-tests' / 'pts' / self.benchmark / 'apr-util-1.6.3',
+        ]
+        for src_dir in source_dirs_to_clean:
+            if src_dir.exists():
+                print(f"  [CLEAN] Removing source dir: {src_dir}")
+                shutil.rmtree(src_dir)
+
         print("  [OK] PTS cache cleaned")
 
     def get_cpu_affinity_list(self, n):
@@ -600,8 +613,9 @@ class ApacheRunner:
         Patch the install.sh script to add GCC-14 and Ubuntu 24.04 compatibility fixes.
 
         This method modifies the test profile's install.sh to:
-        1. Add 'no-asm' to OpenSSL build options (avoiding inline assembly errors with GCC-14)
-        2. Pass XCFLAGS to make to suppress implicit-function-declaration errors in LuaJIT (ARM64)
+        1. Clean up existing httpd_ directory to prevent APR build failures
+        2. Add 'no-asm' to OpenSSL build options (avoiding inline assembly errors with GCC-14)
+        3. Pass XCFLAGS to make to suppress implicit-function-declaration errors in LuaJIT (ARM64)
         """
         install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
 
@@ -616,6 +630,21 @@ class ApacheRunner:
                 content = f.read()
 
             patched = False
+
+            # Patch 0: Add cleanup of existing httpd_ directory to prevent APR build failures
+            # The error "ln: failed to create symbolic link 'libapr-1.so': File exists" occurs
+            # when httpd_ directory has partial files from a previous failed build
+            cleanup_cmd = 'rm -rf $HOME/httpd_'
+            if cleanup_cmd not in content:
+                # Insert before 'mkdir $HOME/httpd_' line
+                content = content.replace(
+                    'mkdir $HOME/httpd_',
+                    f"# Clean up existing httpd_ directory to prevent APR build failures\n{cleanup_cmd}\nmkdir $HOME/httpd_"
+                )
+                patched = True
+                print(f"  [OK] Added httpd_ cleanup patch (fixes libapr-1.so symlink error)")
+            else:
+                print(f"  [INFO] httpd_ cleanup patch already applied")
 
             # Patch 1: Add 'no-asm' to OpenSSL build options (for GCC-14 compatibility)
             # This prevents inline assembly errors in OpenSSL 1.1.1i
@@ -790,6 +819,33 @@ class ApacheRunner:
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
+        # CRITICAL: Verify httpd was actually built
+        # The Apache benchmark requires httpd binary in httpd_/bin/httpd
+        httpd_binary = installed_dir / 'httpd_' / 'bin' / 'httpd'
+        httpd_dir = installed_dir / 'httpd_'
+
+        if not httpd_dir.exists() or not any(httpd_dir.iterdir()):
+            print(f"  [ERROR] Apache httpd build failed!")
+            print(f"  [ERROR] httpd_ directory is empty or missing: {httpd_dir}")
+            print(f"  [INFO] This is usually caused by APR library build failure")
+            print(f"  [INFO] Check install.log for 'ln: failed to create symbolic link' errors")
+            print(f"  [INFO] Possible fixes:")
+            print(f"         1. Clean cache: rm -rf ~/.phoronix-test-suite/installed-tests/pts/{self.benchmark}")
+            print(f"         2. Reinstall: phoronix-test-suite install {self.benchmark_full}")
+            sys.exit(1)
+
+        if not httpd_binary.exists():
+            print(f"  [ERROR] Apache httpd binary not found: {httpd_binary}")
+            print(f"  [INFO] httpd compilation may have failed silently")
+            # List what's in httpd_ for debugging
+            print(f"  [DEBUG] Contents of {httpd_dir}:")
+            try:
+                for item in httpd_dir.iterdir():
+                    print(f"           {item.name}")
+            except Exception:
+                print(f"           (could not list directory)")
+            sys.exit(1)
+
         # Check if test is recognized by PTS
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         verify_result = subprocess.run(
@@ -803,6 +859,65 @@ class ApacheRunner:
             print(f"  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
+        print(f"  [OK] Apache httpd binary found: {httpd_binary}")
+
+    def patch_apache_script(self, num_threads):
+        """
+        Patch the apache execution script to use specified number of wrk threads.
+        
+        The default apache script uses: ./wrk-4.2.0/wrk -t $NUM_CPU_CORES ...
+        This causes wrk to use all system threads (12 in this case), which fails
+        when concurrent connections < threads (e.g., -c 4 with -t 12).
+        
+        We modify it to use: ./wrk-4.2.0/wrk -t <num_threads> ...
+        where num_threads is min(num_threads, concurrent_requests).
+        
+        Args:
+            num_threads: Number of threads specified by user (1 for single-threaded mode)
+        """
+        pts_home = Path.home() / '.phoronix-test-suite'
+        apache_script = pts_home / 'installed-tests' / 'pts' / self.benchmark / 'apache'
+        
+        if not apache_script.exists():
+            print(f"  [ERROR] Apache script not found: {apache_script}")
+            return False
+            
+        print(f"\n>>> Patching apache script for {num_threads} thread(s)")
+        
+        try:
+            with open(apache_script, 'r') as f:
+                content = f.read()
+            
+            # Replace '-t $NUM_CPU_CORES' with '-t <num_threads>'
+            # Original: ./wrk-4.2.0/wrk -t $NUM_CPU_CORES $@ > $LOG_FILE 2>&1
+            # Modified: ./wrk-4.2.0/wrk -t <num_threads> $@ > $LOG_FILE 2>&1
+            original_line = './wrk-4.2.0/wrk -t $NUM_CPU_CORES $@ > $LOG_FILE 2>&1'
+            
+            if original_line in content:
+                # Use num_threads directly for wrk threads
+                new_line = f'./wrk-4.2.0/wrk -t {num_threads} $@ > $LOG_FILE 2>&1'
+                content = content.replace(original_line, new_line)
+                
+                with open(apache_script, 'w') as f:
+                    f.write(content)
+                    
+                print(f"  [OK] Patched apache script: wrk will use {num_threads} thread(s)")
+                print(f"  [INFO] This ensures wrk threads <= concurrent connections")
+                return True
+            else:
+                # Already patched or different format
+                print(f"  [WARN] Apache script has unexpected format, checking if already patched...")
+                if f'-t {num_threads}' in content:
+                    print(f"  [INFO] Script already patched for {num_threads} thread(s)")
+                    return True
+                else:
+                    print(f"  [ERROR] Could not patch apache script - unexpected format")
+                    print(f"  [DEBUG] Content: {content}")
+                    return False
+                    
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch apache script: {e}")
+            return False
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """
@@ -1039,6 +1154,12 @@ class ApacheRunner:
             subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+
+        # Patch apache script to use correct number of wrk threads
+        # This prevents "number of connections must be >= threads" errors
+        if not self.patch_apache_script(num_threads):
+            print(f"  [ERROR] Failed to patch apache script")
+            return False
 
         # Single-threaded: use CPU 0 only with taskset
         cpu_list = '0'
