@@ -465,7 +465,7 @@ class NumpyBenchmarkRunner:
         print(f"[OK] Summary JSON saved: {summary_json_file}")
 
     def install_benchmark(self):
-        """Install benchmark with standard configuration."""
+        """Install benchmark with custom pip options for Ubuntu 24.04 PEP 668."""
         print(f"\n{'='*80}")
         print(f">>> Installing {self.benchmark_full}")
         print(f"{'='*80}")
@@ -491,7 +491,7 @@ class NumpyBenchmarkRunner:
 
         process.wait()
 
-        # Verify installation with dual check
+        # Verify installation directory exists
         pts_home = Path.home() / '.phoronix-test-suite'
         install_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
@@ -499,6 +499,38 @@ class NumpyBenchmarkRunner:
             print(f"  [ERROR] Installation failed: {install_dir} does not exist")
             print(f"  [ERROR] Check output above for details")
             sys.exit(1)
+
+        # Manual pip install with --break-system-packages for Ubuntu 24.04
+        print(f"\n  [INFO] Manually installing Python dependencies with --break-system-packages...")
+        pip_cmd = 'pip3 install --user --break-system-packages scipy numpy'
+        pip_result = subprocess.run(['bash', '-c', pip_cmd], capture_output=True, text=True)
+        
+        if pip_result.returncode != 0:
+            print(f"  [ERROR] pip install failed:")
+            print(pip_result.stderr)
+            sys.exit(1)
+        else:
+            print(f"  [OK] Python dependencies installed successfully")
+
+        # Patch numpy execution script to handle missing $LOG_FILE
+        print(f"\n  [INFO] Patching numpy execution script...")
+        numpy_script = install_dir / 'numpy'
+        if numpy_script.exists():
+            with open(numpy_script, 'r') as f:
+                script_content = f.read()
+            
+            # Replace the problematic lines with conditional output
+            # Old: cat numpy_log > $LOG_FILE
+            # New: cat numpy_log
+            patched_content = script_content.replace(
+                'cat numpy_log > $LOG_FILE\npython3 ../result_parser.py numpy_log >> $LOG_FILE',
+                'cat numpy_log\npython3 ../result_parser.py numpy_log'
+            )
+            
+            with open(numpy_script, 'w') as f:
+                f.write(patched_content)
+            
+            print(f"  [OK] numpy script patched to output to stdout")
 
         # Secondary check: PTS recognition
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
@@ -508,6 +540,53 @@ class NumpyBenchmarkRunner:
 
         print(f"  [OK] Installation completed and verified")
 
+    def patch_install_script(self):
+        """
+        Patch numpy install.sh to add --break-system-packages for Ubuntu 24.04+
+        This is required due to PEP 668 externally-managed-environment policy.
+        """
+        install_script = Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark / 'install.sh'
+        
+        if not install_script.exists():
+            print(f"  [WARN] Install script not found: {install_script}")
+            return False
+        
+        print(f"\n{'='*80}")
+        print(f">>> Patching install.sh for Ubuntu 24.04 PEP 668 compliance")
+        print(f"{'='*80}")
+        
+        try:
+            # Read original script
+            with open(install_script, 'r') as f:
+                original_content = f.read()
+            
+            # Check if already patched
+            if '--break-system-packages' in original_content:
+                print(f"  [INFO] Install script already patched")
+                return True
+            
+            # Patch: pip3 install --user scipy numpy
+            # To:    pip3 install --user --break-system-packages scipy numpy
+            patched_content = original_content.replace(
+                'pip3 install --user scipy numpy',
+                'pip3 install --user --break-system-packages scipy numpy'
+            )
+            
+            if patched_content == original_content:
+                print(f"  [WARN] No pip3 install command found to patch")
+                return False
+            
+            # Write patched script
+            with open(install_script, 'w') as f:
+                f.write(patched_content)
+            
+            print(f"  [OK] Install script patched successfully")
+            print(f"  [INFO] Added --break-system-packages to pip3 install command")
+            return True
+            
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch install script: {e}")
+            return False
 
     def ensure_upload_disabled(self):
         """
