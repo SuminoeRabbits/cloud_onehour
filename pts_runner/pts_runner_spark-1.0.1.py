@@ -186,7 +186,19 @@ class SparkRunner:
         self.py_version = sys.version_info
         print(f"  [INFO] Running on Python {self.py_version.major}.{self.py_version.minor}.{self.py_version.micro}")
 
-        # Python 3.13+ compatibility: store patched Spark python directory path
+        # Python 3.12+ compatibility: prefer older Python for Spark 3.3
+        self.spark_python_exec = None
+        if self.py_version >= (3, 12):
+            for candidate in ("python3.11", "python3.10"):
+                if shutil.which(candidate):
+                    self.spark_python_exec = candidate
+                    break
+            if self.spark_python_exec:
+                print(f"  [INFO] Spark compatibility: using {self.spark_python_exec}")
+            else:
+                print("  [WARN] Python >=3.12 detected but no python3.11/3.10 found; Spark may fail")
+
+        # Python 3.12+ compatibility: store patched Spark python directory path
         # This will be set by fix_benchmark_specific_issues() if patching is needed
         self.spark_python_dir = None
 
@@ -757,9 +769,9 @@ class SparkRunner:
                     new_lines.append(line)
             content = '\n'.join(new_lines)
 
-            # 6. Python 3.13+ compatibility (typing.io / typing.re / pipes removal)
-            if self.py_version >= (3, 13):
-                print(f"  [FIX] Python 3.13+ detected. Starting robust compatibility patches...")
+            # 6. Python 3.12+ compatibility (typing.io / typing.re / pipes removal)
+            if self.py_version >= (3, 12):
+                print(f"  [FIX] Python 3.12+ detected. Starting robust compatibility patches...")
 
                 # Ensure all files are writable before patching
                 subprocess.run(['chmod', '-R', '+w', str(install_sh.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1191,12 +1203,17 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
 
-        # Python 3.13+ compatibility: Set PYTHONPATH to use patched pyspark directory
+        # Python 3.12+ compatibility: Set PYTHONPATH to use patched pyspark directory
         # This ensures Python finds the patched pyspark modules instead of broken zip files
         pythonpath_env = ''
         if self.spark_python_dir:
             pythonpath_env = f'PYTHONPATH="{self.spark_python_dir}:$PYTHONPATH" '
-            print(f"[INFO] Python 3.13+ mode: PYTHONPATH set to {self.spark_python_dir}")
+            print(f"[INFO] Python 3.12+ mode: PYTHONPATH set to {self.spark_python_dir}")
+
+        python_exec_env = ''
+        if self.spark_python_exec:
+            python_exec_env = f'PYSPARK_PYTHON={self.spark_python_exec} PYSPARK_DRIVER_PYTHON={self.spark_python_exec} '
+            print(f"[INFO] Spark Python set to {self.spark_python_exec}")
 
         # Remove existing PTS result to avoid interactive prompts
         # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
@@ -1208,7 +1225,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
         for cmd in remove_cmds:
             subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        batch_env = f'{quick_env}{pythonpath_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+        batch_env = f'{quick_env}{python_exec_env}{pythonpath_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
