@@ -186,6 +186,10 @@ class SparkRunner:
         self.py_version = sys.version_info
         print(f"  [INFO] Running on Python {self.py_version.major}.{self.py_version.minor}.{self.py_version.micro}")
 
+        # Python 3.13+ compatibility: store patched Spark python directory path
+        # This will be set by fix_benchmark_specific_issues() if patching is needed
+        self.spark_python_dir = None
+
         # Determine thread execution mode
         if threads_arg is None:
             # Scaling mode: 1 to vCPU
@@ -756,7 +760,7 @@ class SparkRunner:
             # 6. Python 3.13+ compatibility (typing.io / typing.re / pipes removal)
             if self.py_version >= (3, 13):
                 print(f"  [FIX] Python 3.13+ detected. Starting robust compatibility patches...")
-                
+
                 # Ensure all files are writable before patching
                 subprocess.run(['chmod', '-R', '+w', str(install_sh.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -773,57 +777,167 @@ class SparkRunner:
                         except Exception as e:
                             print(f"    [ERR] Failed to delete {sf.name}: {e}")
 
-                # 6b. Extract PySpark zips into the 'python' directory
-                # This ensures the extracted 'pyspark' folder is in the PYTHONPATH
+                # 6b. Extract PySpark zips and patch Spark launcher scripts
+                # Critical: Spark's bin/pyspark and bin/spark-submit add zip files to PYTHONPATH
+                # We must extract zips AND modify launcher scripts to use extracted directories
                 found_spark_dir = False
                 for spark_dir in install_sh.parent.glob("spark-3.3.0*"):
                     found_spark_dir = True
                     python_dir = spark_dir / "python"
                     lib_dir = python_dir / "lib"
+                    bin_dir = spark_dir / "bin"
                     print(f"  [FIX] Processing Spark directory: {spark_dir.name}")
+
+                    # Extract zip files
                     if lib_dir.exists():
                         for zip_file in lib_dir.glob("*.zip"):
                             print(f"    [ZIP] Extracting {zip_file.name} into {python_dir.name}...")
                             try:
-                                # Use unzip -o for reliability over shutil
                                 res = subprocess.run(['unzip', '-o', str(zip_file), '-d', str(python_dir)], capture_output=True, text=True)
                                 if res.returncode == 0:
-                                    zip_file.unlink() # Remove zip to force use of patched directory
+                                    # Keep zip but rename to .zip.bak so scripts don't find it
+                                    # Note: with_suffix('.zip.bak') would produce 'pyspark.bak', not 'pyspark.zip.bak'
+                                    bak_path = zip_file.with_name(zip_file.name + '.bak')
+                                    zip_file.rename(bak_path)
+                                    print(f"    [OK] Extracted and renamed to {bak_path.name}")
                                 else:
                                     print(f"    [ERR] Unzip failed: {res.stderr}")
                             except Exception as e:
                                 print(f"    [WARN] Failed to extract {zip_file.name}: {e}")
-                
+
+                    # 6b-1.5. Post-extraction: Remove typing.py shadow files from extracted pyspark
+                    # CRITICAL: ZIP extraction may create typing.py files that shadow stdlib
+                    post_shadow_files = list(python_dir.rglob("typing.py")) + list(python_dir.rglob("typing.pyc"))
+                    if post_shadow_files:
+                        print(f"    [FIX] Found {len(post_shadow_files)} typing.py shadow files after ZIP extraction. Removing...")
+                        for sf in post_shadow_files:
+                            try:
+                                sf.unlink()
+                                print(f"      [DEL] {sf.relative_to(python_dir)}")
+                            except Exception as e:
+                                print(f"      [ERR] Failed to delete {sf.name}: {e}")
+
+                    # 6b-2. Patch Spark launcher scripts (pyspark, spark-submit, load-spark-env.sh)
+                    # These scripts add zip files to PYTHONPATH - we need to modify them
+                    launcher_scripts = ['pyspark', 'spark-submit', 'load-spark-env.sh']
+                    for script_name in launcher_scripts:
+                        script_path = bin_dir / script_name
+                        if script_path.exists():
+                            try:
+                                with open(script_path, 'r') as f:
+                                    script_content = f.read()
+
+                                # Replace zip file references with directory references
+                                # Pattern: ${SPARK_HOME}/python/lib/pyspark.zip -> ${SPARK_HOME}/python
+                                # Pattern: ${SPARK_HOME}/python/lib/py4j-*.zip -> ${SPARK_HOME}/python
+                                original_content = script_content
+
+                                # Remove zip file additions to PYTHONPATH
+                                script_content = re.sub(
+                                    r'\$\{SPARK_HOME\}/python/lib/pyspark\.zip[:\"]?',
+                                    '${SPARK_HOME}/python:',
+                                    script_content
+                                )
+                                script_content = re.sub(
+                                    r'\$\{SPARK_HOME\}/python/lib/py4j[^:\"]*\.zip[:\"]?',
+                                    '',
+                                    script_content
+                                )
+                                # Also handle $SPARK_HOME without braces
+                                script_content = re.sub(
+                                    r'\$SPARK_HOME/python/lib/pyspark\.zip[:\"]?',
+                                    '$SPARK_HOME/python:',
+                                    script_content
+                                )
+                                script_content = re.sub(
+                                    r'\$SPARK_HOME/python/lib/py4j[^:\"]*\.zip[:\"]?',
+                                    '',
+                                    script_content
+                                )
+
+                                if script_content != original_content:
+                                    with open(script_path, 'w') as f:
+                                        f.write(script_content)
+                                    print(f"    [OK] Patched {script_name} to use extracted directories")
+                            except Exception as e:
+                                print(f"    [WARN] Failed to patch {script_name}: {e}")
+
+                    # 6b-3. Create a PYTHONPATH setup script for runtime use
+                    pythonpath_setup = python_dir / "setup_pythonpath.sh"
+                    try:
+                        with open(pythonpath_setup, 'w') as f:
+                            f.write(f'''#!/bin/bash
+# Auto-generated PYTHONPATH setup for Python 3.13+ compatibility
+export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
+''')
+                        pythonpath_setup.chmod(0o755)
+                        print(f"    [OK] Created {pythonpath_setup.name}")
+                        # Store for later use in run_benchmark
+                        self.spark_python_dir = str(python_dir)
+                    except Exception as e:
+                        print(f"    [WARN] Failed to create PYTHONPATH setup: {e}")
+
                 if not found_spark_dir:
                     print(f"  [WARN] No 'spark-3.3.0*' directory found in {install_sh.parent}")
 
-                # 6c. Patch ALL files and clear pycache to force re-evaluation
-                print(f"  [FIX] Running sed replacements for typing.io and pipes...")
+                # 6c. Patch Python source files with accurate import replacements
+                print(f"  [FIX] Running import replacements for typing.io, typing.re, and pipes...")
+
+                # More accurate sed patterns for Python imports
+                # Note: Using word boundaries and flexible whitespace to handle indented code
                 patch_cmds = [
-                    f"find -L {install_sh.parent} -type f -exec sed -i 's/typing\\.io/typing/g; s/typing\\.re/typing/g' {{}} +",
-                    f"find -L {install_sh.parent} -type f -exec sed -i 's/\\bimport[[:space:]]\\+pipes\\b/import shlex as pipes/g; s/\\bfrom[[:space:]]\\+pipes[[:space:]]\\+import[[:space:]]\\+quote\\b/from shlex import quote/g; s/\\bpipes\\.quote\\b/shlex.quote/g' {{}} +",
+                    # Fix typing.io imports - Python 3.13 removed typing.io submodule
+                    # 'from typing.io import X' -> 'from typing import X'
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/from typing\\.io import/from typing import/g' {{}} +",
+                    # 'import typing.io' -> 'import typing' (handles indentation)
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/\\bimport typing\\.io\\b/import typing/g' {{}} +",
+                    # 'typing.io.X' -> 'typing.X'
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/typing\\.io\\./typing./g' {{}} +",
+
+                    # Fix typing.re imports - Python 3.13 removed typing.re submodule
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/from typing\\.re import/from typing import/g' {{}} +",
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/\\bimport typing\\.re\\b/import typing/g' {{}} +",
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/typing\\.re\\./typing./g' {{}} +",
+
+                    # Fix pipes module (removed in Python 3.13)
+                    # 'import pipes' -> 'import shlex' (handles indentation with word boundary)
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/\\bimport pipes\\b/import shlex/g' {{}} +",
+                    # 'from pipes import quote' -> 'from shlex import quote'
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/from pipes import/from shlex import/g' {{}} +",
+                    # 'pipes.quote' -> 'shlex.quote'
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/\\bpipes\\.quote/shlex.quote/g' {{}} +",
+                    # 'pipes.Template' and other pipes usages -> comment out or replace
+                    f"find -L {install_sh.parent} -name '*.py' -exec sed -i 's/\\bpipes\\./shlex./g' {{}} +",
+
                     # Delete all pycache to force Python to re-read the patched source files
                     f"find -L {install_sh.parent} -name '__pycache__' -type d -exec rm -rf {{}} +",
                     f"find -L {install_sh.parent} -name '*.pyc' -type f -delete"
                 ]
                 for cmd in patch_cmds:
-                    subprocess.run(['bash', '-c', f"LC_ALL=C {cmd}"], stdout=subprocess.DEVNULL)
-                
+                    subprocess.run(['bash', '-c', f"LC_ALL=C {cmd}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
                 # 6d. Verification step with detailed output
                 print(f"  [FIX] Verifying patches...")
-                check = subprocess.run(['grep', '-r', 'typing.io', str(install_sh.parent)], capture_output=True, text=True)
-                if not check.stdout:
-                    print(f"  [OK] No 'typing.io' found. Patch verified.")
+                check = subprocess.run(
+                    ['bash', '-c', f"grep -r 'typing\\.io' {install_sh.parent} --include='*.py' 2>/dev/null || true"],
+                    capture_output=True, text=True
+                )
+                if not check.stdout.strip():
+                    print(f"  [OK] No 'typing.io' found in Python files. Patch verified.")
                 else:
-                    print(f"  [WARN] 'typing.io' still exists in the following files (first 5):")
-                    for line in check.stdout.splitlines()[:5]:
+                    print(f"  [WARN] 'typing.io' still exists in the following files:")
+                    for line in check.stdout.strip().splitlines()[:5]:
                         print(f"    [REMAIN] {line}")
-                
-                # Final check for any remaining typing.py
-                final_shadow = list(install_sh.parent.rglob("typing.py*"))
+
+                # Final check for any remaining typing.py shadowing files
+                final_shadow = list(install_sh.parent.rglob("typing.py"))
                 if final_shadow:
-                    print(f"  [CRITICAL] Shadowing files still exist: {final_shadow}")
-                
+                    print(f"  [CRITICAL] Shadowing typing.py files still exist:")
+                    for sf in final_shadow:
+                        print(f"    [SHADOW] {sf}")
+                else:
+                    print(f"  [OK] No shadowing typing.py files found.")
+
                 sys.stdout.flush()
 
             if modified:
@@ -1076,27 +1190,25 @@ class SparkRunner:
         spark_opts = f'SPARK_JAVA_OPTS="{java_opts}" JDK_JAVA_OPTIONS="{java_opts}" '
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        
+
+        # Python 3.13+ compatibility: Set PYTHONPATH to use patched pyspark directory
+        # This ensures Python finds the patched pyspark modules instead of broken zip files
+        pythonpath_env = ''
+        if self.spark_python_dir:
+            pythonpath_env = f'PYTHONPATH="{self.spark_python_dir}:$PYTHONPATH" '
+            print(f"[INFO] Python 3.13+ mode: PYTHONPATH set to {self.spark_python_dir}")
+
         # Remove existing PTS result to avoid interactive prompts
-        
         # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
-        
         sanitized_benchmark = self.benchmark.replace('.', '')
-        
         remove_cmds = [
-        
             f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
-        
             f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
-        
         ]
-        
         for cmd in remove_cmds:
-        
             subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        
-        batch_env = f'{quick_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+        batch_env = f'{quick_env}{pythonpath_env}{spark_opts}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
