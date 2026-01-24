@@ -562,10 +562,8 @@ def main():
 
     print(f"\nOutput written to: {output_path}")
 
-    # 終了コードを設定（不完全なテストがあれば1）
-    total_incomplete = sum(postmortem["summary"]["incomplete_benchmarks"].values())
-    if total_incomplete > 0:
-        sys.exit(1)
+    # 終了コードは常に0（postmortemは情報提供が目的であり、incompleteがあってもエラーとしない）
+    # Note: cloud_exec_para.pyのnohupラッパーが非ゼロ終了コードをERRと判定するため
     sys.exit(0)
 
 
