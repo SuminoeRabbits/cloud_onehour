@@ -14,7 +14,8 @@
       "nproc > /tmp/cpu_test.log 2>&1"
     ],
     "workloads": [
-      "sudo apt-get -y update && sudo apt-get install -y git > /tmp/apt_setup.log 2>&1",
+      "sudo apt-get -y update > /tmp/apt_update.log 2>&1",
+      "sudo apt-get -y install -y git > /tmp/apt_install.log 2>&1",
       "git clone https://github.com/SuminoeRabbits/cloud_onehour.git > /tmp/git_clone.log 2>&1",
       "cd ~/cloud_onehour/scripts && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_coremark-1.0.1.py 4 > /tmp/pts_runner_coremark.log 2>&1",
