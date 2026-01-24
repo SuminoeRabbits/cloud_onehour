@@ -161,6 +161,106 @@ class RustlsRunner:
         except Exception:
             return False
 
+
+    def get_cpu_frequencies(self):
+        """
+        Get current CPU frequencies for all CPUs.
+        Tries multiple methods for cross-platform compatibility (x86_64, ARM64, cloud VMs).
+
+        Returns:
+            list: List of frequencies in kHz, one per CPU. Empty list if unavailable.
+        """
+        frequencies = []
+
+        # Method 1: /proc/cpuinfo (works on x86_64)
+        try:
+            result = subprocess.run(
+                ['bash', '-c', 'grep "cpu MHz" /proc/cpuinfo'],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    # Format: "cpu MHz		: 3400.000"
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        mhz = float(parts[1].strip())
+                        frequencies.append(int(mhz * 1000))  # Convert MHz to kHz
+                if frequencies:
+                    return frequencies
+        except Exception:
+            pass
+
+        # Method 2: /sys/devices/system/cpu/cpufreq (works on ARM64 and some x86)
+        try:
+            # Try scaling_cur_freq first (more commonly available)
+            freq_files = sorted(Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/scaling_cur_freq'))
+            if not freq_files:
+                # Fallback to cpuinfo_cur_freq
+                freq_files = sorted(Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/cpuinfo_cur_freq'))
+
+            for freq_file in freq_files:
+                try:
+                    with open(freq_file, 'r') as f:
+                        freq_khz = int(f.read().strip())
+                        frequencies.append(freq_khz)
+                except Exception:
+                    frequencies.append(0)
+
+            if frequencies:
+                return frequencies
+        except Exception:
+            pass
+
+        # Method 3: lscpu (fallback)
+        try:
+            result = subprocess.run(
+                ['lscpu'],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'CPU MHz' in line or 'CPU max MHz' in line:
+                        parts = line.split(':')
+                        if len(parts) >= 2:
+                            mhz = float(parts[1].strip().replace(',', '.'))
+                            # Return same frequency for all CPUs
+                            return [int(mhz * 1000)] * self.vcpu_count
+        except Exception:
+            pass
+
+        return frequencies
+
+    def record_cpu_frequency(self, output_file):
+        """
+        Record current CPU frequencies to a file.
+
+        Args:
+            output_file: Path to output file
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        frequencies = self.get_cpu_frequencies()
+        if frequencies:
+            try:
+                with open(output_file, 'w') as f:
+                    for freq in frequencies:
+                        f.write(f"{freq}\n")
+                return True
+            except Exception as e:
+                print(f"  [WARN] Failed to write frequency file: {e}")
+                return False
+        else:
+            # Write empty file to indicate unavailability
+            try:
+                with open(output_file, 'w') as f:
+                    pass
+                return False
+            except Exception:
+                return False
+
     def get_perf_events(self):
         """
         Determine available perf events by testing actual command execution.
@@ -617,10 +717,12 @@ class RustlsRunner:
             print(f"  [INFO] Running without perf")
 
         # Record CPU frequency before benchmark
+        # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
         print(f"[INFO] Recording CPU frequency before benchmark...")
-        cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
-        command = cmd_template.format(file=freq_start_file)
-        subprocess.run(['bash', '-c', command], capture_output=True, text=True)
+        if self.record_cpu_frequency(freq_start_file):
+            print(f"  [OK] Start frequency recorded")
+        else:
+            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute benchmark with real-time output streaming
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -650,8 +752,12 @@ class RustlsRunner:
             returncode = process.returncode
 
         # Record CPU frequency after benchmark
-        command = cmd_template.format(file=freq_end_file)
-        subprocess.run(['bash', '-c', command], capture_output=True, text=True)
+        # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
+        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        if self.record_cpu_frequency(freq_end_file):
+            print(f"  [OK] End frequency recorded")
+        else:
+            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0:
             print(f"\n[OK] Benchmark completed successfully")
