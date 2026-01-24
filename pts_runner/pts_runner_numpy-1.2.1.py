@@ -27,6 +27,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+MIN_PYTHON_VERSION = (3, 7, 0)
+
+if sys.version_info < MIN_PYTHON_VERSION:
+    sys.stderr.write(
+        "[ERROR] Python 3.7 or newer is required to run pts_runner_numpy-1.2.1.\n"
+    )
+    sys.exit(1)
+
 
 class NumpyBenchmarkRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
@@ -56,6 +64,22 @@ class NumpyBenchmarkRunner:
         # Quick mode for development
         self.quick_mode = quick_mode
 
+        # Pip / Python environment info
+        self.pip_executable = shutil.which('pip3') or shutil.which('pip')
+        if not self.pip_executable:
+            print("  [ERROR] Neither pip3 nor pip found in PATH")
+            sys.exit(1)
+
+        self.pip_version = self.detect_pip_version()
+        self.break_system_packages_supported = self.pip_supports_break_system_packages()
+
+        py_version = sys.version_info
+        pip_info = self.pip_version or "unknown"
+        print(
+            f"  [INFO] Python {py_version.major}.{py_version.minor}.{py_version.micro} / "
+            f"pip {pip_info}"
+        )
+
         # Check perf permissions (standard Linux check)
         self.perf_paranoid = self.check_and_setup_perf_permissions()
 
@@ -72,6 +96,68 @@ class NumpyBenchmarkRunner:
             print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
+    def parse_version_tuple(self, version_str):
+        """Convert a version string into a comparable tuple."""
+        components = []
+        for part in version_str.split('.'):
+            if part.isdigit():
+                components.append(int(part))
+            else:
+                match = re.match(r'(\d+)', part)
+                if match:
+                    components.append(int(match.group(1)))
+                break
+
+        while len(components) < 3:
+            components.append(0)
+
+        return tuple(components[:3])
+
+    def detect_pip_version(self):
+        """Best-effort detection of the system pip version."""
+        try:
+            import pip  # type: ignore
+
+            return getattr(pip, '__version__', None)
+        except Exception:
+            pass
+
+        if not self.pip_executable:
+            return None
+
+        try:
+            result = subprocess.run(
+                [self.pip_executable, '--version'],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0 and result.stdout:
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    return parts[1]
+        except Exception:
+            return None
+
+        return None
+
+    def pip_supports_break_system_packages(self):
+        """Return True if pip understands --break-system-packages."""
+        if not self.pip_version:
+            return False
+
+        return self.parse_version_tuple(self.pip_version) >= (23, 0, 0)
+
+    def build_pip_install_command(self):
+        """Construct the pip install command with conditional flags."""
+        if not self.pip_executable:
+            raise RuntimeError("pip executable not detected")
+
+        cmd = [self.pip_executable, 'install', '--user']
+        if self.break_system_packages_supported:
+            cmd.append('--break-system-packages')
+        cmd.extend(['scipy', 'numpy'])
+        return cmd
 
     def get_os_name(self):
         """
@@ -606,10 +692,14 @@ class NumpyBenchmarkRunner:
             print(f"  [ERROR] Check output above for details")
             sys.exit(1)
 
-        # Manual pip install with --break-system-packages for Ubuntu 24.04
-        print(f"\n  [INFO] Manually installing Python dependencies with --break-system-packages...")
-        pip_cmd = 'pip3 install --user --break-system-packages scipy numpy'
-        pip_result = subprocess.run(['bash', '-c', pip_cmd], capture_output=True, text=True)
+        # Manual pip install with conditional --break-system-packages support
+        print(f"\n  [INFO] Manually installing Python dependencies (auto-detected pip flags)...")
+        if not self.break_system_packages_supported:
+            print("  [INFO] pip version does not support --break-system-packages; using --user only")
+
+        pip_cmd = self.build_pip_install_command()
+        print(f"  [DEBUG] pip command: {' '.join(pip_cmd)}")
+        pip_result = subprocess.run(pip_cmd, capture_output=True, text=True)
         
         if pip_result.returncode != 0:
             print(f"  [ERROR] pip install failed:")
@@ -640,6 +730,10 @@ class NumpyBenchmarkRunner:
         if not install_script.exists():
             print(f"  [WARN] Install script not found: {install_script}")
             return False
+
+        if not self.break_system_packages_supported:
+            print("  [INFO] Skipping install.sh patch (pip lacks --break-system-packages support)")
+            return True
         
         print(f"\n{'='*80}")
         print(f">>> Patching install.sh for Ubuntu 24.04 PEP 668 compliance")
