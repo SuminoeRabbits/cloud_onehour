@@ -8,6 +8,14 @@
 
 set -euo pipefail  # Exit on error, undefined variables, pipe failures
 
+# Script location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APT_UTILS="${SCRIPT_DIR}/lib/apt_utils.sh"
+if [[ -f "${APT_UTILS}" ]]; then
+    # shellcheck disable=SC1090
+    source "${APT_UTILS}"
+fi
+
 # Configuration
 RUST_VERSION="1.84.0"
 CARGO_ENV="${HOME}/.cargo/env"
@@ -40,6 +48,18 @@ log_error() {
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Wait for apt locks if helper is available
+wait_for_apt_lock_if_available() {
+    if declare -F wait_for_apt_lock >/dev/null 2>&1; then
+        log "Waiting for apt locks to be released..."
+        if ! wait_for_apt_lock 600; then
+            log_error "Timeout waiting for apt locks"
+            return 1
+        fi
+    fi
+    return 0
 }
 
 # Determine how many parallel jobs Cargo should use
@@ -165,10 +185,12 @@ install_curl() {
 
     log "Installing curl..."
     if command_exists apt-get; then
+        wait_for_apt_lock_if_available || return 1
         sudo apt-get update -qq || {
             log_error "Failed to update apt repositories"
             return 1
         }
+        wait_for_apt_lock_if_available || return 1
         sudo apt-get install -y curl || {
             log_error "Failed to install curl"
             return 1
@@ -467,9 +489,11 @@ install_ca_certificates() {
     log "Ensuring CA certificates are installed and updated..."
 
     if command_exists apt-get; then
+        wait_for_apt_lock_if_available || return 1
         sudo apt-get update -qq || {
             log_warn "Failed to update apt repositories"
         }
+        wait_for_apt_lock_if_available || return 1
         sudo apt-get install -y ca-certificates || {
             log_error "Failed to install ca-certificates"
             return 1
@@ -501,10 +525,12 @@ install_build_dependencies() {
     log "Installing build dependencies..."
 
     if command_exists apt-get; then
+        wait_for_apt_lock_if_available || return 1
         sudo apt-get update -qq || {
             log_warn "Failed to update apt repositories"
         }
         # Install essential build tools, SSL libraries, and pkg-config
+        wait_for_apt_lock_if_available || return 1
         sudo apt-get install -y \
             build-essential \
             pkg-config \
@@ -809,5 +835,4 @@ main() {
 
 # Run main function
 main "$@"
-
 

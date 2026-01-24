@@ -11,6 +11,9 @@ echo "=== Waiting for apt locks to be released ==="
 wait_for_apt_lock
 echo ""
 
+# Temporarily disable unattended upgrades to reduce apt lock contention
+disable_unattended_upgrades
+
 # setup gcc14
 ./setup_gcc14.sh
 ./setup_binutil244.sh
@@ -33,5 +36,7 @@ echo ""
 # setup rust
 ./setup_rust.sh
 
+# Re-enable unattended upgrades
+enable_unattended_upgrades
 
 
