@@ -800,9 +800,77 @@ class StreamRunner:
                 f.write(f"Benchmark failed with return code {returncode}\n")
                 f.write(f"See {log_file} for details.\n")
             print(f"     Error log: {err_file}")
+            self.dump_failure_debug(num_threads, log_file, stdout_log)
             return False
 
         return True
+
+    def read_tail(self, file_path, max_lines=120):
+        """Read last N lines from a file for debug output."""
+        try:
+            with open(file_path, 'r', errors='replace') as f:
+                lines = f.readlines()
+            return ''.join(lines[-max_lines:])
+        except Exception:
+            return ""
+
+    def dump_failure_debug(self, num_threads, log_file, stdout_log):
+        """Dump debug info to stdout and stdout.log when a test fails."""
+        header = "\n[DEBUG] Failure diagnostics (last logs)\n"
+        debug_text = header
+        print(header, end="")
+
+        runner_tail = self.read_tail(log_file, max_lines=200)
+        if runner_tail:
+            label = f"[DEBUG] Runner log tail: {log_file}\n"
+            print(label, end="")
+            print(runner_tail)
+            debug_text += label + runner_tail + "\n"
+        else:
+            msg = f"[WARN] Unable to read runner log: {log_file}\n"
+            print(msg, end="")
+            debug_text += msg
+
+        pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
+        result_name = f"{self.benchmark}-{num_threads}threads"
+        result_dir_name = result_name.replace('.', '')
+        result_dir = pts_results_dir / result_dir_name
+
+        if result_dir.exists():
+            log_candidates = []
+            log_no_ext = result_dir / "log"
+            if log_no_ext.exists():
+                log_candidates.append(log_no_ext)
+
+            log_candidates.extend(
+                sorted(result_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]
+            )
+
+            seen = set()
+            for log_path in log_candidates:
+                if log_path in seen:
+                    continue
+                seen.add(log_path)
+                pts_tail = self.read_tail(log_path, max_lines=120)
+                label = f"[DEBUG] PTS log tail: {log_path}\n"
+                print(label, end="")
+                if pts_tail:
+                    print(pts_tail)
+                    debug_text += label + pts_tail + "\n"
+                else:
+                    msg = "[WARN] PTS log is empty or unreadable\n"
+                    print(msg, end="")
+                    debug_text += msg
+        else:
+            msg = f"[WARN] PTS result dir not found: {result_dir}\n"
+            print(msg, end="")
+            debug_text += msg
+
+        try:
+            with open(stdout_log, 'a') as stdout_f:
+                stdout_f.write(debug_text)
+        except Exception:
+            print("[WARN] Failed to append debug output to stdout.log")
 
     def run(self):
         """Main execution flow."""
