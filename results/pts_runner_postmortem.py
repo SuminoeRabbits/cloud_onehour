@@ -14,8 +14,9 @@
 #   に従う。
 #   1.a 例外事項
 #   テストが間慮しても、例えば<N>-thread.logに
-#   The following tests failed to properly run:
-#   の様なテスト失敗を示唆する単語が出現する場合もある。
+#   "The following tests failed to properly run"や
+#   "The test run did not produce a result"といった
+#   テスト失敗を示唆する単語が出現する場合もある。
 #   これらのケースは例外事項としてFail判定する。
 #
 #
@@ -35,7 +36,7 @@
 #             "status": "complete" | "incomplete",
 #             "reason": "<reason>",
 #             "missing_files": ["<file1>", "<file2>", ...],
-#             "completion_case": 1 | 2 | 3 | 4 | null
+#             "completion_case": 1 | 2 | 3 | 5 | null
 #           }
 #         }
 #       }
@@ -73,6 +74,7 @@ from typing import Dict, List, Tuple, Optional, Any
 # テスト失敗を示唆する文字列パターン（例外事項1.a）
 FAILURE_PATTERNS = [
     "The following tests failed to properly run:",
+    "The test run did not produce a result",
     "Test Failed",
     "FAILED",
     "Error:",
@@ -100,9 +102,9 @@ OPTIONAL_FILES_PER_THREAD = [
 # stdout.logは<benchmark>ディレクトリ直下に必須
 REQUIRED_FILE_BENCHMARK_DIR = "stdout.log"
 
-# ケース4の特殊ベンチマーク
+# ケース5の特殊ベンチマーク
 # （<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しないがテスト完了）
-SPECIAL_BENCHMARKS_CASE4 = [
+SPECIAL_BENCHMARKS_CASE5 = [
     "build-gcc-1.5.0",
     "build-linux-kernel-1.17.1",
     "build-llvm-1.6.0",
@@ -110,6 +112,7 @@ SPECIAL_BENCHMARKS_CASE4 = [
     "sysbench-1.1.0",
     "java-jmh-1.0.1",
     "ffmpeg-7.0.1",
+    "apache-3.0.0",
 ]
 
 
@@ -211,22 +214,22 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
         (is_complete, missing_files, completion_case)
         - is_complete: 必須ファイルがすべて揃っているかどうか
         - missing_files: 不足しているファイルのリスト
-        - completion_case: 完了ケース番号 (1, 2, 3, 4, または None)
+        - completion_case: 完了ケース番号 (1, 2, 3, 5, または None)
     """
     n = str(thread_num)
     missing_files = []
     completion_case = None
 
-    # まずケース4の特殊ベンチマークかチェック
-    is_special_benchmark = benchmark_name in SPECIAL_BENCHMARKS_CASE4
+    # まずケース5の特殊ベンチマークかチェック
+    is_special_benchmark = benchmark_name in SPECIAL_BENCHMARKS_CASE5
 
-    # ケース4の特殊ベンチマークの場合
-    # ケース4は summary.json, <N>-thread_perf_summary.json, <N>-thread.json が
+    # ケース5の特殊ベンチマークの場合
+    # ケース5は summary.json, <N>-thread_perf_summary.json, <N>-thread.json が
     # すべて存在しないがテスト完了している特殊例
     # 必須: <N>-thread.log（結果抽出に必要）, freq_start, freq_end
     # perf_stats.txt は存在しない場合がある
     if is_special_benchmark:
-        # ケース4の必須ファイル（logファイルが必須）
+        # ケース5の必須ファイル（logファイルが必須）
         thread_log = benchmark_path / f"{n}-thread.log"
         thread_log_subdir = benchmark_path / f"{n}-thread" / f"{n}-thread.log"
 
@@ -234,10 +237,10 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
             missing_files.append(f"{n}-thread.log")
 
         # freq_start, freq_end はオプション扱い（存在すれば読み込む）
-        # ただし存在チェックは行わない（ケース4の特殊性）
+        # ただし存在チェックは行わない（ケース5の特殊性）
 
         if not missing_files:
-            completion_case = 4
+            completion_case = 5
             return True, [], completion_case
         else:
             return False, missing_files, None

@@ -30,6 +30,8 @@ import statistics
 import subprocess
 import re
 from datetime import datetime
+import socket
+import glob
 
 
 # Script version - Format: v<major>.<minor>.<patch>
@@ -514,11 +516,12 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         cost_hour: Cost per hour (cost_hour[730h-mo]) for this machine
 
     Per README_results.md specification:
-        Benchmark completion conditions (4 cases):
+        Benchmark completion conditions (5 cases):
         Case 1: summary.jsonと<N>-thread.jsonの両方が存在
         Case 2: summary.jsonはないが<N>-thread.jsonが存在
         Case 3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
-        Case 4: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも
+        Case 4: (将来の拡張の為に確保)
+        Case 5: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも
                 存在しないがテスト完了している特殊ベンチマーク:
                 - build-gcc-1.5.0
                 - build-linux-kernel-1.17.1
@@ -526,6 +529,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                 - coremark-1.0.1
                 - sysbench-1.1.0
                 - java-jmh-1.0.1
+                - ffmpeg-7.0.1
+                - apache-3.0.0
 
         cost = cost_hour[730h-mo] * time / 3600
         where time is in seconds, so divide by 3600 to convert to hours
@@ -533,9 +538,9 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     summary_json = benchmark_dir / "summary.json"
     benchmark_name = benchmark_dir.name
 
-    # Case 4 special benchmarks (per README_results.md)
-    case4_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1", "sysbench-1.1.0", "java-jmh-1.0.1", "ffmpeg-7.0.1"]
-    is_case4 = benchmark_name in case4_benchmarks
+    # Case 5 special benchmarks (per README_results.md)
+    case5_benchmarks = ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0", "coremark-1.0.1", "sysbench-1.1.0", "java-jmh-1.0.1", "ffmpeg-7.0.1", "apache-3.0.0"]
+    is_case5 = benchmark_name in case5_benchmarks
 
     # Find all thread counts from <N>-thread.json files (Case 1 & 2)
     thread_json_files = list(benchmark_dir.glob("*-thread.json"))
@@ -545,15 +550,15 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     perf_summary_files = list(benchmark_dir.glob("*-thread_perf_summary.json"))
     perf_summary_thread_nums = sorted(set(f.stem.split("-")[0] for f in perf_summary_files if f.stem.split("-")[0].isdigit()))
 
-    # Find all thread counts from <N>-thread.log files (Case 4)
+    # Find all thread counts from <N>-thread.log files (Case 5)
     thread_log_files = list(benchmark_dir.glob("*-thread.log"))
     log_thread_nums = sorted(set(f.stem.split("-")[0] for f in thread_log_files if f.stem.split("-")[0].isdigit()))
 
     # Merge thread numbers from all sources
-    all_thread_nums = sorted(set(thread_nums + perf_summary_thread_nums + (log_thread_nums if is_case4 else [])))
+    all_thread_nums = sorted(set(thread_nums + perf_summary_thread_nums + (log_thread_nums if is_case5 else [])))
 
     # Check if benchmark is complete per README_results.md
-    # At least one of: <N>-thread.json, <N>-thread_perf_summary.json, or (Case 4: <N>-thread.log) must exist
+    # At least one of: <N>-thread.json, <N>-thread_perf_summary.json, or (Case 5: <N>-thread.log) must exist
     if not all_thread_nums:
         print(f"Warning: Skipping incomplete benchmark at {benchmark_dir} (no <N>-thread.json or <N>-thread_perf_summary.json found)", file=sys.stderr)
         return None
@@ -577,7 +582,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         thread_data = process_thread_data(benchmark_dir, thread_num)
         if thread_data is None:
             # thread_data can be None if required files are missing
-            # For Case 4, try to read freq files if they exist
+            # For Case 5, try to read freq files if they exist
             thread_data = {"perf_stat": {}}
             freq_start = benchmark_dir / f"{thread_num}-thread_freq_start.txt"
             freq_end = benchmark_dir / f"{thread_num}-thread_freq_end.txt"
@@ -590,12 +595,12 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         # Case 1: summary.jsonと<N>-thread.jsonの両方が存在
         # Case 2: summary.jsonはないが<N>-thread.jsonが存在
         # Case 3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
-        # Case 4: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しない特殊ベンチマーク
+        # Case 5: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しない特殊ベンチマーク
         test_results = {}
         has_thread_log = thread_num in log_thread_nums
 
         # Determine which case to apply
-        # Priority: Case 1 > Case 2 > Case 3 > Case 4
+        # Priority: Case 1 > Case 2 > Case 3 > Case 5
         if summary_data and "results" in summary_data and has_thread_json:
             # Case 1: Both summary.json and <N>-thread.json exist
             # Use summary.json for test metadata and <N>-thread.json for raw data
@@ -798,9 +803,9 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                 except (json.JSONDecodeError, IOError) as e:
                     print(f"Warning: Failed to read {perf_summary_file}: {e}", file=sys.stderr)
 
-        elif is_case4 and has_thread_log and not has_thread_json and not has_perf_summary:
-            # Case 4: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しない特殊ベンチマーク
-            # Per README_results.md Case 4:
+        elif is_case5 and has_thread_log and not has_thread_json and not has_perf_summary:
+            # Case 5: summary.jsonも<N>-thread_perf_summary.jsonも<N>-thread.jsonも存在しない特殊ベンチマーク
+            # Per README_results.md Case 5:
             # - coremark-1.0.1: Extract "Average: XXXX.XXXX Iterations/Sec" from <N>-thread.log
             # - build-*: Extract "Average: XXXX.XXXX Seconds" from <N>-thread.log
             # - sysbench-1.1.0: Extract RAM_Memory (MiB/sec) and CPU (Events Per Second)
@@ -1033,6 +1038,63 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                             print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
                             print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
 
+                    elif benchmark_name == "apache-3.0.0":
+                        # Per README_results.md Case 5 - apache-3.0.0:
+                        # Apache HTTP Server has multiple tests with format: "pts/apache-3.0.0 [Concurrent Requests: XXX]"
+                        # Each test outputs "Average: XXXX.XX Requests Per Second"
+                        # Example patterns in log:
+                        #   Apache HTTP Server 2.4.56:
+                        #       pts/apache-3.0.0 [Concurrent Requests: 200]
+                        #   ...
+                        #   Concurrent Requests: 200:
+                        #       1168.48
+                        #   Average: 1168.48 Requests Per Second
+
+                        # Find all test blocks with Concurrent Requests and Average Requests Per Second
+                        # Pattern to match test header lines like "pts/apache-3.0.0 [Concurrent Requests: 200]"
+                        test_header_pattern = r'pts/apache-[\d.]+\s*\[Concurrent Requests:\s*(\d+)\]'
+                        rps_pattern = r'Average[:\s]+([\d.]+)\s+Requests\s+Per\s+Second'
+
+                        # Find all test headers
+                        test_headers = list(re.finditer(test_header_pattern, log_content, re.IGNORECASE))
+                        rps_matches = list(re.finditer(rps_pattern, log_content, re.IGNORECASE))
+
+                        if test_headers and rps_matches:
+                            # Match each header with its corresponding RPS value
+                            for i, header_match in enumerate(test_headers):
+                                concurrent_req = header_match.group(1)
+
+                                # Find the RPS value that comes after this header
+                                header_pos = header_match.end()
+                                next_header_pos = test_headers[i + 1].start() if i + 1 < len(test_headers) else len(log_content)
+
+                                # Look for RPS match between this header and the next
+                                for rps_match in rps_matches:
+                                    if header_pos < rps_match.start() < next_header_pos:
+                                        rps_value = float(rps_match.group(1))
+
+                                        # Create test key like "Apache HTTP Server 2.4.56 - Concurrent Requests: 200"
+                                        test_key = f"Apache HTTP Server 2.4.56 - Concurrent Requests: {concurrent_req}"
+                                        description = f"Concurrent Requests: {concurrent_req}"
+
+                                        test_results[test_key] = {
+                                            "description": description,
+                                            "values": rps_value,
+                                            "raw_values": [rps_value],
+                                            "unit": "Requests Per Second",
+                                            "time": "N/A",
+                                            "test_run_times": ["N/A"],
+                                            "cost": "N/A"
+                                        }
+                                        break  # Found the matching RPS, move to next header
+                        else:
+                            # Enhanced debugging
+                            excerpt_lines = [line for line in log_content.split('\n') if 'average' in line.lower() or 'requests' in line.lower() or 'concurrent' in line.lower()]
+                            excerpt = '\n    '.join(excerpt_lines[:10]) if excerpt_lines else "(no relevant lines found)"
+                            print(f"Warning: Could not find Apache test patterns in {thread_log}", file=sys.stderr)
+                            print(f"  File exists: {thread_log.exists()}, Size: {thread_log.stat().st_size if thread_log.exists() else 'N/A'} bytes", file=sys.stderr)
+                            print(f"  Relevant lines:\n    {excerpt}", file=sys.stderr)
+
                     elif benchmark_name in ["build-gcc-1.5.0", "build-linux-kernel-1.17.1", "build-llvm-1.6.0"]:
                         # Extract "Average: XXXX.XXXX Seconds" from log (very flexible regex)
                         # Try multiple patterns to handle various formats, including leading whitespace
@@ -1255,13 +1317,19 @@ def check_json_syntax(json_file: Path) -> bool:
 
 
 def main():
+    # Get default output filename with hostname
+    hostname = socket.gethostname()
+    default_output = f'one_big_json_{hostname}.json'
+
     parser = argparse.ArgumentParser(description='Generate one_big_json.json from results directory')
     parser.add_argument('--dir', '-D', type=str, action='append',
                         help='Path to project root (can be specified multiple times). Default: current directory')
-    parser.add_argument('--output', '-O', type=str, default='one_big_json.json',
-                        help='Output JSON file path (default: one_big_json.json)')
-    parser.add_argument('--merge', '-M', nargs='+', metavar='JSON_FILE',
-                        help='Merge multiple JSON files instead of building from directories. Requires --output to be specified.')
+    parser.add_argument('--output', '-O', type=str, default=default_output,
+                        help=f'Output JSON file path (default: {default_output})')
+    parser.add_argument('--force', '-F', action='store_true',
+                        help='Force overwrite without confirmation when --output is specified')
+    parser.add_argument('--merge', '-M', nargs='*', metavar='JSON_FILE',
+                        help='Merge multiple JSON files instead of building from directories. If no files specified, merges all one_big_json_*.json in current directory. Requires --output to be specified.')
 
     args = parser.parse_args()
 
@@ -1274,27 +1342,44 @@ def main():
     output_file = Path(args.output)
 
     # Handle --merge mode
-    if args.merge:
+    if args.merge is not None:
         # In merge mode, --output must be specified and different from default
-        if args.output == 'one_big_json.json':
+        hostname = socket.gethostname()
+        default_output = f'one_big_json_{hostname}.json'
+        if args.output == default_output:
             print("Error: When using --merge, you must specify --output with a non-default filename.", file=sys.stderr)
             print("Example: make_one_big_json.py --merge ./1.json ./2.json --output ./New.json", file=sys.stderr)
             sys.exit(1)
 
-        # Check if output file exists and confirm overwrite
-        if output_file.exists():
+        # If --merge specified without arguments, auto-detect one_big_json_*.json files
+        merge_files = args.merge
+        if not merge_files:
+            pattern = 'one_big_json_*.json'
+            merge_files = glob.glob(pattern)
+            if not merge_files:
+                print(f"Error: No files matching pattern '{pattern}' found in current directory.", file=sys.stderr)
+                print("Please specify JSON files explicitly or ensure one_big_json_*.json files exist.", file=sys.stderr)
+                sys.exit(1)
+            print(f"Auto-detected {len(merge_files)} JSON files matching '{pattern}':")
+            for f in merge_files:
+                print(f"  - {f}")
+        else:
+            merge_files = args.merge
+
+        # Check if output file exists and confirm overwrite (unless --force)
+        if output_file.exists() and not args.force:
             response = input(f"Output file '{output_file}' already exists. Overwrite? [y/N]: ")
             if response.lower() not in ['y', 'yes']:
                 print("Aborted.")
                 sys.exit(0)
 
         # Merge JSON files
-        print(f"Merging {len(args.merge)} JSON files...")
+        print(f"Merging {len(merge_files)} JSON files...")
         current_version = get_version_info()
         merged_data = {}
         first_version = None
 
-        for idx, json_file_path in enumerate(args.merge):
+        for idx, json_file_path in enumerate(merge_files):
             json_file = Path(json_file_path)
             if not json_file.exists():
                 print(f"Error: JSON file '{json_file}' does not exist", file=sys.stderr)
@@ -1341,7 +1426,7 @@ def main():
         with open(output_file, 'w') as f:
             json.dump(final_output, f, indent=2)
 
-        print(f"Successfully merged {len(args.merge)} JSON files into {output_file}")
+        print(f"Successfully merged {len(merge_files)} JSON files into {output_file}")
         print(f"Output version: {current_version}")
         print(f"Total machines in merged output: {len(merged_data)}")
 
@@ -1357,8 +1442,8 @@ def main():
     # If --dir is not specified, use current directory
     project_roots = args.dir if args.dir else ['.']
 
-    # Check if output file exists and confirm overwrite
-    if output_file.exists():
+    # Check if output file exists and confirm overwrite (unless --force)
+    if output_file.exists() and not args.force:
         response = input(f"Output file '{output_file}' already exists. Overwrite? [y/N]: ")
         if response.lower() not in ['y', 'yes']:
             print("Aborted.")

@@ -16,7 +16,7 @@
       - [ケース1: `summary.json`と`<N>-thread.json`の両方が存在](#ケース1-summaryjsonとn-threadjsonの両方が存在)
       - [ケース2: `summary.json`はないが`<N>-thread.json`が存在](#ケース2-summaryjsonはないがn-threadjsonが存在)
       - [ケース3: `<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在](#ケース3-n-threadjsonはないがn-thread_perf_summaryjsonが存在)
-      - [ケース4: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）](#ケース4-特殊ベンチマークsummaryjsonもn-thread_perf_summaryjsonもn-threadjsonも存在しない)
+      - [ケース5: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）](#ケース5-特殊ベンチマークsummaryjsonもn-thread_perf_summaryjsonもn-threadjsonも存在しない)
       - [Multiple "test\_name", "description" in one ](#multiple-test_name-description-in-one-)
         - ["test\_name"のキー生成ルール](#test_nameのキー生成ルール)
   - [perf\_stat output](#perf_stat-output)
@@ -46,7 +46,7 @@
         - ["\<N\>":"test\_name"](#ntest_name)
           - [データソース](#データソース)
           - [ケース３ データソース 例外処理](#ケース３-データソース-例外処理)
-          - [ケース４ データソース 例外処理](#ケース４-データソース-例外処理)
+          - [ケース５ データソース 例外処理](#ケース５-データソース-例外処理)
           - [descriptionによるマッチング](#descriptionによるマッチング)
         - ["\<N\>":"test\_name":"values", "raw\_values", "time", "test\_run\_times"](#ntest_namevalues-raw_values-time-test_run_times)
         - ["\<N\>":"test\_name":"cost"](#ntest_namecost)
@@ -128,7 +128,9 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `<N>-thread_perf_stats.txt`
 - `<N>-thread_perf_summary.json`
 
-#### ケース4: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）
+#### ケース4: このケースは将来の拡張の為に確保されている。
+
+#### ケース5: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）
 以下のベンチマークはPTSの出力形式が異なるため、`<N>-thread.log`から直接結果を抽出する。
 - `<benchmark>="build-gcc-1.5.0"`
 - `<benchmark>="build-linux-kernel-1.17.1"`
@@ -137,6 +139,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `<benchmark>="sysbench-1.1.0"`
 - `<benchmark>="java-jmh-1.0.1"`
 - `<benchmark>="ffmpeg-7.0.1"`
+- `<benchmark>="apache-3.0.0"`
 
 **必須ファイル:**
 - `<N>-thread.log`（結果抽出に必須）
@@ -557,8 +560,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - ケース３が発生するのは、PTSが正常に結果JSONを出力しなかったが、perf statの計測は完了した場合
 - このケースでは性能値は取得できないが、実行時間とコストは計算可能
 
-###### ケース４ データソース 例外処理
-ケース４でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
+###### ケース５ データソース 例外処理
+ケース５でのデータソース例外処理について、各`<benchmark>`特有の特殊事情を説明する。
 
 - `<benchmark>="build-gcc-1.5.0"`:
     `<N>-thread.log`内の `Average: XXXX.XXXX Seconds`が存在しなければならない。`<N>`が複数あるのでそれらすべてに適応。
@@ -662,6 +665,49 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Platform"
     - "FFmpeg 7.0 - Encoder: libx264 - Scenario: Video On Demand"
     - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Video On Demand"
+
+- `<benchmark>="apache-3.0.0"`:
+    このベンチマークは1つの`<N>-thread.log`内に**複数の独立したテスト**（異なるConcurrent Requests数）が含まれる。
+    それぞれを別の`<test_name>`として登録する。
+    
+    各テストは`pts/apache-3.0.0 [Concurrent Requests: XXX]`の形式でヘッダーがあり、その後に`Average: XXXX.XX Requests Per Second`の形式で結果が出力される。
+    
+    - **test_name**: `"Apache HTTP Server 2.4.56 - Concurrent Requests: XXX"`（複数存在）
+    - **values**: `<N>-thread.log`から`Average: XXXX.XX Requests Per Second`の`XXXX.XX`を抽出
+    - **raw_values**: `<N>-thread.log`から`Average: XXXX.XX Requests Per Second`の`XXXX.XX`を抽出（quickモードでは1回のみ実行のため単一要素配列）
+    - **unit**: `"Requests Per Second"`
+    - **test_run_times**: `"N/A"`
+    - **description**: `"Concurrent Requests: XXX"`
+    
+    例えば以下のテストが存在する：
+    - "Apache HTTP Server 2.4.56 - Concurrent Requests: 4"
+    - "Apache HTTP Server 2.4.56 - Concurrent Requests: 20"
+    - "Apache HTTP Server 2.4.56 - Concurrent Requests: 100"
+    - "Apache HTTP Server 2.4.56 - Concurrent Requests: 200"
+    - "Apache HTTP Server 2.4.56 - Concurrent Requests: 500"
+    - "Apache HTTP Server 2.4.56 - Concurrent Requests: 1000"
+    
+    **出力例**:
+    ```json
+    "test_name": {
+        "Apache HTTP Server 2.4.56 - Concurrent Requests: 4": {
+            "description": "Concurrent Requests: 4",
+            "values": 652.06,
+            "raw_values": [652.06],
+            "unit": "Requests Per Second",
+            "test_run_times": "N/A",
+            "cost": 0.000XXX
+        },
+        "Apache HTTP Server 2.4.56 - Concurrent Requests: 200": {
+            "description": "Concurrent Requests: 200",
+            "values": 1168.48,
+            "raw_values": [1168.48],
+            "unit": "Requests Per Second",
+            "test_run_times": "N/A",
+            "cost": 0.000XXX
+        }
+    }
+    ```
 
 ###### descriptionによるマッチング
 [summary file](#summary-file-in-files)のケース１，２の場合は
