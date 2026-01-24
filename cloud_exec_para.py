@@ -247,6 +247,49 @@ def sanitize_instance_name(name: str) -> str:
     return name.replace('_', '-').lower()
 
 
+def is_apt_setup_command(cmd: str) -> bool:
+    """
+    Detect apt setup commands that are prone to transient failures.
+
+    We only wrap update+install flows to avoid altering unrelated workloads.
+    """
+    cmd_lower = cmd.lower()
+    return "apt-get" in cmd_lower and "update" in cmd_lower and "install" in cmd_lower
+
+
+def wrap_apt_command_with_retries(cmd: str) -> str:
+    """
+    Wrap apt setup commands with lock waits and retries to reduce transient failures.
+
+    Preserves any trailing redirection (e.g., > /tmp/apt_setup.log 2>&1).
+    """
+    redir_match = re.search(r'(\s*>\s*/tmp/\S+\s*2>&1)\s*$', cmd)
+    redir = redir_match.group(1) if redir_match else ""
+    cmd_core = cmd[:redir_match.start()].strip() if redir_match else cmd.strip()
+
+    escaped_cmd = cmd_core.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+    wrapped = (
+        'bash -lc "'
+        'set -e; '
+        'if command -v cloud-init >/dev/null 2>&1; then sudo cloud-init status --wait || true; fi; '
+        'for attempt in 1 2 3; do '
+        'while sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1 || '
+        'sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || '
+        'sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || '
+        'sudo fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do '
+        'sleep 5; '
+        'done; '
+        f'{escaped_cmd} && exit 0; '
+        'sleep $((attempt*10)); '
+        'done; '
+        'exit 100"'
+    )
+
+    if redir:
+        wrapped = f"{wrapped} {redir}"
+    return wrapped
+
+
 def check_instance_name_conflict(
     provider: CloudProvider,
     instance_name: str,
@@ -1530,6 +1573,13 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
         if not cmd or cmd.strip() == "":
             continue
+
+        if is_apt_setup_command(cmd):
+            cmd = wrap_apt_command_with_retries(cmd)
+            if logger:
+                logger.info("Detected apt setup command, enabling lock wait/retry wrapper")
+            else:
+                print("  [INFO] Detected apt setup command, enabling lock wait/retry wrapper")
 
         progress(instance_name, f"Workload {i}/{total_workloads}", logger)
 
@@ -3275,4 +3325,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

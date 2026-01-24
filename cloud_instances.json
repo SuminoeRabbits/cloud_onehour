@@ -151,7 +151,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": true,
+        "enable": false,
         "testloads": false,
         "type": "VM.Standard.E6.Flex",
         "arch": "amd64",
@@ -165,7 +165,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
         "type": "VM.Standard.A1.Flex",
         "arch": "arm64",
@@ -193,7 +193,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": true,
+        "enable": false,
         "testloads": false,
         "type": "VM.Standard.A4.Flex",
         "arch": "arm64",
