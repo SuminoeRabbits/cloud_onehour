@@ -520,6 +520,9 @@ class StreamRunner:
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
+        # Patch install.sh to cap STREAM_ARRAY_SIZE on large L3 systems (e.g., m8i)
+        self.patch_install_script()
+
         print(f"  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -590,6 +593,56 @@ class StreamRunner:
             print(f"  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
+
+    def patch_install_script(self):
+        """Patch install.sh to avoid oversized STREAM_ARRAY_SIZE on large L3 caches."""
+        install_sh = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+        if not install_sh.exists():
+            print(f"  [WARN] install.sh not found: {install_sh}")
+            return False
+
+        try:
+            content = install_sh.read_text()
+            if 'MAX_STREAM_ARRAY_SIZE' in content:
+                print("  [INFO] install.sh already patched for STREAM_ARRAY_SIZE cap")
+                return True
+
+            pattern = (
+                r"STREAM_ARRAY_SIZE=100000000\\n"
+                r"L3_CACHE_SIZE=`getconf LEVEL3_CACHE_SIZE`\\n"
+                r"SIZE_BASED_ON_L3=\\$\\(\\(L3_CACHE_SIZE \\* 4\\)\\)\\n"
+                r"if \\[ \\$SIZE_BASED_ON_L3 -gt \\$STREAM_ARRAY_SIZE \\]\\n"
+                r"then\\n"
+                r"     STREAM_ARRAY_SIZE=\\$SIZE_BASED_ON_L3\\n"
+                r"fi"
+            )
+
+            replacement = (
+                "STREAM_ARRAY_SIZE=100000000\\n"
+                "L3_CACHE_SIZE=`getconf LEVEL3_CACHE_SIZE`\\n"
+                "if [ -n \"$L3_CACHE_SIZE\" ] && [ \"$L3_CACHE_SIZE\" -gt 0 ]; then\\n"
+                "     SIZE_BASED_ON_L3=$((L3_CACHE_SIZE / 8 * 4))\\n"
+                "     if [ $SIZE_BASED_ON_L3 -gt $STREAM_ARRAY_SIZE ]; then\\n"
+                "          STREAM_ARRAY_SIZE=$SIZE_BASED_ON_L3\\n"
+                "     fi\\n"
+                "fi\\n"
+                "MAX_STREAM_ARRAY_SIZE=200000000\\n"
+                "if [ $STREAM_ARRAY_SIZE -gt $MAX_STREAM_ARRAY_SIZE ]; then\\n"
+                "     STREAM_ARRAY_SIZE=$MAX_STREAM_ARRAY_SIZE\\n"
+                "fi"
+            )
+
+            new_content, count = re.subn(pattern, replacement, content)
+            if count == 0:
+                print("  [WARN] Could not find STREAM_ARRAY_SIZE block to patch")
+                return False
+
+            install_sh.write_text(new_content)
+            print("  [OK] install.sh patched to cap STREAM_ARRAY_SIZE")
+            return True
+        except Exception as e:
+            print(f"  [WARN] Failed to patch install.sh: {e}")
+            return False
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""

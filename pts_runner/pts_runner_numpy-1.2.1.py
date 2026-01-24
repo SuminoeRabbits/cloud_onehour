@@ -708,6 +708,38 @@ class NumpyBenchmarkRunner:
         else:
             print(f"  [OK] Python dependencies installed successfully")
 
+        # Strengthen result parser to tolerate unsupported lines on newer Python/numpy
+        result_parser_path = install_dir / 'result_parser.py'
+        result_parser_path.write_text(
+            "import sys\n"
+            "product = 1.0\n"
+            "count = 0\n"
+            "skipped = 0\n"
+            "with open(sys.argv[-1]) as fp:\n"
+            "    for l in fp.readlines():\n"
+            "        parts = l.split()\n"
+            "        if len(parts) < 4:\n"
+            "            skipped += 1\n"
+            "            continue\n"
+            "        try:\n"
+            "            avg = float(parts[3])\n"
+            "        except ValueError:\n"
+            "            skipped += 1\n"
+            "            continue\n"
+            "        product *= avg\n"
+            "        count += 1\n"
+            "if count == 0:\n"
+            "    print(\"[WARN] No valid benchmark lines found; skipped=%d\" % skipped)\n"
+            "    print(\"Geometric mean score: 0.00\")\n"
+            "else:\n"
+            "    gmean = product**(1.0/count)\n"
+            "    score = 1000000.0/gmean\n"
+            "    if skipped:\n"
+            "        print(\"[WARN] Skipped %d non-numeric lines\" % skipped)\n"
+            "    print(\"Geometric mean score: %.2f\" % score)\n"
+        )
+        print(f"  [OK] result_parser.py patched for robust parsing")
+
         # Note: Do NOT patch numpy script - PTS requires $LOG_FILE output for result parsing
         # The original script writes to $LOG_FILE which PTS uses to extract benchmark results
         print(f"\n  [INFO] Keeping original numpy script (PTS requires $LOG_FILE output)")
