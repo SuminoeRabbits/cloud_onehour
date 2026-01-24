@@ -246,6 +246,41 @@ class X265Runner:
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
+    def ensure_7z_available(self):
+        """Ensure 7z is available for extracting input Y4M files."""
+        if shutil.which("7z"):
+            return True
+
+        print("  [WARN] 7z command not found; installing p7zip-full")
+        if shutil.which("sudo") is None:
+            print("  [ERROR] sudo not found; cannot install p7zip-full automatically")
+            return False
+
+        install_cmds = [
+            "sudo apt-get -y update",
+            "sudo apt-get -y install p7zip-full",
+        ]
+        for cmd in install_cmds:
+            result = subprocess.run(
+                ['bash', '-c', cmd],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"  [ERROR] Command failed: {cmd}")
+                if result.stdout:
+                    print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+                return False
+
+        if shutil.which("7z"):
+            print("  [OK] 7z installed successfully")
+            return True
+
+        print("  [ERROR] 7z still not available after installation")
+        return False
+
     def get_os_name(self):
         """
         Get OS name and version formatted as <Distro>_<Version>.
@@ -804,6 +839,9 @@ class X265Runner:
         THChange_at_runtime=false, we don't control threads via environment
         variables. Instead, we use taskset at runtime to limit CPU visibility.
         """
+        if not self.ensure_7z_available():
+            print("  [ERROR] 7z is required to extract input files for x265")
+            sys.exit(1)
 
         # --- Pre-download large files (Pattern 5) ---
         print(f"\\n>>> Checking for large files to pre-seed...")
