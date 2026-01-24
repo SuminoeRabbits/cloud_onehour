@@ -113,6 +113,10 @@ class ComplianceChecker:
         self.check_results_dir_structure()
         self.check_thread_capping()
 
+        # Cloud/ARM64 compatibility checks (new 2026-01)
+        self.check_perf_init_order()
+        self.check_cpu_frequency_methods()
+
 
 
         # Print results
@@ -401,7 +405,11 @@ class ComplianceChecker:
 
             'run_benchmark',
 
-            'install_benchmark'
+            'install_benchmark',
+
+            'get_cpu_frequencies',
+
+            'record_cpu_frequency'
 
         ]
 
@@ -968,6 +976,117 @@ class ComplianceChecker:
             # No $LOG_FILE usage, no patching - this is fine
             self.passed.append(
                 f"✅ $LOG_FILE handling: Not needed (checked {len(script_files_checked)} script(s))"
+            )
+
+    def check_perf_init_order(self):
+        """
+        Check if perf initialization order is correct.
+
+        CRITICAL: check_and_setup_perf_permissions() MUST be called BEFORE get_perf_events()
+
+        Wrong order causes perf to fail on cloud VMs (OCI, etc.) because perf_event_paranoid
+        is not adjusted before testing perf availability.
+
+        Correct order:
+            self.perf_paranoid = self.check_and_setup_perf_permissions()  # FIRST
+            self.perf_events = self.get_perf_events()                      # SECOND
+
+        Wrong order:
+            self.perf_events = self.get_perf_events()                      # FIRST (fails on cloud)
+            self.perf_paranoid = self.check_and_setup_perf_permissions()  # SECOND (too late)
+        """
+        # Find positions of both calls
+        perf_paranoid_match = re.search(r'self\.perf_paranoid\s*=\s*self\.check_and_setup_perf_permissions', self.content)
+        perf_events_match = re.search(r'self\.perf_events\s*=\s*self\.get_perf_events', self.content)
+
+        if not perf_paranoid_match:
+            self.warnings.append(
+                "⚠️  WARNING: check_and_setup_perf_permissions() call not found\n"
+                "   Should call: self.perf_paranoid = self.check_and_setup_perf_permissions()"
+            )
+            return
+
+        if not perf_events_match:
+            self.warnings.append(
+                "⚠️  WARNING: get_perf_events() call not found\n"
+                "   Should call: self.perf_events = self.get_perf_events()"
+            )
+            return
+
+        # Check order: perf_paranoid should come BEFORE perf_events
+        paranoid_pos = perf_paranoid_match.start()
+        events_pos = perf_events_match.start()
+
+        if paranoid_pos < events_pos:
+            self.passed.append("✅ Perf initialization order correct (permissions checked before testing)")
+        else:
+            self.errors.append(
+                "❌ CRITICAL: Perf initialization order is wrong\n"
+                "   Found: get_perf_events() called BEFORE check_and_setup_perf_permissions()\n"
+                "   Expected: check_and_setup_perf_permissions() should be called FIRST\n"
+                "   Impact: Perf will fail on cloud VMs (OCI, etc.) with restrictive defaults\n"
+                "   Fix: Swap the order in __init__:\n"
+                "        self.perf_paranoid = self.check_and_setup_perf_permissions()  # FIRST\n"
+                "        self.perf_events = self.get_perf_events()                      # SECOND"
+            )
+
+    def check_cpu_frequency_methods(self):
+        """
+        Check if cross-platform CPU frequency methods are implemented.
+
+        Required methods:
+        - get_cpu_frequencies(): Multi-method approach for x86_64, ARM64, and cloud VMs
+        - record_cpu_frequency(): Wrapper to record frequencies to file
+
+        Old pattern to avoid:
+        - grep "cpu MHz" /proc/cpuinfo (only works on x86_64)
+
+        New pattern required:
+        - Uses get_cpu_frequencies() which tries:
+          1. /proc/cpuinfo (x86_64)
+          2. /sys/devices/system/cpu/cpufreq (ARM64)
+          3. lscpu (fallback)
+        """
+        # Check for get_cpu_frequencies method
+        has_get_cpu_freq = re.search(r'def\s+get_cpu_frequencies\s*\(', self.content)
+
+        # Check for record_cpu_frequency method
+        has_record_cpu_freq = re.search(r'def\s+record_cpu_frequency\s*\(', self.content)
+
+        # Check for old pattern usage in run_benchmark (not in get_cpu_frequencies method)
+        # Old pattern: cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk...'
+        # This pattern is ONLY acceptable inside get_cpu_frequencies() as a fallback
+        has_old_pattern = re.search(r'cmd_template\s*=\s*["\']grep\s+["\']?cpu MHz', self.content)
+
+        # Check if record_cpu_frequency is used in run_benchmark
+        uses_new_pattern = re.search(r'self\.record_cpu_frequency\(', self.content)
+
+        issues = []
+
+        if not has_get_cpu_freq:
+            issues.append("Missing get_cpu_frequencies() method")
+
+        if not has_record_cpu_freq:
+            issues.append("Missing record_cpu_frequency() method")
+
+        if has_old_pattern:
+            issues.append("Uses old 'grep cpu MHz' pattern (only works on x86_64)")
+
+        if has_get_cpu_freq and has_record_cpu_freq and not has_old_pattern:
+            if uses_new_pattern:
+                self.passed.append("✅ Cross-platform CPU frequency methods implemented and used")
+            else:
+                self.warnings.append(
+                    "⚠️  WARNING: CPU frequency methods exist but may not be used in run_benchmark\n"
+                    "   Should use: self.record_cpu_frequency(freq_start_file)"
+                )
+        elif issues:
+            self.errors.append(
+                "❌ CRITICAL: Cross-platform CPU frequency handling incomplete\n"
+                f"   Issues: {', '.join(issues)}\n"
+                "   Impact: CPU frequency recording will fail on ARM64 and some cloud VMs\n"
+                "   Fix: Add get_cpu_frequencies() and record_cpu_frequency() methods\n"
+                "   Reference: CODE_TEMPLATE.md 'クロスプラットフォームCPU周波数取得' section"
             )
 
     def print_results(self):

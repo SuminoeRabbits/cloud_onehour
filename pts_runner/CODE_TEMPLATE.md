@@ -244,15 +244,19 @@ class BenchmarkRunner:
         # Quick mode for development
         self.quick_mode = quick_mode
 
-        # Check perf permissions (standard Linux check)
-        self.perf_paranoid = self.check_and_setup_perf_permissions()
-
         # Detect environment for logging
         self.is_wsl_env = self.is_wsl()
         if self.is_wsl_env:
             print("  [INFO] Running on WSL environment")
 
+        # CRITICAL: Setup perf permissions BEFORE testing perf availability
+        # This allows perf to work on cloud VMs with restrictive defaults (OCI, etc.)
+        # Wrong order: get_perf_events() -> check_and_setup_perf_permissions() (will fail on cloud)
+        # Correct order: check_and_setup_perf_permissions() -> get_perf_events() (works on cloud)
+        self.perf_paranoid = self.check_and_setup_perf_permissions()
+
         # Feature Detection: Check if perf is actually functional
+        # This MUST be called AFTER check_and_setup_perf_permissions()
         self.perf_events = self.get_perf_events()
 
         # Enforce safety
@@ -388,6 +392,103 @@ def is_wsl(self):
             return 'microsoft' in content or 'wsl' in content
     except Exception:
         return False
+```
+
+### クロスプラットフォームCPU周波数取得（必須）
+
+**背景**: `/proc/cpuinfo`の`cpu MHz`フィールドはx86_64でのみ利用可能。ARM64やクラウドVMでは動作しません。
+
+```python
+def get_cpu_frequencies(self):
+    """
+    Get current CPU frequencies for all CPUs.
+    Tries multiple methods for cross-platform compatibility (x86_64, ARM64, cloud VMs).
+
+    Returns:
+        list: List of frequencies in kHz, one per CPU. Empty list if unavailable.
+    """
+    frequencies = []
+
+    # Method 1: /proc/cpuinfo (works on x86_64)
+    try:
+        result = subprocess.run(
+            ['bash', '-c', 'grep "cpu MHz" /proc/cpuinfo'],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    mhz = float(parts[1].strip())
+                    frequencies.append(int(mhz * 1000))  # MHz to kHz
+            if frequencies:
+                return frequencies
+    except Exception:
+        pass
+
+    # Method 2: /sys/devices/system/cpu/cpufreq (works on ARM64 and some x86)
+    try:
+        freq_files = sorted(Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/scaling_cur_freq'))
+        if not freq_files:
+            freq_files = sorted(Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/cpuinfo_cur_freq'))
+
+        for freq_file in freq_files:
+            try:
+                with open(freq_file, 'r') as f:
+                    freq_khz = int(f.read().strip())
+                    frequencies.append(freq_khz)
+            except Exception:
+                frequencies.append(0)
+
+        if frequencies:
+            return frequencies
+    except Exception:
+        pass
+
+    # Method 3: lscpu (fallback)
+    try:
+        result = subprocess.run(['lscpu'], capture_output=True, text=True)
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if 'CPU MHz' in line or 'CPU max MHz' in line:
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        mhz = float(parts[1].strip().replace(',', '.'))
+                        return [int(mhz * 1000)] * self.vcpu_count
+    except Exception:
+        pass
+
+    return frequencies
+
+def record_cpu_frequency(self, output_file):
+    """
+    Record current CPU frequencies to a file.
+
+    Args:
+        output_file: Path to output file
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    frequencies = self.get_cpu_frequencies()
+    if frequencies:
+        try:
+            with open(output_file, 'w') as f:
+                for freq in frequencies:
+                    f.write(f"{freq}\n")
+            return True
+        except Exception as e:
+            print(f"  [WARN] Failed to write frequency file: {e}")
+            return False
+    else:
+        # Write empty file to indicate unavailability
+        try:
+            with open(output_file, 'w') as f:
+                pass
+            return False
+        except Exception:
+            return False
 ```
 
 ### Perf機能検知（3段階フォールバック）
@@ -619,11 +720,12 @@ def run_benchmark(self, num_threads):
         pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
         print(f"  [INFO] Running without perf")
 
-    # Record CPU frequency before benchmark
+    # Record CPU frequency before benchmark (cross-platform)
     print(f"[INFO] Recording CPU frequency before benchmark...")
-    cmd_template = 'grep "cpu MHz" /proc/cpuinfo | awk \'{{printf "%.0f\\n", $4 * 1000}}\' > {file}'
-    command = cmd_template.format(file=freq_start_file)
-    subprocess.run(['bash', '-c', command], capture_output=True, text=True)
+    if self.record_cpu_frequency(freq_start_file):
+        print(f"  [OK] Start frequency recorded")
+    else:
+        print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
     # Execute benchmark with real-time output streaming
     with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -651,9 +753,11 @@ def run_benchmark(self, num_threads):
         process.wait()
         returncode = process.returncode
 
-    # Record CPU frequency after benchmark
-    command = cmd_template.format(file=freq_end_file)
-    subprocess.run(['bash', '-c', command], capture_output=True, text=True)
+    # Record CPU frequency after benchmark (cross-platform)
+    if self.record_cpu_frequency(freq_end_file):
+        print(f"  [OK] End frequency recorded")
+    else:
+        print(f"  [WARN] CPU frequency not available")
 
     if returncode == 0:
         print(f"\n[OK] Benchmark completed successfully")
@@ -1161,3 +1265,47 @@ test-profiles内のinstall.shを直接編集（PTSアップデート時に上書
 
 ### Q4: perf_event_paranoidエラー
 **A**: `get_perf_events()`の動作テストで自動的に判定されます。`-A -a`フラグは`perf_paranoid <= 0`の場合のみ使用されます。
+
+### Q7: OCI環境でperf_stats.txtが生成されない（CRITICAL）
+
+**症状**:
+- OCI (Oracle Cloud Infrastructure) VMでベンチマーク実行後、`*_perf_stats.txt`が生成されない
+- 他のクラウド（AWS、GCP）では正常に動作する
+
+**原因**:
+`__init__`内の初期化順序が間違っている。`get_perf_events()`が`check_and_setup_perf_permissions()`の前に呼ばれると、perf_event_paranoidの調整前にperfをテストしてしまい、失敗する。
+
+**解決策**:
+```python
+# NG: 間違った順序
+self.perf_events = self.get_perf_events()      # ← 先にテスト（失敗）
+self.perf_paranoid = self.check_and_setup_perf_permissions()  # ← 後で調整
+
+# OK: 正しい順序
+self.perf_paranoid = self.check_and_setup_perf_permissions()  # ← 先に調整
+self.perf_events = self.get_perf_events()      # ← 調整後にテスト（成功）
+```
+
+**検証方法**:
+```bash
+# OCI VM上で実行
+./pts_runner_xxx.py 1 --quick
+ls results/*/*/Compression/xxx/*perf_stats.txt  # ファイルが生成されるはず
+```
+
+### Q8: ARM64やクラウドVMでCPU周波数が取得できない
+
+**症状**:
+- `*_freq_start.txt`や`*_freq_end.txt`が空（0バイト）
+- ARM64環境（GCP C4A、AWS Graviton、OCI Ampere）で発生
+
+**原因**:
+`/proc/cpuinfo`の`cpu MHz`フィールドはx86_64専用。ARM64では存在しない。
+
+**解決策**:
+`get_cpu_frequencies()`と`record_cpu_frequency()`メソッドを使用。これらは以下を順に試す:
+1. `/proc/cpuinfo` (x86_64)
+2. `/sys/devices/system/cpu/cpufreq/scaling_cur_freq` (ARM64、一部x86)
+3. `lscpu` (フォールバック)
+
+詳細な実装は「クロスプラットフォームCPU周波数取得」セクションを参照。
