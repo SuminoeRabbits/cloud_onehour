@@ -42,8 +42,8 @@ def get_version_info() -> str:
 def get_generation_log() -> Dict[str, Any]:
     """Generate the generation log with version and timestamp."""
     return {
-        "generation_log": {
-            "version_info": get_version_info(),
+        "generation log": {
+            "version info": get_version_info(),
             "date": datetime.now().strftime("%Y%m%d-%H%M%S")
         }
     }
@@ -99,7 +99,7 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     workloads = []
 
     for machinename, machine_data in data.items():
-        if machinename == "generation_log":
+        if machinename in ("generation_log", "generation log"):
             continue
 
         os_data = machine_data.get("os", {})
@@ -164,6 +164,14 @@ def get_benchmark_score(test_data: Dict[str, Any]) -> Tuple[Any, Any, bool, str]
     return ("unknown", "unknown", False, unit)
 
 
+def get_hourly_rate(machine_data: Dict[str, Any]) -> Any:
+    """Return hourly rate from input data (preferred: hourly_rate)."""
+    hourly_rate = machine_data.get("hourly_rate")
+    if hourly_rate is not None:
+        return hourly_rate
+    return machine_data.get("cost_hour[730h-mo]", 0)
+
+
 def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate Performance comparison metrics.
@@ -177,9 +185,9 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 <benchmark>: {
                     <test_name>: {
                         <os>: {
-                            <machinename>: {
-                                "thread": {
-                                    "<N>": {
+                            "thread": {
+                                "<N>": {
+                                    <machinename>: {
                                         "time_score": <time_score>,
                                         "benchmark_score": <benchmark_score>,
                                         "unit": <unit>
@@ -220,13 +228,13 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         if test_name not in result["workload"][testcategory][benchmark]:
             result["workload"][testcategory][benchmark][test_name] = {}
         if os_name not in result["workload"][testcategory][benchmark][test_name]:
-            result["workload"][testcategory][benchmark][test_name][os_name] = {}
-        if machinename not in result["workload"][testcategory][benchmark][test_name][os_name]:
-            result["workload"][testcategory][benchmark][test_name][os_name][machinename] = {
+            result["workload"][testcategory][benchmark][test_name][os_name] = {
                 "thread": {}
             }
+        if thread not in result["workload"][testcategory][benchmark][test_name][os_name]["thread"]:
+            result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread] = {}
 
-        result["workload"][testcategory][benchmark][test_name][os_name][machinename]["thread"][thread] = {
+        result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread][machinename] = {
             "time_score": time_score,
             "benchmark_score": benchmark_score,
             "unit": unit
@@ -284,7 +292,7 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         benchmark_score, time_score, _, unit = get_benchmark_score(test_data)
 
         # Calculate cost_score
-        hourly_rate = machine_data.get("cost_hour[730h-mo]", 0)
+        hourly_rate = get_hourly_rate(machine_data)
         time_val = test_data.get("time")
 
         cost_score: Any = "unknown"
@@ -540,7 +548,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             machine_data = w["machine_data"]
 
             # Calculate cost_score
-            hourly_rate = machine_data.get("cost_hour[730h-mo]", 0)
+            hourly_rate = get_hourly_rate(machine_data)
             time_val = test_data.get("time")
 
             cost_score = None
