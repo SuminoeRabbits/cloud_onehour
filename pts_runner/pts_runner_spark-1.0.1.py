@@ -649,27 +649,86 @@ class SparkRunner:
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
-        # Patch spark execution script to handle missing $LOG_FILE
+        # Patch spark execution script to handle missing $LOG_FILE and bad paths
         print(f"\n  [INFO] Patching spark execution script...")
         spark_script = installed_dir / 'spark'
         if spark_script.exists():
             with open(spark_script, 'r') as f:
                 script_content = f.read()
-            
-            # Replace $LOG_FILE redirects with stdout output
-            # Pattern: > $LOG_FILE 2>&1 and >> $LOG_FILE 2>&1
+
+            # Replace $LOG_FILE redirects with safe fallback to stdout
+            # Keep LOG_FILE when PTS sets it, otherwise use /dev/stdout
             patched_content = script_content.replace(
                 '> $LOG_FILE 2>&1',
-                '2>&1'
+                '> "${LOG_FILE:-/dev/stdout}" 2>&1'
             ).replace(
                 '>> $LOG_FILE 2>&1',
-                '2>&1'
+                '>> "${LOG_FILE:-/dev/stdout}" 2>&1'
             )
-            
+
+            # Fix malformed redirect that writes to a file named "2>&1"
+            patched_content = patched_content.replace('>2>&1', '2>&1')
+
+            # Fix absolute $HOME paths to use installed test directory
+            patched_content = patched_content.replace(
+                'cd ~/spark-3.3.0-bin-hadoop3/bin',
+                'cd spark-3.3.0-bin-hadoop3/bin'
+            )
+            patched_content = patched_content.replace(
+                '$HOME/pyspark-benchmark',
+                '../../pyspark-benchmark'
+            )
+            patched_content = patched_content.replace(
+                '$HOME/test-data',
+                '../../test-data'
+            )
+
+            # Ensure spark-submit lines write into LOG_FILE even if it was removed previously
+            lines = patched_content.splitlines()
+            new_lines = []
+            seen_submit = 0
+            for line in lines:
+                if 'spark-submit' in line and 'LOG_FILE' not in line:
+                    clean_line = re.sub(r'\s*(>>?|)\s*[^\\s]*\s*2>&1\s*$', '', line).rstrip()
+                    redir = '> "${LOG_FILE:-/dev/stdout}" 2>&1' if seen_submit == 0 else '>> "${LOG_FILE:-/dev/stdout}" 2>&1'
+                    line = f"{clean_line} {redir}"
+                    seen_submit += 1
+                new_lines.append(line)
+            patched_content = '\n'.join(new_lines)
+
+            # Add debug output around spark-submit invocations for tracing
+            debug_lines = [
+                'echo "[DEBUG] spark script start"',
+                'echo "[DEBUG] pwd=$(pwd)"',
+                'echo "[DEBUG] LOG_FILE=${LOG_FILE:-/dev/stdout}"',
+                'echo "[DEBUG] PYSPARK_PYTHON=${PYSPARK_PYTHON:-}"',
+                'echo "[DEBUG] PYSPARK_DRIVER_PYTHON=${PYSPARK_DRIVER_PYTHON:-}"',
+                'echo "[DEBUG] SPARK_HOME=${SPARK_HOME:-}"',
+                'echo "[DEBUG] ls -la ."; ls -la .',
+                'echo "[DEBUG] ls -la .."; ls -la ..',
+                'echo "[DEBUG] ls -la ../test-data"; ls -la ../test-data 2>/dev/null || true',
+                'echo "[DEBUG] which spark-submit"; which spark-submit || true',
+                'echo "[DEBUG] spark-submit --version"; spark-submit --version 2>/dev/null || true'
+            ]
+            patched_lines = patched_content.splitlines()
+            with_debug = []
+            injected = False
+            for line in patched_lines:
+                if not injected and line.strip().startswith('cd '):
+                    with_debug.append(line)
+                    with_debug.extend(debug_lines)
+                    injected = True
+                    continue
+                with_debug.append(line)
+            if not injected:
+                with_debug = debug_lines + with_debug
+            patched_content = '\n'.join(with_debug)
+
             with open(spark_script, 'w') as f:
                 f.write(patched_content)
-            
-            print(f"  [OK] spark script patched to output to stdout")
+
+            spark_script.chmod(0o755)
+            print(f"  [OK] spark script patched for stdout and local paths")
 
 
         
@@ -768,6 +827,28 @@ class SparkRunner:
                 else:
                     new_lines.append(line)
             content = '\n'.join(new_lines)
+
+            # 5b. Patch pre.sh paths to use installed test directory
+            pre_sh = pts_dir / "test-profiles" / "pts" / "spark-1.0.1" / "pre.sh"
+            if pre_sh.exists():
+                try:
+                    pre_content = pre_sh.read_text()
+                    pre_content = pre_content.replace(
+                        "cd ~/spark-3.3.0-bin-hadoop3/bin",
+                        "cd spark-3.3.0-bin-hadoop3/bin"
+                    )
+                    pre_content = pre_content.replace(
+                        "$HOME/pyspark-benchmark",
+                        "../../pyspark-benchmark"
+                    )
+                    pre_content = pre_content.replace(
+                        "$HOME/test-data",
+                        "../../test-data"
+                    )
+                    pre_sh.write_text(pre_content)
+                    print("  [OK] pre.sh patched for local paths")
+                except Exception as e:
+                    print(f"  [WARN] Failed to patch pre.sh: {e}")
 
             # 6. Python 3.12+ compatibility (typing.io / typing.re / pipes removal)
             if self.py_version >= (3, 12):
