@@ -736,13 +736,12 @@ class X265Runner:
         Patch the install.sh script to fix x265 build issues on Ubuntu 24.04 with GCC-14.
 
         Problem: x265 4.1 uses CMake which doesn't pick up CFLAGS/CXXFLAGS from environment.
-        Also, -march=native on newer AMD CPUs (Zen 4/5) can generate instructions that
-        x265's assembly code doesn't handle properly.
+        Also, -march=native can generate instructions that x265's assembly code
+        doesn't handle properly on some CPUs.
 
         Solution:
         1. Pass CMAKE_C_COMPILER and CMAKE_CXX_COMPILER explicitly
-        2. Use -march=x86-64-v3 instead of -march=native for broader compatibility
-           (x86-64-v3 includes AVX2 but not AVX-512 which can cause issues)
+        2. Use -march=native for target-appropriate optimizations
         3. Add -Wno-error flags to suppress GCC-14 warnings-as-errors
         """
         install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
@@ -759,21 +758,26 @@ class X265Runner:
 
             patched = False
 
-            # Patch: Replace cmake command with proper flags for GCC-14
-            # Original: cmake -DCMAKE_BUILD_TYPE=Release ../source
-            # New: cmake with explicit compiler and flags
-            old_cmake = 'cmake -DCMAKE_BUILD_TYPE=Release ../source'
-            new_cmake = '''cmake -DCMAKE_BUILD_TYPE=Release \\
+        # Patch: Replace cmake command with proper flags for GCC-14
+        # Original: cmake -DCMAKE_BUILD_TYPE=Release ../source
+        # New: cmake with explicit compiler and flags
+        old_cmake = 'cmake -DCMAKE_BUILD_TYPE=Release ../source'
+        arch = os.uname().machine
+        if arch in ("x86_64", "amd64"):
+            march_flags = "-O3 -march=x86-64-v3 -mtune=generic -Wno-error"
+        else:
+            march_flags = "-O3 -march=native -mtune=native -Wno-error"
+        new_cmake = '''cmake -DCMAKE_BUILD_TYPE=Release \\
   -DCMAKE_C_COMPILER=gcc-14 \\
   -DCMAKE_CXX_COMPILER=g++-14 \\
-  -DCMAKE_C_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -Wno-error" \\
-  -DCMAKE_CXX_FLAGS="-O3 -march=x86-64-v3 -mtune=generic -Wno-error" \\
+  -DCMAKE_C_FLAGS="{march_flags}" \\
+  -DCMAKE_CXX_FLAGS="{march_flags}" \\
   ../source'''
 
             if old_cmake in content and 'CMAKE_C_COMPILER=gcc-14' not in content:
-                content = content.replace(old_cmake, new_cmake)
+                content = content.replace(old_cmake, new_cmake.format(march_flags=march_flags))
                 patched = True
-                print(f"  [OK] Added CMake GCC-14 and x86-64-v3 compatibility patch")
+                print(f"  [OK] Added CMake GCC-14 patch for arch: {arch}")
             elif 'CMAKE_C_COMPILER=gcc-14' in content:
                 print(f"  [INFO] CMake patch already applied")
             else:
