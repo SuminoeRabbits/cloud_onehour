@@ -46,6 +46,7 @@ class ComplianceChecker:
         self.warnings = []
 
         self.passed = []
+        self.syntax_ok = True
 
        
 
@@ -74,6 +75,9 @@ class ComplianceChecker:
         # Python syntax check (must pass first)
 
         self.check_python_syntax()
+        if not self.syntax_ok:
+            self.print_results()
+            return (False, len(self.errors), len(self.warnings))
 
 
 
@@ -142,7 +146,7 @@ class ComplianceChecker:
             self.passed.append("✅ Python syntax is valid")
 
         except SyntaxError as e:
-
+            self.syntax_ok = False
             self.errors.append(
 
                 f"❌ CRITICAL: Python syntax error at line {e.lineno}:\n"
@@ -154,7 +158,7 @@ class ComplianceChecker:
             )
 
         except Exception as e:
-
+            self.syntax_ok = False
             self.errors.append(f"❌ CRITICAL: Failed to parse Python file: {str(e)}")
 
 

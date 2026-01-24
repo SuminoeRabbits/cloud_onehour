@@ -758,16 +758,16 @@ class X265Runner:
 
             patched = False
 
-        # Patch: Replace cmake command with proper flags for GCC-14
-        # Original: cmake -DCMAKE_BUILD_TYPE=Release ../source
-        # New: cmake with explicit compiler and flags
-        old_cmake = 'cmake -DCMAKE_BUILD_TYPE=Release ../source'
-        arch = os.uname().machine
-        if arch in ("x86_64", "amd64"):
-            march_flags = "-O3 -march=x86-64-v3 -mtune=generic -Wno-error"
-        else:
-            march_flags = "-O3 -march=native -mtune=native -Wno-error"
-        new_cmake = '''cmake -DCMAKE_BUILD_TYPE=Release \\
+            # Patch: Replace cmake command with proper flags for GCC-14
+            # Original: cmake -DCMAKE_BUILD_TYPE=Release ../source
+            # New: cmake with explicit compiler and flags
+            old_cmake = 'cmake -DCMAKE_BUILD_TYPE=Release ../source'
+            arch = os.uname().machine
+            if arch in ("x86_64", "amd64"):
+                march_flags = "-O3 -march=x86-64-v3 -mtune=generic -Wno-error"
+            else:
+                march_flags = "-O3 -march=native -mtune=native -Wno-error"
+            new_cmake = '''cmake -DCMAKE_BUILD_TYPE=Release \\
   -DCMAKE_C_COMPILER=gcc-14 \\
   -DCMAKE_CXX_COMPILER=g++-14 \\
   -DCMAKE_C_FLAGS="{march_flags}" \\
