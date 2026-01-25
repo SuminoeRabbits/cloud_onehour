@@ -414,13 +414,20 @@ def process_thread_data(benchmark_dir: Path, thread_num: str) -> Optional[Dict[s
     Returns dict with perf_stat and test results, or None if incomplete.
 
     Per README_results.md specification:
-    Required files:
+    Case 1 (summary.json + <N>-thread.json + <N>-thread_perf_stats.txt):
     - <N>-thread_freq_start.txt
     - <N>-thread_freq_end.txt
     - <N>-thread_perf_stats.txt
     - <N>-thread.json
 
-    Optional files:
+    Case 2 (no summary.json, <N>-thread.json exists):
+    - <N>-thread_freq_start.txt
+    - <N>-thread_freq_end.txt
+    - <N>-thread.json
+
+    Case 3 (<N>-thread.json missing, <N>-thread_perf_summary.json exists):
+    - <N>-thread_freq_start.txt
+    - <N>-thread_freq_end.txt
     - <N>-thread_perf_summary.json
     """
     # Check required files per README_results.md
@@ -432,9 +439,27 @@ def process_thread_data(benchmark_dir: Path, thread_num: str) -> Optional[Dict[s
     # Optional file
     perf_summary = benchmark_dir / f"{thread_num}-thread_perf_summary.json"
 
-    # Skip if any REQUIRED file is missing
-    required_files = [freq_start, freq_end, perf_stats, thread_json]
-    if not all(f.exists() for f in required_files):
+    summary_json = benchmark_dir / "summary.json"
+    has_summary = summary_json.exists()
+    has_thread_json = thread_json.exists()
+    has_perf_stats = perf_stats.exists()
+    has_perf_summary = perf_summary.exists()
+
+    # Common required files for all non-case5 benchmarks
+    if not freq_start.exists() or not freq_end.exists():
+        return None
+
+    # Case 1: summary.json and <N>-thread.json exist, perf_stats required
+    if has_summary and has_thread_json:
+        if not has_perf_stats:
+            return None
+    # Case 2: no summary.json but <N>-thread.json exists
+    elif not has_summary and has_thread_json:
+        pass
+    # Case 3: <N>-thread.json missing but <N>-thread_perf_summary.json exists
+    elif not has_thread_json and has_perf_summary:
+        pass
+    else:
         return None
 
     # Build thread data
