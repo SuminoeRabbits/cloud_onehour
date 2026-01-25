@@ -115,8 +115,22 @@ class PreSeedDownloader:
 
         profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
         if not profile_path.exists():
-            return False
-
+            print(f"  [WARN] downloads.xml not found at {profile_path}")
+            print(f"  [INFO] Attempting to fetch test profile via phoronix-test-suite info {benchmark_name}...")
+            try:
+                subprocess.run(
+                    ['phoronix-test-suite', 'info', benchmark_name],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                print(f"  [WARN] Failed to run phoronix-test-suite info: {e}")
+                return False
+            
+            if not profile_path.exists():
+                print(f"  [WARN] downloads.xml still missing after info: {profile_path}")
+                return False
         try:
             import xml.etree.ElementTree as ET
             tree = ET.parse(profile_path)

@@ -122,6 +122,7 @@ class ComplianceChecker:
         # Cloud/ARM64 compatibility checks (new 2026-01)
         self.check_perf_init_order()
         self.check_cpu_frequency_methods()
+        self.check_downloads_xml_prefetch()
 
         # Informational checks
         self.find_hardcoded_thread_lists()
@@ -787,7 +788,7 @@ class ComplianceChecker:
         """
         # Single-threaded benchmarks that are intentionally fixed at 1 thread
         single_threaded_benchmarks = [
-            'redis', 'phpbench', 'simdjson', 'tinymembench', 'apache'
+            'phpbench', 'simdjson', 'tinymembench', 'apache'
         ]
 
         # Check if this is a single-threaded benchmark
@@ -1173,6 +1174,28 @@ class ComplianceChecker:
                 "   Impact: CPU frequency recording will fail on ARM64 and some cloud VMs\n"
                 "   Fix: Add get_cpu_frequencies() and record_cpu_frequency() methods\n"
                 "   Reference: CODE_TEMPLATE.md 'クロスプラットフォームCPU周波数取得' section"
+            )
+
+    def check_downloads_xml_prefetch(self):
+        """
+        Check if PreSeedDownloader attempts to fetch downloads.xml when missing.
+
+        Expected pattern:
+          - logs when downloads.xml is missing
+          - runs 'phoronix-test-suite info <benchmark>' to fetch test profile
+          - rechecks downloads.xml presence
+        """
+        has_downloads_xml_check = re.search(r'downloads\.xml', self.content)
+        has_pts_info_call = re.search(r'phoronix-test-suite["\']?,\s*[\'"]info', self.content)
+        has_missing_log = re.search(r'downloads\.xml not found', self.content)
+
+        if has_downloads_xml_check and has_pts_info_call and has_missing_log:
+            self.passed.append("✅ downloads.xml prefetch via phoronix-test-suite info implemented")
+        elif has_downloads_xml_check:
+            self.warnings.append(
+                "⚠️  WARNING: downloads.xml prefetch missing\n"
+                "   Recommended: if downloads.xml is missing, run 'phoronix-test-suite info <benchmark>'\n"
+                "   This enables aria2c pre-seeding before install"
             )
 
     def print_results(self):
