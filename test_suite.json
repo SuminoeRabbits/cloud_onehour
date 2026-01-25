@@ -185,7 +185,7 @@
                     "TH_scaling": "spark-internal (auto-detect, configurable via spark-defaults.conf)",
                     "sve2_support": false,
                     "notes": "Need to downgrade JDK17. Spark auto-detects CPU cores. Thread control via spark.executor.cores, spark.default.parallelism in spark-defaults.conf. SVE2 supported via JVM (OpenJDK 9+)",
-                    "exe_time_v8cpu": "17.0"
+                    "exe_time_v8cpu": "120.0"
                 },
                 "pts/phpbench-1.1.6": {
                     "enabled": true,
