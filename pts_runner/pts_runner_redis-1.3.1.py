@@ -173,10 +173,8 @@ class RedisRunner:
         """
         Initialize Redis benchmark runner.
 
-        Note: Redis is single-threaded, thread_arg is ignored.
-
         Args:
-            threads_arg: Ignored (Redis is single-threaded)
+            threads_arg: If set, run only that thread count (capped to vCPU count)
             quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
         self.benchmark = "redis-1.3.1"
@@ -189,8 +187,12 @@ class RedisRunner:
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
         self.os_name = self.get_os_name()
 
-        # Redis is single-threaded - always run on single CPU
-        self.thread_list = [1]
+        # Thread list setup
+        if threads_arg is None:
+            self.thread_list = list(range(1, self.vcpu_count + 1))
+        else:
+            n = min(threads_arg, self.vcpu_count)
+            self.thread_list = [n]
 
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
@@ -671,9 +673,9 @@ class RedisRunner:
         return perf_summary
 
     def run_benchmark(self, num_threads):
-        """Run benchmark (single-threaded)."""
+        """Run benchmark with conditional perf monitoring."""
         print(f"\n{'='*80}")
-        print(f">>> Running {self.benchmark_full} (single-threaded benchmark)")
+        print(f">>> Running {self.benchmark_full} with {num_threads} thread(s)")
         print(f"{'='*80}")
 
         
@@ -702,29 +704,27 @@ class RedisRunner:
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
-        # Single-threaded: use CPU 0 only with taskset
-        cpu_list = '0'
-        pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
-        cpu_info = f"Single-threaded benchmark: CPU affinity (taskset): {cpu_list}"
+        # Build PTS base command (taskset if needed)
+        if num_threads >= self.vcpu_count:
+            cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
+            pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
+        else:
+            cpu_list = self.get_cpu_affinity_list(num_threads)
+            pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
 
         # Wrap PTS command with perf stat (mode depends on perf availability and paranoid)
         # CRITICAL: Environment variables MUST come BEFORE perf stat
         if self.perf_events:
             if self.perf_paranoid <= 0:
-                # Full monitoring mode: per-CPU stats + hardware counters
-                pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -A -a -o {perf_stats_file} {pts_base_cmd}'
-                perf_mode = "Full (per-CPU + HW counters)"
+                perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
+                print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
             else:
-                # Limited mode: aggregated events only (no -A -a)
-                pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
-                perf_mode = "Limited (aggregated events only)"
+                perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
+                print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
         else:
-            # No perf monitoring available
-            pts_cmd = f'{batch_env} {pts_base_cmd}'
-            perf_mode = "Disabled (perf unavailable)"
-
-        print(f"  [INFO] {cpu_info}")
-        print(f"[INFO] Perf monitoring mode: {perf_mode}")
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
+            print(f"  [INFO] Running without perf")
         print(f"\n{'>'*80}")
         print(f"[PTS RUN COMMAND]")
         print(f"  {pts_cmd}")
@@ -775,7 +775,8 @@ class RedisRunner:
         if returncode == 0:
             print(f"\n[OK] Benchmark completed successfully")
 
-            # Parse perf stats
+        # Parse perf stats
+        if self.perf_events and perf_stats_file.exists():
             try:
                 perf_summary = self.parse_perf_stats_and_freq(
                     perf_stats_file, freq_start_file, freq_end_file, cpu_list
@@ -806,7 +807,7 @@ class RedisRunner:
         print(f"# Machine: {self.machine_name}")
         print(f"# OS: {self.os_name}")
         print(f"# vCPU Count: {self.vcpu_count}")
-        print(f"# Note: Redis is single-threaded (CPU 0 only)")
+        print(f"# Thread List: {self.thread_list}")
         if self.quick_mode:
             print(f"# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
         print(f"{'#'*80}")
@@ -822,7 +823,7 @@ class RedisRunner:
         self.clean_pts_cache()
         self.install_benchmark()
 
-        # Run benchmark (single-threaded)
+        # Run benchmark for each thread count
         failed = []
         for num_threads in self.thread_list:
             if not self.run_benchmark(num_threads):
@@ -987,7 +988,7 @@ class RedisRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Redis 6.0.9 Benchmark Runner (Single-threaded)",
+        description="Redis 6.0.9 Benchmark Runner (Multi-thread scaling)",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 

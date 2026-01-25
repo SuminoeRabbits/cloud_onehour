@@ -47,6 +47,7 @@ class ComplianceChecker:
 
         self.passed = []
         self.syntax_ok = True
+        self.hardcoded_thread_lists = []
 
        
 
@@ -122,6 +123,8 @@ class ComplianceChecker:
         self.check_perf_init_order()
         self.check_cpu_frequency_methods()
 
+        # Informational checks
+        self.find_hardcoded_thread_lists()
 
 
         # Print results
@@ -873,6 +876,64 @@ class ComplianceChecker:
                     "⚠️  WARNING: self.thread_list not initialized in __init__"
                 )
 
+    def find_hardcoded_thread_lists(self):
+        """
+        Detect hardcoded numeric thread lists assigned to self.thread_list.
+        """
+        try:
+            tree = ast.parse(self.content)
+        except SyntaxError:
+            return
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+                value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+                value = node.value
+            else:
+                continue
+
+            for target in targets:
+                if not (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == 'self'
+                    and target.attr == 'thread_list'
+                ):
+                    continue
+
+                thread_values = self._extract_literal_int_list(value)
+                if thread_values is not None:
+                    lineno = getattr(node, 'lineno', 0)
+                    self.hardcoded_thread_lists.append((lineno, thread_values))
+
+    def _extract_literal_int_list(self, value):
+        """
+        Return list of ints if value is a literal list/tuple of ints, else None.
+        """
+        if isinstance(value, (ast.List, ast.Tuple)):
+            items = value.elts
+        elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'list':
+            if len(value.args) != 1:
+                return None
+            arg = value.args[0]
+            if isinstance(arg, (ast.List, ast.Tuple)):
+                items = arg.elts
+            else:
+                return None
+        else:
+            return None
+
+        numbers = []
+        for item in items:
+            if isinstance(item, ast.Constant) and isinstance(item.value, int):
+                numbers.append(item.value)
+            else:
+                return None
+        return numbers
+
     def check_log_file_handling(self):
         """
         Check if benchmark's PTS install.sh or execution scripts use $LOG_FILE variable
@@ -1313,6 +1374,7 @@ Warning Checks:
     total_errors = 0
 
     total_warnings = 0
+    hardcoded_scripts = []
 
    
 
@@ -1385,6 +1447,8 @@ Warning Checks:
         checker = ComplianceChecker(filepath)
 
         passed, num_errors, num_warnings = checker.check_all()
+        if checker.hardcoded_thread_lists:
+            hardcoded_scripts.append((filepath.name, checker.hardcoded_thread_lists))
 
         results.append((filepath.name, passed, num_errors, num_warnings))
 
@@ -1436,7 +1500,16 @@ Warning Checks:
 
         print(f"Warnings: {total_warnings}")
 
-       
+        print(f"\n{'='*80}")
+        print("HARDCODED THREAD LISTS")
+        print(f"{'='*80}")
+        if hardcoded_scripts:
+            for name, entries in hardcoded_scripts:
+                for lineno, threads in entries:
+                    line_label = f"line {lineno}" if lineno else "line ?"
+                    print(f"{name}: {line_label} -> {threads}")
+        else:
+            print("None")
 
         return 0 if failed_count == 0 else 1
 
