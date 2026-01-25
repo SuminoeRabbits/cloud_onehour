@@ -28,7 +28,7 @@
 #    --output <machinename>/results/postmortem_<machinename>.json
 #
 # 2. <machinename>内でのデータ収集
-# オプション: --merge-csp(省略可能)　指定時はこのステップのみ（互換性のためオプション名は固定）
+# オプション: --merge-machine(省略可能)　指定時はこのステップのみ
 # まず${PWD}/<machinename>/results内のベンチマーク結果ファイルを収集します。
 # one_big_json_<machinename>.jsonが1つでも複数ある場合でも、それを --mergeオプションで一つにまとめます。
 # (--merge時は--dirは無視されます)
@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         help="Run step 1 only: extract CSP tarballs into per-CSP directories.",
     )
     parser.add_argument(
-        "--merge-csp",
+        "--merge-machine",
         action="store_true",
         help="Run step 2 only: merge per-machine one_big_json_*.json files.",
     )
@@ -251,7 +251,7 @@ def main() -> int:
     analytics_script = results_dir / "one_big_json_analytics.py"
     postmortem_script = results_dir / "pts_runner_postmortem.py"
 
-    step_flags = [args.extract, args.merge_csp, args.merge_global, args.analyze]
+    step_flags = [args.extract, args.merge_machine, args.merge_global, args.analyze]
     run_all = not any(step_flags)
 
     csp_dirs: List[Path] = []
@@ -290,7 +290,7 @@ def main() -> int:
     else:
         csp_dirs = find_csp_dirs(workdir)
 
-    if run_all or args.merge_csp:
+    if run_all or args.merge_machine:
         for csp_dir in csp_dirs:
             results_path = csp_dir / "results"
             if not results_path.is_dir():
