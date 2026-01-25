@@ -128,7 +128,9 @@ def validate_script_syntax() -> bool:
 
 
 def find_tarballs(workdir: Path) -> List[Path]:
-    return sorted(workdir.glob("*.tar.gz"))
+    tarballs = list(workdir.glob("*.tar.gz"))
+    tarballs.sort(key=lambda path: (path.stat().st_mtime, path.name))
+    return tarballs
 
 
 def find_csp_dirs(workdir: Path) -> List[Path]:
