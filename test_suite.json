@@ -240,7 +240,7 @@
                     "TH_scaling": "redis-benchmark:--threads",
                     "sve2_support": false,
                     "notes": "redis-benchmark needs --threads $NUM_CPU_CORES option added to install.sh. Redis server supports I/O threading (v6.0+) via io-threads config. Client connections via -c option (already set to 50)",
-                    "exe_time_v8cpu": "21.0"
+                    "exe_time_v8cpu": "10.0"
                 }
             }
         },

@@ -45,7 +45,7 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_ffmpeg-7.0.1.py 288 --quick > /tmp/pts_runner_ffmpeg0.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_ffmpeg-7.0.1.py 4 --quick > /tmp/pts_runner_ffmpeg1.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_x265-1.5.0.py > /tmp/pts_runner_x265.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_redis-1.3.1.py --quick > /tmp/pts_runner_redis.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_redis-1.3.1.py > /tmp/pts_runner_redis.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_stream-1.3.4.py > /tmp/pts_runner_stream.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tinymembench-1.0.2.py 1 --quick > /tmp/pts_runner_tinymembench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_memcached-1.2.0.py --quick > /tmp/pts_runner_memcached.log 2>&1",
