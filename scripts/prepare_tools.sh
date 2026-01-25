@@ -18,24 +18,41 @@ get_ubuntu_version() {
     echo "unknown"
 }
 
+get_ubuntu_codename() {
+    if command -v lsb_release >/dev/null 2>&1; then
+        lsb_release -sc
+        return
+    fi
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "${VERSION_CODENAME:-unknown}"
+        return
+    fi
+    echo "unknown"
+}
+
 install_python_with_ppa_if_needed() {
     local ubuntu_version
+    local ubuntu_codename
     ubuntu_version="$(get_ubuntu_version)"
+    ubuntu_codename="$(get_ubuntu_codename)"
 
     case "$ubuntu_version" in
         22.04*)
             echo "Ubuntu $ubuntu_version detected: using OS default Python (3.10)."
             ;;
-        24.04*|25.*)
-            echo "Ubuntu $ubuntu_version detected: installing Python 3.11 via deadsnakes PPA."
-            sudo apt-get update -y
-            sudo apt-get install -y software-properties-common
-            sudo add-apt-repository -y ppa:deadsnakes/ppa
-            sudo apt-get update -y
-            sudo apt-get install -y python3.11 python3.11-venv python3.11-distutils
-            ;;
         *)
-            echo "Ubuntu $ubuntu_version detected: skipping Python PPA setup."
+            if [ "$ubuntu_codename" = "noble" ] || [ "$ubuntu_codename" = "plucky" ]; then
+                echo "Ubuntu $ubuntu_version ($ubuntu_codename) detected: installing Python 3.11 via deadsnakes PPA."
+                sudo apt-get update -y
+                sudo apt-get install -y software-properties-common
+                sudo add-apt-repository -y ppa:deadsnakes/ppa
+                sudo apt-get update -y
+                sudo apt-get install -y python3.11 python3.11-venv python3.11-distutils
+            else
+                echo "Ubuntu $ubuntu_version ($ubuntu_codename) detected: skipping Python PPA setup."
+                echo "  [INFO] deadsnakes PPA is not available for this release."
+            fi
             ;;
     esac
 }
@@ -76,4 +93,3 @@ install_python_with_ppa_if_needed
 
 # Re-enable unattended upgrades
 enable_unattended_upgrades
-
