@@ -492,12 +492,11 @@ def process_thread_data(benchmark_dir: Path, thread_num: str) -> Optional[Dict[s
     if not freq_start.exists() or not freq_end.exists():
         return None
 
-    # Case 1: summary.json and <N>-thread.json exist, perf_stats required
-    if has_summary and has_thread_json:
-        if not has_perf_stats:
-            return None
-    # Case 2: no summary.json but <N>-thread.json exists
-    elif not has_summary and has_thread_json:
+    # Case 1: summary.json and <N>-thread.json exist, perf_stats present
+    if has_summary and has_thread_json and has_perf_stats:
+        pass
+    # Case 2: <N>-thread.json exists (perf_stats may be missing)
+    elif has_thread_json:
         pass
     # Case 3: <N>-thread.json missing but <N>-thread_perf_summary.json exists
     elif not has_thread_json and has_perf_summary:

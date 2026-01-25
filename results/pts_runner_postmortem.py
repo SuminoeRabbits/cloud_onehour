@@ -278,12 +278,14 @@ def check_required_files_for_thread(
     if missing_files:
         return False, missing_files, None
 
-    # ケース1: summary.jsonと<N>-thread.jsonの両方が存在
+    # ケース1: summary.jsonと<N>-thread.jsonの両方が存在（perf_statsあり）
     if has_summary and has_n_thread_json and has_perf_stats:
         completion_case = 1
         return True, [], completion_case
-    elif has_summary and has_n_thread_json and not has_perf_stats:
-        return False, [f"{n}-thread_perf_stats.txt"], None
+    # ケース2: perf_statsがなくても<N>-thread.jsonが存在すれば完了扱い
+    if has_n_thread_json and not has_perf_stats:
+        completion_case = 2
+        return True, [], completion_case
     # ケース2: summary.jsonはないが<N>-thread.jsonが存在
     if not has_summary and has_n_thread_json:
         completion_case = 2
