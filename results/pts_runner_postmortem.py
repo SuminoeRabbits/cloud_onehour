@@ -95,17 +95,10 @@ FAILURE_PATTERNS = [
 ]
 
 # 必須ファイルの定義（README_results.md準拠）
-# <N>-thread.csv と <N>-thread.json は必須ファイルから除外
-# （<N>-thread.json の有無はケース1/2/3判定で処理する）
-REQUIRED_FILES_PER_THREAD = [
+# 必須ファイルはケースごとに異なるため、ここでは共通必須のみ定義する。
+COMMON_REQUIRED_FILES_PER_THREAD = [
     "{N}-thread_freq_end.txt",
     "{N}-thread_freq_start.txt",
-    "{N}-thread_perf_stats.txt",
-]
-
-# オプションファイルの定義
-OPTIONAL_FILES_PER_THREAD = [
-    "{N}-thread_perf_summary.json",
 ]
 
 # stdout.logは<benchmark>ディレクトリ直下に必須
@@ -215,7 +208,11 @@ def find_thread_numbers(benchmark_path: Path) -> List[int]:
     return sorted(list(thread_numbers))
 
 
-def check_required_files_for_thread(benchmark_path: Path, thread_num: int, benchmark_name: str) -> Tuple[bool, List[str], Optional[int]]:
+def check_required_files_for_thread(
+    benchmark_path: Path,
+    thread_num: int,
+    benchmark_name: str,
+) -> Tuple[bool, List[str], Optional[int]]:
     """
     指定されたスレッド数のテストに必要なファイルがすべて揃っているかチェック。
 
@@ -256,45 +253,45 @@ def check_required_files_for_thread(benchmark_path: Path, thread_num: int, bench
 
     # 通常のベンチマーク（ケース1, 2, 3）
 
-    # 必須ファイルのチェック（README_results.md準拠）
-    # freq_end, freq_start, perf_stats が必須
-    # <N>-thread.json の有無はケース判定で処理する
-    required_files_to_check = [
-        f"{n}-thread_freq_end.txt",
-        f"{n}-thread_freq_start.txt",
-        f"{n}-thread_perf_stats.txt",
-    ]
-
-    for req_file in required_files_to_check:
-        file_in_dir = benchmark_path / req_file
-        file_in_subdir = benchmark_path / f"{n}-thread" / req_file
-
-        if not file_in_dir.exists() and not file_in_subdir.exists():
-            missing_files.append(req_file)
-
-    if missing_files:
-        return False, missing_files, None
-
     # 完了ケースを判定（README_results.md準拠）
     summary_json = benchmark_path / "summary.json"
     n_thread_json = benchmark_path / f"{n}-thread.json"
     n_thread_json_subdir = benchmark_path / f"{n}-thread" / f"{n}-thread.json"
     n_thread_perf_summary = benchmark_path / f"{n}-thread_perf_summary.json"
     n_thread_perf_summary_subdir = benchmark_path / f"{n}-thread" / f"{n}-thread_perf_summary.json"
+    n_thread_perf_stats = benchmark_path / f"{n}-thread_perf_stats.txt"
+    n_thread_perf_stats_subdir = benchmark_path / f"{n}-thread" / f"{n}-thread_perf_stats.txt"
 
     has_summary = summary_json.exists()
     has_n_thread_json = n_thread_json.exists() or n_thread_json_subdir.exists()
     has_perf_summary = n_thread_perf_summary.exists() or n_thread_perf_summary_subdir.exists()
+    has_perf_stats = n_thread_perf_stats.exists() or n_thread_perf_stats_subdir.exists()
+
+    # 共通必須ファイルのチェック（freq_start/end）
+    for template in COMMON_REQUIRED_FILES_PER_THREAD:
+        req_file = template.format(N=n)
+        file_in_dir = benchmark_path / req_file
+        file_in_subdir = benchmark_path / f"{n}-thread" / req_file
+        if not file_in_dir.exists() and not file_in_subdir.exists():
+            missing_files.append(req_file)
+
+    if missing_files:
+        return False, missing_files, None
 
     # ケース1: summary.jsonと<N>-thread.jsonの両方が存在
-    if has_summary and has_n_thread_json:
+    if has_summary and has_n_thread_json and has_perf_stats:
         completion_case = 1
+        return True, [], completion_case
+    elif has_summary and has_n_thread_json and not has_perf_stats:
+        return False, [f"{n}-thread_perf_stats.txt"], None
     # ケース2: summary.jsonはないが<N>-thread.jsonが存在
-    elif not has_summary and has_n_thread_json:
+    if not has_summary and has_n_thread_json:
         completion_case = 2
+        return True, [], completion_case
     # ケース3: <N>-thread.jsonはないが<N>-thread_perf_summary.jsonが存在
-    elif not has_n_thread_json and has_perf_summary:
+    if not has_n_thread_json and has_perf_summary:
         completion_case = 3
+        return True, [], completion_case
     else:
         # <N>-thread.jsonも<N>-thread_perf_summary.jsonも存在しない場合はincomplete
         return False, [f"{n}-thread.json or {n}-thread_perf_summary.json"], None
