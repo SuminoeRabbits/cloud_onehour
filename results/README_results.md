@@ -449,11 +449,11 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 |"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.4057 |
 |"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.4231 |
 |"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.3869 |
-|"VM.Standard.E5.Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1925 |
-|"VM.Standard.E6.Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1925 |
-|"VM.Standard.A1.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.0599 |
-|"VM.Standard.A2.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1845 |
-|"VM.Standard.A4.Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.2053 |
+|"E5" and "Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1925 |
+|"E6" and "Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1925 |
+|"A1" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.0599 |
+|"A2" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1845 |
+|"A4" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.2053 |
 
 
 ### Cost at Look-Up-Table

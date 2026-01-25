@@ -129,141 +129,184 @@ def check_version_compatibility(version1: str, version2: str) -> bool:
 # Look-Up-Table from README_results.md
 # cost_hour[730h-mo] is pre-calculated (CPU cost + storage cost) and stored directly in this table
 # Per README_results.md: All machine info is obtained from this Look-Up-Table only
-MACHINE_LOOKUP = {
-    "rpi5": {
-        "CSP": "local",
-        "total_vcpu": 4,
-        "cpu_name": "Cortex-A76",
-        "cpu_isa": "Armv8.2-A",
-        "cost_hour[730h-mo]": 0.0
+# Matching is case-insensitive and based on substrings in machinename.
+MACHINE_LOOKUP = [
+    {
+        "match": ["rpi5"],
+        "info": {
+            "CSP": "local",
+            "total_vcpu": 4,
+            "cpu_name": "Cortex-A76",
+            "cpu_isa": "Armv8.2-A",
+            "cost_hour[730h-mo]": 0.0,
+        },
     },
-    "t3_medium": {
-        "CSP": "AWS",
-        "total_vcpu": 2,
-        "cpu_name": "Intel Xeon Platinum (8000 series)",
-        "cpu_isa": "x86-64 (AVX-512)",
-        "cost_hour[730h-mo]": 0.0183
+    {
+        "match": ["t3", "medium"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 2,
+            "cpu_name": "Intel Xeon Platinum (8000 series)",
+            "cpu_isa": "x86-64 (AVX-512)",
+            "cost_hour[730h-mo]": 0.0183,
+        },
     },
-    "m8a_2xlarge": {
-        "CSP": "AWS",
-        "total_vcpu": 8,
-        "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.3164
+    {
+        "match": ["m8a", "2xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 8,
+            "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.3164,
+        },
     },
-    "m8i_2xlarge": {
-        "CSP": "AWS",
-        "total_vcpu": 8,
-        "cpu_name": "Intel Xeon 6 (6th Granite Rapids)",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.2594
+    {
+        "match": ["m8i", "2xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 8,
+            "cpu_name": "Intel Xeon 6 (6th Granite Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.2594,
+        },
     },
-    "i7ie_2xlarge": {
-        "CSP": "AWS",
-        "total_vcpu": 8,
-        "cpu_name": "Intel Xeon 5 Metal(5th Emerald Rapids)",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 1.2433
+    {
+        "match": ["i7ie", "2xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 8,
+            "cpu_name": "Intel Xeon 5 Metal(5th Emerald Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 1.2433,
+        },
     },
-    "m7i_2xlarge": {
-        "CSP": "AWS",
-        "total_vcpu": 8,
-        "cpu_name": "Intel Xeon 4 (4th Sapphire Rapids)",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.5405
+    {
+        "match": ["m7i", "2xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 8,
+            "cpu_name": "Intel Xeon 4 (4th Sapphire Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.5405,
+        },
     },
-    "m8g_2xlarge": {
-        "CSP": "AWS",
-        "total_vcpu": 8,
-        "cpu_name": "Neoverse-V2 (Graviton4)",
-        "cpu_isa": "Armv9.0-A (SVE2-128)",
-        "cost_hour[730h-mo]": 0.2274
+    {
+        "match": ["m8g", "2xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 8,
+            "cpu_name": "Neoverse-V2 (Graviton4)",
+            "cpu_isa": "Armv9.0-A (SVE2-128)",
+            "cost_hour[730h-mo]": 0.2274,
+        },
     },
-    "e2-standard-2": {
-        "CSP": "GCP",
-        "total_vcpu": 2,
-        "cpu_name": "Intel Xeon / AMD EPYC(Variable)",
-        "cpu_isa": "x86-64",
-        "cost_hour[730h-mo]": 0.0683
+    {
+        "match": ["e2-standard-2"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 2,
+            "cpu_name": "Intel Xeon / AMD EPYC(Variable)",
+            "cpu_isa": "x86-64",
+            "cost_hour[730h-mo]": 0.0683,
+        },
     },
-    "c4d-standard-8": {
-        "CSP": "GCP",
-        "total_vcpu": 8,
-        "cpu_name": "AMD EPYC 9B45 (Zen 5 \"Turin\")",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.4057
+    {
+        "match": ["c4d-standard-8"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 8,
+            "cpu_name": "AMD EPYC 9B45 (Zen 5 \"Turin\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.4057,
+        },
     },
-    "c4-standard-8": {
-        "CSP": "GCP",
-        "total_vcpu": 8,
-        "cpu_name": "Intel Xeon Platinum 8581C (5th Emerald Rapids)",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.4231
+    {
+        "match": ["c4-standard-8"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 8,
+            "cpu_name": "Intel Xeon Platinum 8581C (5th Emerald Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.4231,
+        },
     },
-    "c4a-standard-8": {
-        "CSP": "GCP",
-        "total_vcpu": 8,
-        "cpu_name": "Neoverse-V2 (Google Axion)",
-        "cpu_isa": "Armv9.0-A (SVE2-128)",
-        "cost_hour[730h-mo]": 0.3869
+    {
+        "match": ["c4a-standard-8"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 8,
+            "cpu_name": "Neoverse-V2 (Google Axion)",
+            "cpu_isa": "Armv9.0-A (SVE2-128)",
+            "cost_hour[730h-mo]": 0.3869,
+        },
     },
-    "VM.Standard.E5.Flex": {
-        "CSP": "OCI",
-        "total_vcpu": 8,
-        "cpu_name": "AMD EPYC 9J14 (Zen 4 \"Genoa\")",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.1925
+    {
+        "match": ["e5", "flex"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 8,
+            "cpu_name": "AMD EPYC 9J14 (Zen 4 \"Genoa\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.1925,
+        },
     },
-    "VM.Standard.E6.Flex": {
-        "CSP": "OCI",
-        "total_vcpu": 8,
-        "cpu_name": "AMD EPYC 9J45 (Zen 5 \"Turin\")",
-        "cpu_isa": "x86-64 (AMX + AVX-512)",
-        "cost_hour[730h-mo]": 0.1925
+    {
+        "match": ["e6", "flex"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 8,
+            "cpu_name": "AMD EPYC 9J45 (Zen 5 \"Turin\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.1925,
+        },
     },
-    "VM.Standard.A1.Flex": {
-        "CSP": "OCI",
-        "total_vcpu": 8,
-        "cpu_name": "Ampere one (v8.6A)",
-        "cpu_isa": "Armv8.6 (NEON-128)",
-        "cost_hour[730h-mo]": 0.0599
+    {
+        "match": ["a1", "flex"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 8,
+            "cpu_name": "Ampere one (v8.6A)",
+            "cpu_isa": "Armv8.6 (NEON-128)",
+            "cost_hour[730h-mo]": 0.0599,
+        },
     },
-    "VM.Standard.A2.Flex": {
-        "CSP": "OCI",
-        "total_vcpu": 8,
-        "cpu_name": "Ampere one (v8.6A)",
-        "cpu_isa": "Armv8.6 (NEON-128)",
-        "cost_hour[730h-mo]": 0.1845
+    {
+        "match": ["a2", "flex"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 8,
+            "cpu_name": "Ampere one (v8.6A)",
+            "cpu_isa": "Armv8.6 (NEON-128)",
+            "cost_hour[730h-mo]": 0.1845,
+        },
     },
-    "VM.Standard.A4.Flex": {
-        "CSP": "OCI",
-        "total_vcpu": 8,
-        "cpu_name": "Ampere one (v8.6A)",
-        "cpu_isa": "Armv8.6 (NEON-128)",
-        "cost_hour[730h-mo]": 0.2053
-    }
-}
+    {
+        "match": ["a4", "flex"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 8,
+            "cpu_name": "Ampere one (v8.6A)",
+            "cpu_isa": "Armv8.6 (NEON-128)",
+            "cost_hour[730h-mo]": 0.2053,
+        },
+    },
+]
 
 
 def get_machine_info(machinename: str) -> Dict[str, Any]:
     """
     Get machine info from Look-Up-Table based on machinename.
-    Searches for partial matches (e.g., "t3" and "medium" for "t3_medium").
+    Searches for partial matches (case-insensitive substrings).
 
     Per README_results.md specification:
     - All machine info is obtained from Look-Up-Table only
     - If not in Look-Up-Table, cost defaults to 0.0 and other fields to "unknown"
     """
-    # Direct match
-    if machinename in MACHINE_LOOKUP:
-        return MACHINE_LOOKUP[machinename].copy()
-
-    # Partial match for compound names
     machinename_lower = machinename.lower()
-    for key, value in MACHINE_LOOKUP.items():
-        parts = key.replace("-", "_").split("_")
-        if all(part in machinename_lower for part in parts):
-            return value.copy()
+    for entry in MACHINE_LOOKUP:
+        if all(part.lower() in machinename_lower for part in entry["match"]):
+            return entry["info"].copy()
 
     # Default fallback - not in lookup table at all
     print(f"Warning: Machine '{machinename}' not found in lookup table. Using defaults.", file=sys.stderr)
