@@ -13,9 +13,10 @@
     - [How to distingush `<N>` in `<files>`](#how-to-distingush-n-in-files)
       - [ファイル一覧](#ファイル一覧)
     - [summary file in `<files>`](#summary-file-in-files)
-      - [ケース1: `summary.json`と`<N>-thread.json`の両方が存在](#ケース1-summaryjsonとn-threadjsonの両方が存在)
-      - [ケース2: `summary.json`はないが`<N>-thread.json`が存在](#ケース2-summaryjsonはないがn-threadjsonが存在)
-      - [ケース3: `<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在](#ケース3-n-threadjsonはないがn-thread_perf_summaryjsonが存在)
+      - [ケース1: `summary.json`、`<N>-thread_perf_stats.txt`と`<N>-thread.json`が存在](#ケース1-summaryjsonn-thread_perf_statstxtとn-threadjsonが存在)
+      - [ケース2: `summary.json`と`<N>-thread_perf_stats.txt`はないが`<N>-thread.json`が存在](#ケース2-summaryjsonとn-thread_perf_statstxtはないがn-threadjsonが存在)
+      - [ケース3: `<N>-thread.json`と`<N>-thread_perf_stats.txt`はないが`<N>-thread_perf_summary.json`が存在](#ケース3-n-threadjsonとn-thread_perf_statstxtはないがn-thread_perf_summaryjsonが存在)
+      - [ケース4: このケースは将来の拡張の為に確保されている。](#ケース4-このケースは将来の拡張の為に確保されている)
       - [ケース5: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）](#ケース5-特殊ベンチマークsummaryjsonもn-thread_perf_summaryjsonもn-threadjsonも存在しない)
       - [Multiple "test\_name", "description" in one ](#multiple-test_name-description-in-one-)
         - ["test\_name"のキー生成ルール](#test_nameのキー生成ルール)
@@ -106,7 +107,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 ### summary file in `<files>`
 `<benchmark>`が完了している条件は４つのケースがありうる。必須ファイルはケース毎に異なる。
 
-#### ケース1: `summary.json`と`<N>-thread.json`の両方が存在
+#### ケース1: `summary.json`、`<N>-thread_perf_stats.txt`と`<N>-thread.json`が存在
 **必須ファイル:**
 - `<N>-thread_freq_end.txt`
 - `<N>-thread_freq_start.txt`
@@ -114,18 +115,16 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `<N>-thread.json`
 - `summary.json`
 
-#### ケース2: `summary.json`はないが`<N>-thread.json`が存在
+#### ケース2: `summary.json`と`<N>-thread_perf_stats.txt`はないが`<N>-thread.json`が存在
 **必須ファイル:**
 - `<N>-thread_freq_end.txt`
 - `<N>-thread_freq_start.txt`
-- `<N>-thread_perf_stats.txt`
 - `<N>-thread.json`
 
-#### ケース3: `<N>-thread.json`はないが`<N>-thread_perf_summary.json`が存在
+#### ケース3: `<N>-thread.json`と`<N>-thread_perf_stats.txt`はないが`<N>-thread_perf_summary.json`が存在
 **必須ファイル:**
 - `<N>-thread_freq_end.txt`
 - `<N>-thread_freq_start.txt`
-- `<N>-thread_perf_stats.txt`
 - `<N>-thread_perf_summary.json`
 
 #### ケース4: このケースは将来の拡張の為に確保されている。
