@@ -58,6 +58,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import tarfile
@@ -140,7 +141,9 @@ def generate_one_big_json_if_missing(
 ) -> None:
     output_json = results_path / f"one_big_json_{machinename}.json"
     if output_json.exists():
-        return
+        if is_valid_one_big_json(output_json, machinename):
+            return
+        print(f"Regenerating invalid JSON -> {output_json}")
     cmd = [
         sys.executable,
         str(make_one_big_json),
@@ -151,6 +154,31 @@ def generate_one_big_json_if_missing(
     ]
     run_script(cmd, results_path)
     print(f"Generated missing JSON -> {output_json}")
+
+
+def is_valid_one_big_json(json_path: Path, machinename: str) -> bool:
+    try:
+        with open(json_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"Invalid JSON file {json_path}: {exc}", file=sys.stderr)
+        return False
+
+    if machinename not in data:
+        print(
+            f"Invalid one_big_json: missing machinename '{machinename}' in {json_path}",
+            file=sys.stderr,
+        )
+        return False
+    machine_data = data.get(machinename, {})
+    os_data = machine_data.get("os", {})
+    if not isinstance(os_data, dict) or not os_data:
+        print(
+            f"Invalid one_big_json: empty os data for '{machinename}' in {json_path}",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def infer_machine_name(tar_path: Path) -> str:
