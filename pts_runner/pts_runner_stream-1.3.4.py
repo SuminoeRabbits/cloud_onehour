@@ -521,7 +521,7 @@ class StreamRunner:
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Patch install.sh to cap STREAM_ARRAY_SIZE on large L3 systems (e.g., m8i)
-        self.patch_install_script()
+        self.patch_install_script(required=False)
 
         print(f"  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
@@ -592,57 +592,92 @@ class StreamRunner:
             print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
             print(f"  [INFO] But installation directory exists, continuing...")
 
+        # Ensure patch is present after install (fail fast if not)
+        if not self.patch_install_script(required=True):
+            print("  [ERROR] Failed to apply STREAM_ARRAY_SIZE patch after install")
+            sys.exit(1)
+
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
-    def patch_install_script(self):
+    def patch_install_script(self, required=False):
         """Patch install.sh to avoid oversized STREAM_ARRAY_SIZE on large L3 caches."""
-        install_sh = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
-        if not install_sh.exists():
-            print(f"  [WARN] install.sh not found: {install_sh}")
+        candidates = [
+            Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh',
+            Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark / 'install.sh',
+        ]
+        patched_any = False
+        found_any = False
+
+        for install_sh in candidates:
+            if not install_sh.exists():
+                continue
+            found_any = True
+
+            try:
+                content = install_sh.read_text()
+                if "\\n" in content:
+                    content = content.replace("\\n", "\n")
+                    install_sh.write_text(content)
+
+                if 'MAX_STREAM_ARRAY_SIZE' in content:
+                    print(f"  [INFO] install.sh already patched: {install_sh}")
+                    patched_any = True
+                    continue
+
+                cap_block = (
+                    "MAX_STREAM_ARRAY_SIZE=200000000\n"
+                    "if [ $STREAM_ARRAY_SIZE -gt $MAX_STREAM_ARRAY_SIZE ]; then\n"
+                    "     STREAM_ARRAY_SIZE=$MAX_STREAM_ARRAY_SIZE\n"
+                    "fi\n"
+                )
+
+                new_content = content
+                count = 0
+                if "MAX_STREAM_ARRAY_SIZE=200000000\\n" in content:
+                    new_content, replace_count = re.subn(
+                        r"MAX_STREAM_ARRAY_SIZE=200000000\\n"
+                        r"if \[ \$STREAM_ARRAY_SIZE -gt \$MAX_STREAM_ARRAY_SIZE \]; then\\n"
+                        r"\s*STREAM_ARRAY_SIZE=\$MAX_STREAM_ARRAY_SIZE\\n"
+                        r"fi\\n",
+                        cap_block,
+                        content
+                    )
+                    if replace_count > 0:
+                        count = 1
+                    else:
+                        new_content = content.replace("\\n", "\n")
+                        count = 1
+
+                start = content.find("STREAM_ARRAY_SIZE=100000000")
+                if count == 0 and start != -1:
+                    fi_match = re.search(r"\nfi\r?\n", content[start:])
+                    if fi_match:
+                        insert_at = start + fi_match.end()
+                        new_content = content[:insert_at] + cap_block + content[insert_at:]
+                        count = 1
+                    else:
+                        fallback_match = re.search(r"STREAM_ARRAY_SIZE=100000000\r?\n", content)
+                        if fallback_match:
+                            insert_at = fallback_match.end()
+                            new_content = content[:insert_at] + cap_block + content[insert_at:]
+                            count = 1
+
+                if count == 0:
+                    print(f"  [WARN] Could not find STREAM_ARRAY_SIZE block to patch: {install_sh}")
+                    continue
+
+                install_sh.write_text(new_content)
+                print(f"  [OK] install.sh patched to cap STREAM_ARRAY_SIZE: {install_sh}")
+                patched_any = True
+            except Exception as e:
+                print(f"  [WARN] Failed to patch install.sh: {install_sh}: {e}")
+
+        if required and (not found_any or not patched_any):
+            if not found_any:
+                print("  [ERROR] install.sh not found in test-profiles or installed-tests")
             return False
 
-        try:
-            content = install_sh.read_text()
-            if 'MAX_STREAM_ARRAY_SIZE' in content:
-                print("  [INFO] install.sh already patched for STREAM_ARRAY_SIZE cap")
-                return True
-
-            pattern = (
-                r"STREAM_ARRAY_SIZE=100000000\\n"
-                r"L3_CACHE_SIZE=`getconf LEVEL3_CACHE_SIZE`\\n"
-                r"SIZE_BASED_ON_L3=\\$\\(\\(L3_CACHE_SIZE \\* 4\\)\\)\\n"
-                r"if \\[ \\$SIZE_BASED_ON_L3 -gt \\$STREAM_ARRAY_SIZE \\]\\n"
-                r"then\\n"
-                r"     STREAM_ARRAY_SIZE=\\$SIZE_BASED_ON_L3\\n"
-                r"fi"
-            )
-
-            replacement = (
-                "STREAM_ARRAY_SIZE=100000000\\n"
-                "L3_CACHE_SIZE=`getconf LEVEL3_CACHE_SIZE`\\n"
-                "if [ -n \"$L3_CACHE_SIZE\" ] && [ \"$L3_CACHE_SIZE\" -gt 0 ]; then\\n"
-                "     SIZE_BASED_ON_L3=$((L3_CACHE_SIZE / 8 * 4))\\n"
-                "     if [ $SIZE_BASED_ON_L3 -gt $STREAM_ARRAY_SIZE ]; then\\n"
-                "          STREAM_ARRAY_SIZE=$SIZE_BASED_ON_L3\\n"
-                "     fi\\n"
-                "fi\\n"
-                "MAX_STREAM_ARRAY_SIZE=200000000\\n"
-                "if [ $STREAM_ARRAY_SIZE -gt $MAX_STREAM_ARRAY_SIZE ]; then\\n"
-                "     STREAM_ARRAY_SIZE=$MAX_STREAM_ARRAY_SIZE\\n"
-                "fi"
-            )
-
-            new_content, count = re.subn(pattern, replacement, content)
-            if count == 0:
-                print("  [WARN] Could not find STREAM_ARRAY_SIZE block to patch")
-                return False
-
-            install_sh.write_text(new_content)
-            print("  [OK] install.sh patched to cap STREAM_ARRAY_SIZE")
-            return True
-        except Exception as e:
-            print(f"  [WARN] Failed to patch install.sh: {e}")
-            return False
+        return patched_any
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
