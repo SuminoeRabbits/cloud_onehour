@@ -23,6 +23,15 @@
 # 2.出力
 #   cloud_onehour/results/postmortem.json
 #
+# 追加仕様:
+#   作業DirectoryとOutputを生成するDirectoryは同じで、それを--dirで指定する。
+#   --dirは省略可能で、省略時はこのスクリプトが存在するDirectoryが--dirとなる。
+#   --outputで相対パスを指定した場合は<--dir>/<output>として解決する。
+#   使用例:
+#     $> ./pts_runner_postmortem.py
+#     $> ./pts_runner_postmortem.py --dir /path/to/results
+#     $> ./pts_runner_postmortem.py --dir /path/to/results --output custom.json
+#
 # 3.出力フォーマット
 #   {
 #     "postmortem_date": "<yyyymmdd-hhmmss>",
@@ -476,8 +485,8 @@ def main():
     parser.add_argument(
         "--dir", "-D",
         type=str,
-        default=".",
-        help="Project root directory (default: current directory)"
+        default=str(Path(__file__).resolve().parent),
+        help="Project root directory (default: script directory)"
     )
     parser.add_argument(
         "--output", "-O",
@@ -517,6 +526,8 @@ def main():
 
     if args.output:
         output_path = Path(args.output)
+        if not output_path.is_absolute():
+            output_path = project_root / output_path
     else:
         output_path = project_root / "postmortem.json"
 
