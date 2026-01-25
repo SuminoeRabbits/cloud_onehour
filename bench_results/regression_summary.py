@@ -20,6 +20,7 @@
 # ${PWD}/<machinename>/results内にone_big_json_<machinename>.jsonが無い場合はその場で生成します。
 # 1.b one_big_json_<machinename>.jsonの生成
 # <machinename>/results内にone_big_json_<machinename>.jsonが無い場合は生成します。
+# JSONが壊れている場合は一旦削除してから生成します。
 # $> ../results/make_one_big_json.py \
 #    --dir <machinename>/results \
 #    --output <machinename>/results/one_big_json_<machinename>.json
@@ -143,7 +144,8 @@ def generate_one_big_json_if_missing(
     if output_json.exists():
         if is_valid_one_big_json(output_json, machinename):
             return
-        print(f"Regenerating invalid JSON -> {output_json}")
+        print(f"Removing invalid JSON -> {output_json}")
+        output_json.unlink(missing_ok=True)
     cmd = [
         sys.executable,
         str(make_one_big_json),
