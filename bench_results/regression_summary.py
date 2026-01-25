@@ -18,6 +18,7 @@
 # <machinename>毎にディレクトリを作成し、その中に解凍します。解凍が終わると、${PWD}/<machinename>/results内に
 # ベンチマーク結果ファイルが配置されます。
 # ${PWD}/<machinename>/results内にone_big_json_<machinename>.jsonが無い場合はその場で生成します。
+# one_big_json_<machinename>.jsonが存在する場合でも上書きします。
 # 1.b one_big_json_<machinename>.jsonの生成
 # <machinename>/results内にone_big_json_<machinename>.jsonが無い場合は生成します。
 # JSONが壊れている場合は一旦削除してから生成します。
@@ -32,6 +33,7 @@
 # オプション: --merge-machine(省略可能)　指定時はこのステップのみ
 # まず${PWD}/<machinename>/results内のベンチマーク結果ファイルを収集します。
 # one_big_json_<machinename>.jsonが1つでも複数ある場合でも、それを --mergeオプションで一つにまとめます。
+# <machinename>/results/all_results_<machinename>.jsonが存在する場合でも上書きします。
 # (--merge時は--dirは無視されます)
 # $> ../results/make_one_big_json.py \
 #     --merge <machinename>/results/one_big_json_<machinename>.json ... \
@@ -43,6 +45,7 @@
 # ${PWD}/globalディレクトリが無い場合は作成します。
 # ${PWD}/<machinename>/results内のall_results_<machinename>.jsonを収集し、
 # --merge で全体を${PWD}/global以下に一つにまとめます。
+# ./global/global_all_results.jsonが存在する場合でも上書きします。
 # $> ../results/make_one_big_json.py \
 #     --merge ../<machinename>/results/all_results_<machinename>.json ... \
 #     --output ./global/global_all_results.json
@@ -146,9 +149,10 @@ def generate_one_big_json_if_missing(
     output_json = results_path / f"one_big_json_{machinename}.json"
     if output_json.exists():
         if is_valid_one_big_json(output_json, machinename):
-            return
-        print(f"Removing invalid JSON -> {output_json}")
-        output_json.unlink(missing_ok=True)
+            print(f"Overwriting existing JSON -> {output_json}")
+        else:
+            print(f"Removing invalid JSON -> {output_json}")
+            output_json.unlink(missing_ok=True)
     cmd = [
         sys.executable,
         str(make_one_big_json),
@@ -156,6 +160,7 @@ def generate_one_big_json_if_missing(
         str(results_path),
         "--output",
         str(output_json),
+        "--force",
     ]
     run_script(cmd, results_path)
     print(f"Generated missing JSON -> {output_json}")
