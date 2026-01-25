@@ -17,6 +17,9 @@
 # <machinename>_<os>*.tar.gzなどになっています。
 # <machinename>毎にディレクトリを作成し、その中に解凍します。解凍が終わると、${PWD}/<machinename>/results内に
 # ベンチマーク結果ファイルが配置されます。
+# 解凍の順番は以下の通り:
+# - 圧縮ファイルのタイムスタンプが古い順
+# - そのうえでアルファベット順にソートして順番に解凍
 # ${PWD}/<machinename>/results内にone_big_json_<machinename>.jsonが無い場合はその場で生成します。
 # one_big_json_<machinename>.jsonが存在する場合でも上書きします。
 # 1.b one_big_json_<machinename>.jsonの生成
