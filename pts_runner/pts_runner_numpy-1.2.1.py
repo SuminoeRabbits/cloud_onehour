@@ -838,6 +838,22 @@ class NumpyBenchmarkRunner:
         print(f"Results Directory: {self.results_dir}")
         print(f"{'='*80}\n")
 
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log = self.results_dir / "stdout.log"
+        with open(stdout_log, 'a') as stdout_f:
+            stdout_f.write(f"{'='*80}\n")
+            stdout_f.write("[RUNNER STARTUP]\n")
+            stdout_f.write(f"Python: {sys.version.split()[0]}\n")
+            stdout_f.write(f"pip: {self.pip_version or 'unknown'}\n")
+            stdout_f.write(f"pip exec: {self.pip_executable or '-'}\n")
+            stdout_f.write(f"Machine: {self.machine_name}\n")
+            stdout_f.write(f"OS: {self.os_name}\n")
+            stdout_f.write(f"vCPU: {self.vcpu_count}\n")
+            stdout_f.write(f"Threads: {self.thread_list}\n")
+            stdout_f.write(f"Perf events: {self.perf_events or '-'}\n")
+            stdout_f.write(f"Perf paranoid: {self.perf_paranoid}\n")
+            stdout_f.write(f"{'='*80}\n\n")
+
         # Install benchmark
         self.install_benchmark()
 

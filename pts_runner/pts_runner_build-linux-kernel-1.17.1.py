@@ -815,7 +815,7 @@ class BuildLinuxKernelRunner:
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"build-linux-kernel-{num_threads}threads"
+            result_name = f"{self.benchmark}-{num_threads}threads"
 
             # Check if result exists, try both with dots (standard) and without dots (PTS sanitized)
             result_dir = pts_results_dir / result_name

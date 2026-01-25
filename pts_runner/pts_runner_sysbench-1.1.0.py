@@ -881,7 +881,7 @@ class SysbenchRunner:
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"sysbench-{num_threads}threads"
+            result_name = f"{self.benchmark}-{num_threads}threads"
 
             # PTS removes dots from directory names
             result_dir_name = result_name.replace('.', '')

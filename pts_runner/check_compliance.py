@@ -88,6 +88,7 @@ class ComplianceChecker:
         self.check_test_results_name()
 
         self.check_export_results_method()
+        self.check_export_results_uses_benchmark()
 
         self.check_generate_summary_method()
 
@@ -236,6 +237,26 @@ class ComplianceChecker:
         else:
 
             self.errors.append("❌ CRITICAL: export_results() method not found")
+
+    def check_export_results_uses_benchmark(self):
+
+        """Check if export_results() uses self.benchmark in result naming"""
+
+        match = re.search(
+            r'def\s+export_results\s*\(.*?\):([\s\S]*?)(?:\n\s*def\s+|\Z)',
+            self.content
+        )
+        if not match:
+            return
+
+        body = match.group(1)
+        if 'self.benchmark' in body:
+            self.passed.append("✅ export_results() uses self.benchmark for result naming")
+        else:
+            self.errors.append(
+                "❌ CRITICAL: export_results() does not reference self.benchmark\n"
+                "   Fix: Use result_name = f\"{self.benchmark}-{num_threads}threads\""
+            )
 
    
 

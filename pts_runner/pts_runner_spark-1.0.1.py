@@ -1476,6 +1476,22 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
             shutil.rmtree(self.results_dir)
             print(f"  [OK] Results directory cleaned\n")
 
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log = self.results_dir / "stdout.log"
+        with open(stdout_log, 'a') as stdout_f:
+            stdout_f.write(f"{'='*80}\n")
+            stdout_f.write("[RUNNER STARTUP]\n")
+            stdout_f.write(f"Python: {sys.version.split()[0]}\n")
+            stdout_f.write(f"Python exec override: {self.spark_python_exec or '-'}\n")
+            stdout_f.write(f"PYTHONPATH override: {self.spark_python_dir or '-'}\n")
+            stdout_f.write(f"Machine: {self.machine_name}\n")
+            stdout_f.write(f"OS: {self.os_name}\n")
+            stdout_f.write(f"vCPU: {self.vcpu_count}\n")
+            stdout_f.write(f"Threads: {self.thread_list}\n")
+            stdout_f.write(f"Perf events: {self.perf_events or '-'}\n")
+            stdout_f.write(f"Perf paranoid: {self.perf_paranoid}\n")
+            stdout_f.write(f"{'='*80}\n\n")
+
         self.clean_pts_cache()
         self.install_benchmark()
         self.fix_benchmark_specific_issues()
