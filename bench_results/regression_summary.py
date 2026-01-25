@@ -201,7 +201,15 @@ def merge_jsons(
     input_list = [str(p) for p in inputs]
     if not input_list:
         raise RuntimeError(f"No input JSON files found for merge output: {output}")
-    cmd = [sys.executable, str(make_one_big_json), "--merge", *input_list, "--output", str(output)]
+    cmd = [
+        sys.executable,
+        str(make_one_big_json),
+        "--merge",
+        *input_list,
+        "--output",
+        str(output),
+        "--force",
+    ]
     run_script(cmd, cwd)
 
 
