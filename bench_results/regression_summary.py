@@ -40,20 +40,22 @@
 # 3. Globalでのデータ収集
 # オプション: --merge-global(省略可能)　指定時はこのステップのみ
 # ${PWD}/globalディレクトリで各<machinename>の結果を収集します。
-# ${PWD}/<machinename>/results内のall_results_<machinename>.jsonを収集し、--merge で全体を一つにまとめます。
+# ${PWD}/globalディレクトリが無い場合は作成します。
+# ${PWD}/<machinename>/results内のall_results_<machinename>.jsonを収集し、
+# --merge で全体を${PWD}/global以下に一つにまとめます。
 # $> ../results/make_one_big_json.py \
 #     --merge ../<machinename>/results/all_results_<machinename>.json ... \
-#     --output global_all_results.json
+#     --output ./global/global_all_results.json
 # 
 # 4. Globalでの回帰分析
 # オプション: --analyze(省略可能)　指定時はこのステップのみ
 # ${PWD}/globalディレクトリで、one_big_json_analytics.pyを使って回帰分析を行います。
 # $> ../results/one_big_json_analytics.py \
-#     --input global_all_results.json \
-#     --perf > global_performance_analysis.json
+#     --input ./global/global_all_results.json \
+#     --perf > ./global/global_performance_analysis.json
 # $> ../results/one_big_json_analytics.py \
-#     --input global_all_results.json \
-#     --cost > global_cost_analysis.json
+#     --input ./global/global_all_results.json \
+#     --cost > ./global/global_cost_analysis.json
 #
 #
 from __future__ import annotations
@@ -63,6 +65,7 @@ import json
 import subprocess
 import sys
 import tarfile
+import shutil
 from pathlib import Path
 from typing import Iterable, List
 
@@ -339,11 +342,15 @@ def main() -> int:
                 print(msg, file=sys.stderr)
                 return 1
 
-            input_jsons = sorted(results_path.glob("one_big_json_*.json"))
             output_json = results_path / f"all_results_{csp_dir.name}.json"
+            input_jsons = sorted(results_path.glob("one_big_json_*.json"))
             try:
-                merge_jsons(make_one_big_json, input_jsons, output_json, results_path)
-                print(f"Merged CSP results -> {output_json}")
+                if len(input_jsons) == 1:
+                    shutil.copy2(input_jsons[0], output_json)
+                    print(f"Copied single CSP result -> {output_json}")
+                else:
+                    merge_jsons(make_one_big_json, input_jsons, output_json, results_path)
+                    print(f"Merged CSP results -> {output_json}")
             except Exception as exc:
                 print(f"Failed to merge CSP results in {results_path}: {exc}", file=sys.stderr)
                 if not args.keep_going:
