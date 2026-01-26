@@ -788,30 +788,29 @@ class RedisRunner:
         if returncode == 0:
             print(f"\n[OK] Benchmark completed successfully")
 
-        # Parse perf stats
-        if self.perf_events and perf_stats_file.exists():
-            try:
-                perf_summary = self.parse_perf_stats_and_freq(
-                    perf_stats_file, freq_start_file, freq_end_file, cpu_list
-                )
+            # Parse perf stats if available
+            if self.perf_events and perf_stats_file.exists():
+                try:
+                    perf_summary = self.parse_perf_stats_and_freq(
+                        perf_stats_file, freq_start_file, freq_end_file, cpu_list
+                    )
 
-                # Save perf summary
-                with open(perf_summary_file, 'w') as f:
-                    json.dump(perf_summary, f, indent=2)
-                print(f"  [OK] Perf summary saved to {perf_summary_file}")
-            except Exception as e:
-                print(f"  [ERROR] Failed to parse perf stats: {e}")
+                    # Save perf summary
+                    with open(perf_summary_file, 'w') as f:
+                        json.dump(perf_summary, f, indent=2)
+                    print(f"  [OK] Perf summary saved to {perf_summary_file}")
+                except Exception as e:
+                    print(f"  [ERROR] Failed to parse perf stats: {e}")
 
-        else:
-            print(f"\n[ERROR] Benchmark failed with return code {returncode}")
-            err_file = self.results_dir / f"{num_threads}-thread.err"
-            with open(err_file, 'w') as f:
-                f.write(f"Benchmark failed with return code {returncode}\n")
-                f.write(f"See {log_file} for details.\n")
-            print(f"     Error log: {err_file}")
-            return False
+            return True
 
-        return True
+        print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+        err_file = self.results_dir / f"{num_threads}-thread.err"
+        with open(err_file, 'w') as f:
+            f.write(f"Benchmark failed with return code {returncode}\n")
+            f.write(f"See {log_file} for details.\n")
+        print(f"     Error log: {err_file}")
+        return False
 
     def run(self):
         """Main execution flow."""
