@@ -1163,7 +1163,10 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     version_number = os_version.replace('.', '')
     is_lts = os_version.endswith('.04') and int(os_version.split('.')[0]) % 2 == 0
     lts_suffix = "-lts" if is_lts else ""
-    image_family = f"ubuntu-{version_number}{lts_suffix}-{img_arch}"
+    if img_arch == "amd64":
+        image_family = f"ubuntu-{version_number}{lts_suffix}"
+    else:
+        image_family = f"ubuntu-{version_number}{lts_suffix}-{img_arch}"
 
     if logger:
         logger.info(f"Using image family: {image_family}")
