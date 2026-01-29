@@ -1327,19 +1327,32 @@ def build_json_structure(project_root: Path) -> Dict[str, Any]:
     return result
 
 
+def _merge_missing(dst: Dict[str, Any], src: Dict[str, Any]) -> None:
+    """
+    Merge src into dst without overwriting existing keys.
+    Recurses into nested dicts.
+    """
+    for key, value in src.items():
+        if key not in dst:
+            dst[key] = value
+            continue
+        if isinstance(dst[key], dict) and isinstance(value, dict):
+            _merge_missing(dst[key], value)
+
+
 def merge_json_data(data1: Dict[str, Any], data2: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Merge two JSON structures. Machine data is merged at the top level.
+    Merge two JSON structures without overwriting existing data.
+    Machine data (including OS layers) is merged deeply.
     """
     result = data1.copy()
     for machine_name, machine_data in data2.items():
         if machine_name in result:
-            # Merge OS data
-            for os_name, os_data in machine_data.get("os", {}).items():
-                if os_name not in result[machine_name].get("os", {}):
-                    if "os" not in result[machine_name]:
-                        result[machine_name]["os"] = {}
-                    result[machine_name]["os"][os_name] = os_data
+            if isinstance(result[machine_name], dict) and isinstance(machine_data, dict):
+                _merge_missing(result[machine_name], machine_data)
+            else:
+                # Fallback: keep existing if types mismatch
+                continue
         else:
             result[machine_name] = machine_data
     return result
