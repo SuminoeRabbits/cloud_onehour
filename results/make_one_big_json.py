@@ -560,6 +560,9 @@ def get_test_raw_data(benchmark_dir: Path, thread_num: str, test_name: str, desc
             if test_info.get("title") == test_name and test_info.get("description") == description:
                 # Get the results for this specific benchmark run
                 for run_id, run_data in test_info.get("results", {}).items():
+                    # Skip runs that didn't produce a valid result
+                    if run_data.get("details", {}).get("error"):
+                        continue
                     return {
                         "raw_values": run_data.get("raw_values", []),
                         "test_run_times": run_data.get("test_run_times", []),
@@ -721,6 +724,8 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 
                         # Get the results for this specific benchmark run
                         for run_id, run_data in test_info.get("results", {}).items():
+                            if run_data.get("details", {}).get("error"):
+                                continue
                             raw_values = run_data.get("raw_values", [])
                             test_run_times = run_data.get("test_run_times", [])
                             value = run_data.get("value", 0.0)
@@ -744,7 +749,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
                                 "test_run_times": test_run_times,
                                 "cost": cost
                             }
-                            # Only process first run_id
+                            # Only process first valid run_id
                             break
 
                 except (json.JSONDecodeError, IOError) as e:
