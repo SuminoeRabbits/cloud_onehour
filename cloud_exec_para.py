@@ -1163,10 +1163,32 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     version_number = os_version.replace('.', '')
     is_lts = os_version.endswith('.04') and int(os_version.split('.')[0]) % 2 == 0
     lts_suffix = "-lts" if is_lts else ""
-    if img_arch == "amd64":
-        image_family = f"ubuntu-{version_number}{lts_suffix}"
-    else:
-        image_family = f"ubuntu-{version_number}{lts_suffix}-{img_arch}"
+    # GCP Ubuntu families changed for some releases (e.g., 24.04 requires arch suffix).
+    # Probe candidates and pick the first family that exists.
+    arch_suffix = img_arch
+    family_candidates = [
+        f"ubuntu-{version_number}{lts_suffix}-{arch_suffix}",
+        f"ubuntu-{version_number}{lts_suffix}",
+    ]
+    image_family = None
+    for candidate in family_candidates:
+        exists = run_cmd(
+            f"gcloud compute images describe --project=ubuntu-os-cloud --family={candidate} "
+            f"--format='get(name)'",
+            logger=logger,
+            ignore=True
+        )
+        if exists:
+            image_family = candidate
+            break
+
+    if not image_family:
+        msg = f"No Ubuntu image family found for {os_version} ({img_arch}) in ubuntu-os-cloud"
+        if logger:
+            logger.error(msg)
+        else:
+            print(f"[Error] {msg}")
+        return None, None
 
     if logger:
         logger.info(f"Using image family: {image_family}")
