@@ -23,7 +23,7 @@ fi
 echo "Installing essential build dependencies..."
 sudo apt-get update
 sudo apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev \
-    flex bison texinfo libzstd-dev zlib1g-dev wget ninja-build
+    flex bison texinfo libzstd-dev zlib1g-dev wget ninja-build aria2
 
 # Check if GCC-14 is already installed
 gcc14_installed=false
@@ -68,7 +68,12 @@ if [[ "$gcc14_installed" = false ]]; then
         echo "Downloading GCC ${GCC_VERSION} source code..."
         cd /tmp
         if [[ ! -f "gcc-${GCC_VERSION}.tar.gz" ]]; then
-            wget https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz
+            GCC_URL="https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.gz"
+            if command -v aria2c >/dev/null 2>&1; then
+                aria2c -x 8 -s 8 -o "gcc-${GCC_VERSION}.tar.gz" "${GCC_URL}"
+            else
+                wget "${GCC_URL}"
+            fi
         fi
         
         # Extract source
