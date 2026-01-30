@@ -1303,6 +1303,9 @@ class X265Runner:
 
             # Export to CSV
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
+            if csv_output.exists():
+                print(f"  [SKIP] CSV already exists: {csv_output}")
+            else:
             result = subprocess.run(
                 ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
                 capture_output=True,
@@ -1313,9 +1316,15 @@ class X265Runner:
                 if home_csv.exists():
                     shutil.move(str(home_csv), str(csv_output))
                     print(f"  [OK] Saved: {csv_output}")
+                elif result.stdout.strip():
+                    csv_output.write_text(result.stdout, encoding="utf-8")
+                    print(f"  [OK] Saved stdout to: {csv_output}")
 
             # Export to JSON
             json_output = self.results_dir / f"{num_threads}-thread.json"
+            if json_output.exists():
+                print(f"  [SKIP] JSON already exists: {json_output}")
+            else:
             result = subprocess.run(
                 ['phoronix-test-suite', 'result-file-to-json', target_result_name],
                 capture_output=True,
@@ -1326,6 +1335,9 @@ class X265Runner:
                 if home_json.exists():
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")
+                elif result.stdout.strip():
+                    json_output.write_text(result.stdout, encoding="utf-8")
+                    print(f"  [OK] Saved stdout to: {json_output}")
 
         print(f"\n[OK] Export completed")
 
