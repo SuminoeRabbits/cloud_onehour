@@ -1306,38 +1306,38 @@ class X265Runner:
             if csv_output.exists():
                 print(f"  [SKIP] CSV already exists: {csv_output}")
             else:
-            result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                home_csv = Path.home() / f"{target_result_name}.csv"
-                if home_csv.exists():
-                    shutil.move(str(home_csv), str(csv_output))
-                    print(f"  [OK] Saved: {csv_output}")
-                elif result.stdout.strip():
-                    csv_output.write_text(result.stdout, encoding="utf-8")
-                    print(f"  [OK] Saved stdout to: {csv_output}")
+                result = subprocess.run(
+                    ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    home_csv = Path.home() / f"{target_result_name}.csv"
+                    if home_csv.exists():
+                        shutil.move(str(home_csv), str(csv_output))
+                        print(f"  [OK] Saved: {csv_output}")
+                    elif result.stdout.strip():
+                        csv_output.write_text(result.stdout, encoding="utf-8")
+                        print(f"  [OK] Saved stdout to: {csv_output}")
 
             # Export to JSON
             json_output = self.results_dir / f"{num_threads}-thread.json"
             if json_output.exists():
                 print(f"  [SKIP] JSON already exists: {json_output}")
             else:
-            result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', target_result_name],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                home_json = Path.home() / f"{target_result_name}.json"
-                if home_json.exists():
-                    shutil.move(str(home_json), str(json_output))
-                    print(f"  [OK] Saved: {json_output}")
-                elif result.stdout.strip():
-                    json_output.write_text(result.stdout, encoding="utf-8")
-                    print(f"  [OK] Saved stdout to: {json_output}")
+                result = subprocess.run(
+                    ['phoronix-test-suite', 'result-file-to-json', target_result_name],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    home_json = Path.home() / f"{target_result_name}.json"
+                    if home_json.exists():
+                        shutil.move(str(home_json), str(json_output))
+                        print(f"  [OK] Saved: {json_output}")
+                    elif result.stdout.strip():
+                        json_output.write_text(result.stdout, encoding="utf-8")
+                        print(f"  [OK] Saved stdout to: {json_output}")
 
         print(f"\n[OK] Export completed")
 
