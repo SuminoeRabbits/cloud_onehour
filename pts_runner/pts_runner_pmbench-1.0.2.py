@@ -763,6 +763,9 @@ eval "$REAL_CC" $ARGS
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
+        # Sanitize cached tarball on ARM64 to avoid x86_64 object files
+        self.sanitize_pmbench_tarball()
+
 
         print(f"\n>>> Installing {self.benchmark_full}...")
         self.patch_install_script()
@@ -1109,6 +1112,54 @@ eval "$REAL_CC" $ARGS
             return False
 
         return True
+
+    def sanitize_pmbench_tarball(self):
+        """Remove prebuilt object files from cached pmbench tarball on ARM64."""
+        arch = os.uname().machine
+        if not (self.force_arm64 or arch in {"aarch64", "arm64"}):
+            return
+
+        cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+        if not cache_dir.exists():
+            return
+
+        candidates = sorted(cache_dir.glob("jisooy-pmbench-*.tar.xz"), key=lambda p: p.stat().st_mtime)
+        if not candidates:
+            return
+
+        tar_path = candidates[-1]
+        backup_path = tar_path.with_suffix(tar_path.suffix + ".orig")
+        if not backup_path.exists():
+            shutil.copy2(tar_path, backup_path)
+
+        print(f"\n>>> Sanitizing cached tarball: {tar_path}")
+        tmp_dir = Path("/tmp") / f"pmbench_sanitize_{os.getpid()}"
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with tarfile.open(tar_path, "r:xz") as tf:
+                tf.extractall(tmp_dir)
+
+            removed = 0
+            for pattern in ("*.o", "*.a", "*.obj"):
+                for obj in tmp_dir.rglob(pattern):
+                    try:
+                        obj.unlink()
+                        removed += 1
+                    except Exception:
+                        pass
+
+            with tarfile.open(tar_path, "w:xz") as tf:
+                for path in tmp_dir.rglob("*"):
+                    tf.add(path, arcname=path.relative_to(tmp_dir))
+
+            print(f"  [OK] Sanitized tarball (removed {removed} object files)")
+        except Exception as e:
+            print(f"  [WARN] Failed to sanitize tarball: {e}")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def run(self):
         """Main execution flow."""
