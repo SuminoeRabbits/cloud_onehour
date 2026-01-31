@@ -593,6 +593,18 @@ class CpuminerOptRunner:
             f'TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
         )
 
+        # Prevent interactive prompts by removing prior results
+        result_tag = f"{self.benchmark}-{num_threads}threads"
+        try:
+            subprocess.run(
+                ['phoronix-test-suite', 'remove-result', result_tag],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False
+            )
+        except Exception:
+            pass
+
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
             pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
