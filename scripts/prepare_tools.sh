@@ -91,5 +91,14 @@ install_python_with_ppa_if_needed
 # setup rust
 ./setup_rust.sh
 
+# Verify libxml2-dev is installed (for pmbench xmlgen build)
+if ! dpkg -s libxml2-dev >/dev/null 2>&1; then
+    echo "[WARN] libxml2-dev not installed. Installing..."
+    sudo apt-get update -y
+    sudo apt-get install -y libxml2-dev
+else
+    echo "[OK] libxml2-dev is installed"
+fi
+
 # Re-enable unattended upgrades
 enable_unattended_upgrades
