@@ -109,6 +109,7 @@ class CloudProvider(ABC):
     def check_instance_exists(
         self,
         instance_name: str,
+        inst: Optional[Dict[str, Any]] = None,
         logger: Optional['InstanceLogger'] = None
     ) -> bool:
         """
@@ -116,6 +117,7 @@ class CloudProvider(ABC):
 
         Args:
             instance_name: Name to check
+            inst: Instance definition (optional; some CSPs may use it)
             logger: Logger for status messages
 
         Returns:
@@ -293,6 +295,7 @@ def wrap_apt_command_with_retries(cmd: str) -> str:
 def check_instance_name_conflict(
     provider: CloudProvider,
     instance_name: str,
+    inst: Optional[Dict[str, Any]] = None,
     logger: Optional['InstanceLogger'] = None
 ) -> bool:
     """
@@ -307,7 +310,7 @@ def check_instance_name_conflict(
         True if name conflict exists (cannot launch), False if safe to proceed
     """
     try:
-        exists = provider.check_instance_exists(instance_name, logger)
+        exists = provider.check_instance_exists(instance_name, inst, logger)
 
         if exists:
             msg = (f"Instance name '{instance_name}' is already in use. "
@@ -536,8 +539,10 @@ def cleanup_active_instances(signum=None, frame=None):
                     print(f"[CLEANUP] GCP instance {instance_name} termination initiated")
 
                 elif cloud == 'oci':
+                    region = inst_info.get('region')
+                    cmd_prefix = f"OCI_REGION={region} " if region else ""
                     subprocess.run(
-                        f"oci compute instance terminate --instance-id {instance_id} --force",
+                        f"{cmd_prefix}oci compute instance terminate --instance-id {instance_id} --force",
                         shell=True,
                         timeout=300,  # OCI takes longer
                         capture_output=True
@@ -557,7 +562,9 @@ def cleanup_active_instances(signum=None, frame=None):
                 elif cloud == 'gcp':
                     print(f"[CLEANUP] Manual cleanup: gcloud compute instances delete {instance_name} --project={inst_info.get('project')} --zone={inst_info.get('zone')}")
                 elif cloud == 'oci':
-                    print(f"[CLEANUP] Manual cleanup: oci compute instance terminate --instance-id {instance_id} --force")
+                    region = inst_info.get('region')
+                    prefix = f"OCI_REGION={region} " if region else ""
+                    print(f"[CLEANUP] Manual cleanup: {prefix}oci compute instance terminate --instance-id {instance_id} --force")
                 # Continue to next instance
 
         # Clear list after all termination attempts
@@ -568,7 +575,15 @@ def cleanup_active_instances(signum=None, frame=None):
         sys.exit(1)
 
 
-def get_manual_cleanup_command(cloud: str, instance_id: str, name: str, shared_resources: Dict[str, Any]) -> str:
+def get_manual_cleanup_command(
+    cloud: str,
+    instance_id: str,
+    name: str,
+    shared_resources: Dict[str, Any],
+    region: Optional[str] = None,
+    project: Optional[str] = None,
+    zone: Optional[str] = None
+) -> str:
     """
     Generate manual cleanup command for failed termination.
 
@@ -582,14 +597,15 @@ def get_manual_cleanup_command(cloud: str, instance_id: str, name: str, shared_r
         CLI command string for manual cleanup
     """
     if cloud == 'aws':
-        region = shared_resources.get('region', 'ap-northeast-1')
+        region = region or shared_resources.get('region', 'ap-northeast-1')
         return f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}"
     elif cloud == 'gcp':
-        project = shared_resources.get('project')
-        zone = shared_resources.get('zone')
+        project = project or shared_resources.get('project')
+        zone = zone or shared_resources.get('zone')
         return f"gcloud compute instances delete {name} --project={project} --zone={zone}"
     elif cloud == 'oci':
-        return f"oci compute instance terminate --instance-id {instance_id} --force"
+        prefix = f"OCI_REGION={region} " if region else ""
+        return f"{prefix}oci compute instance terminate --instance-id {instance_id} --force"
     else:
         return f"Unknown cloud type: {cloud}"
 
@@ -1166,15 +1182,30 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     # GCP Ubuntu families changed for some releases (e.g., 24.04 requires arch suffix).
     # Probe candidates and pick the first family that exists.
     arch_suffix = img_arch
-    family_candidates = [
-        f"ubuntu-{version_number}{lts_suffix}-{arch_suffix}",
-        f"ubuntu-{version_number}{lts_suffix}",
+    # Try several known family naming variants across releases.
+    # Examples:
+    # 24.04: ubuntu-2404-lts-amd64 / ubuntu-2404-lts-arm64
+    # 22.04: ubuntu-2204-lts (amd64), ubuntu-2204-lts-arm64
+    base = f"ubuntu-{version_number}"
+    candidates = [
+        f"{base}{lts_suffix}-{arch_suffix}",
+        f"{base}{lts_suffix}",
+        f"{base}-{arch_suffix}",
+        f"{base}",
     ]
+    # De-duplicate while preserving order
+    seen = set()
+    family_candidates = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            family_candidates.append(c)
     image_family = None
     for candidate in family_candidates:
+        # Use list+filter for better compatibility with gcloud versions
         exists = run_cmd(
-            f"gcloud compute images describe --project=ubuntu-os-cloud --family={candidate} "
-            f"--format='get(name)'",
+            f"gcloud compute images list --project=ubuntu-os-cloud "
+            f"--filter=\"family={candidate}\" --limit=1 --format='get(name)'",
             logger=logger,
             ignore=True
         )
@@ -1412,8 +1443,9 @@ def get_instance_status(cloud, instance_id, region=None, project=None, zone=None
 
         elif cloud == 'oci':
             # OCI status: PROVISIONING, STAGING, RUNNING, STOPPING, STOPPED, TERMINATING, TERMINATED
+            cmd_prefix = f"OCI_REGION={region} " if region else ""
             status = run_cmd(
-                f"oci compute instance get --instance-id {instance_id} --query 'data.\"lifecycle-state\"' --raw-output",
+                f"{cmd_prefix}oci compute instance get --instance-id {instance_id} --query 'data.\"lifecycle-state\"' --raw-output",
                 capture=True, ignore=True, logger=logger
             )
             return status.strip() if status else "TERMINATED"
@@ -2222,6 +2254,10 @@ class AWSProvider(CloudProvider):
         region = self.csp_config['region']
         sg_name = self.config['common']['security_group_name']
 
+        # Per-region shared resources (for multi-region support)
+        self._region_resources = {}
+        self._region_lock = threading.Lock()
+
         # Setup Security Group
         sg_id = setup_aws_sg(region, sg_name, logger)
 
@@ -2231,21 +2267,53 @@ class AWSProvider(CloudProvider):
             logger=logger
         )
 
+        self._region_resources[region] = {
+            'sg_id': sg_id,
+            'key_name': key_name
+        }
+
         self.shared_resources = {
             'sg_id': sg_id,
             'key_name': key_name,
-            'region': region
+            'region': region,
+            'sg_name': sg_name
         }
 
         return self.shared_resources
+
+    def _get_region_for_instance(self, inst: Dict[str, Any]) -> str:
+        """Resolve region for an instance (instance override > CSP default)."""
+        return inst.get('region') or self.shared_resources.get('region') or self.csp_config.get('region')
+
+    def _get_region_resources(self, region: str, logger=None) -> Dict[str, Any]:
+        """Get or initialize region-specific AWS resources."""
+        resources = self._region_resources.get(region)
+        if resources:
+            return resources
+
+        with self._region_lock:
+            resources = self._region_resources.get(region)
+            if resources:
+                return resources
+
+            sg_name = self.shared_resources.get('sg_name') or self.config['common']['security_group_name']
+            sg_id = setup_aws_sg(region, sg_name, logger)
+            key_name = run_cmd(
+                f"aws ec2 describe-key-pairs --region {region} --query 'KeyPairs[0].KeyName' --output text",
+                logger=logger
+            )
+            resources = {'sg_id': sg_id, 'key_name': key_name}
+            self._region_resources[region] = resources
+
+        return resources
 
     def validate_instance_name(self, name: str) -> None:
         """AWS has no name constraints (uses tags)."""
         pass  # No validation needed
 
-    def check_instance_exists(self, instance_name: str, logger=None) -> bool:
+    def check_instance_exists(self, instance_name: str, inst: Optional[Dict[str, Any]] = None, logger=None) -> bool:
         """Check if AWS instance with Name tag exists."""
-        region = self.shared_resources['region']
+        region = self._get_region_for_instance(inst or {})
 
         result = run_cmd(
             f"aws ec2 describe-instances --region {region} "
@@ -2297,18 +2365,20 @@ class AWSProvider(CloudProvider):
 
     def launch_instance(self, inst: Dict[str, Any], logger=None) -> Tuple[Optional[str], Optional[str]]:
         """Launch AWS instance."""
+        region = self._get_region_for_instance(inst)
+        resources = self._get_region_resources(region, logger)
         return launch_aws_instance(
             inst,
             self.config,
-            self.shared_resources['region'],
-            self.shared_resources['key_name'],
-            self.shared_resources['sg_id'],
+            region,
+            resources['key_name'],
+            resources['sg_id'],
             logger
         )
 
     def terminate_instance(self, instance_id: str, inst: Dict[str, Any], logger=None) -> bool:
         """Terminate AWS instance."""
-        region = self.shared_resources['region']
+        region = self._get_region_for_instance(inst)
         try:
             run_cmd(
                 f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}",
@@ -2323,7 +2393,7 @@ class AWSProvider(CloudProvider):
 
     def get_instance_status(self, instance_id: str, inst: Dict[str, Any], logger=None) -> str:
         """Get AWS instance status."""
-        region = self.shared_resources['region']
+        region = self._get_region_for_instance(inst)
         try:
             status = run_cmd(
                 f"aws ec2 describe-instances --region {region} --instance-ids {instance_id} "
@@ -2347,10 +2417,20 @@ class GCPProvider(CloudProvider):
 
         self.shared_resources = {
             'project': project,
+            # Default zone (can be overridden per instance)
             'zone': zone
         }
 
         return self.shared_resources
+
+    def _get_zone_for_instance(self, inst: Dict[str, Any]) -> str:
+        """Resolve zone for an instance (instance override > CSP default > fallback)."""
+        return (
+            inst.get('zone')
+            or self.shared_resources.get('zone')
+            or self.csp_config.get('zone')
+            or 'us-central1-a'
+        )
 
     def validate_instance_name(self, name: str) -> None:
         """Validate GCP instance name (1-63 chars, lowercase, starts with letter)."""
@@ -2359,10 +2439,10 @@ class GCPProvider(CloudProvider):
         if not re.match(r'^[a-z]([a-z0-9-]*[a-z0-9])?$', name):
             raise ValueError(f"Invalid GCP name format: {name}")
 
-    def check_instance_exists(self, instance_name: str, logger=None) -> bool:
+    def check_instance_exists(self, instance_name: str, inst: Optional[Dict[str, Any]] = None, logger=None) -> bool:
         """Check if GCP instance exists."""
         project = self.shared_resources['project']
-        zone = self.shared_resources['zone']
+        zone = self._get_zone_for_instance(inst or {})
 
         result = run_cmd(
             f"gcloud compute instances describe {instance_name} "
@@ -2416,14 +2496,14 @@ class GCPProvider(CloudProvider):
             inst,
             self.config,
             self.shared_resources['project'],
-            self.shared_resources['zone'],
+            self._get_zone_for_instance(inst),
             logger
         )
 
     def terminate_instance(self, instance_id: str, inst: Dict[str, Any], logger=None) -> bool:
         """Terminate GCP instance."""
         project = self.shared_resources['project']
-        zone = self.shared_resources['zone']
+        zone = self._get_zone_for_instance(inst)
         # Note: GCP uses instance name, not ID
         name = inst.get('name', instance_id)
         try:
@@ -2441,7 +2521,7 @@ class GCPProvider(CloudProvider):
     def get_instance_status(self, instance_id: str, inst: Dict[str, Any], logger=None) -> str:
         """Get GCP instance status."""
         project = self.shared_resources['project']
-        zone = self.shared_resources['zone']
+        zone = self._get_zone_for_instance(inst)
         name = inst.get('name', instance_id)
         try:
             status = run_cmd(
@@ -2556,6 +2636,34 @@ class OCIProvider(CloudProvider):
 
         return self.shared_resources
 
+    def _get_region_for_instance(self, inst: Dict[str, Any]) -> str:
+        """Resolve OCI region (instance override > CSP default > env > fallback)."""
+        import os
+        return (
+            inst.get('region')
+            or self.shared_resources.get('region')
+            or self.csp_config.get('region')
+            or os.getenv('OCI_REGION')
+            or 'us-ashburn-1'
+        )
+
+    def _get_compartment_id_for_instance(self, inst: Dict[str, Any]) -> str:
+        """Resolve compartment OCID (instance override > shared)."""
+        return inst.get('compartment_id') or self.shared_resources.get('compartment_id')
+
+    def _get_subnet_id_for_instance(self, inst: Dict[str, Any]) -> Optional[str]:
+        """Resolve subnet OCID (instance override > shared)."""
+        return inst.get('subnet_id') or self.shared_resources.get('subnet_id')
+
+    def _get_availability_domain_for_instance(self, inst: Dict[str, Any]) -> Optional[str]:
+        """Resolve availability domain (instance override > shared)."""
+        return inst.get('availability_domain') or self.shared_resources.get('availability_domain')
+
+    def _oci_cmd_prefix(self, inst: Dict[str, Any]) -> str:
+        """Prefix to force OCI region per command."""
+        region = self._get_region_for_instance(inst)
+        return f"OCI_REGION={region} " if region else ""
+
     def validate_instance_name(self, name: str) -> None:
         """Validate OCI instance name (1-255 chars)."""
         if len(name) > 255:
@@ -2563,12 +2671,14 @@ class OCIProvider(CloudProvider):
         if not re.match(r'^[a-zA-Z0-9._-]+$', name):
             raise ValueError(f"Invalid OCI name format: {name}")
 
-    def check_instance_exists(self, instance_name: str, logger=None) -> bool:
+    def check_instance_exists(self, instance_name: str, inst: Optional[Dict[str, Any]] = None, logger=None) -> bool:
         """Check if OCI instance exists."""
-        compartment_id = self.shared_resources['compartment_id']
+        inst = inst or {}
+        compartment_id = self._get_compartment_id_for_instance(inst)
+        cmd_prefix = self._oci_cmd_prefix(inst)
 
         result = run_cmd(
-            f"oci compute instance list "
+            f"{cmd_prefix}oci compute instance list "
             f"--compartment-id {compartment_id} "
             f"--display-name '{instance_name}' "
             f"--lifecycle-state RUNNING "
@@ -2618,15 +2728,15 @@ class OCIProvider(CloudProvider):
 
     def launch_instance(self, inst: Dict[str, Any], logger=None) -> Tuple[Optional[str], Optional[str]]:
         """Launch OCI instance and return (instance_id, ip)."""
-        compartment_id = self.shared_resources['compartment_id']
-        region = self.shared_resources['region']
+        compartment_id = self._get_compartment_id_for_instance(inst)
+        cmd_prefix = self._oci_cmd_prefix(inst)
         name = inst['name']
 
         if logger:
             logger.info(f"Launching OCI instance: {name} ({inst['type']})")
 
         # 1. Find Subnet ID (from config or auto-detect public subnet)
-        subnet_id = self.shared_resources.get('subnet_id')
+        subnet_id = self._get_subnet_id_for_instance(inst)
 
         if not subnet_id:
             if logger:
@@ -2634,13 +2744,13 @@ class OCIProvider(CloudProvider):
 
             # Find VCNs first
             vcns_json = run_cmd(
-                f"oci network vcn list --compartment-id {compartment_id} --query 'data[0].id' --raw-output",
+                f"{cmd_prefix}oci network vcn list --compartment-id {compartment_id} --query 'data[0].id' --raw-output",
                 logger=logger
             )
             if vcns_json and vcns_json != "None":
                 # List subnets in the VCN (we want a public subnet)
                 subnet_cmd = (
-                    f"oci network subnet list --compartment-id {compartment_id} --vcn-id {vcns_json} "
+                    f"{cmd_prefix}oci network subnet list --compartment-id {compartment_id} --vcn-id {vcns_json} "
                     f"--query 'data[?\"prohibit-public-ip-on-vnic\"==`false`] | [0].id' --raw-output"
                 )
                 subnet_id = run_cmd(subnet_cmd, logger=logger)
@@ -2655,10 +2765,12 @@ class OCIProvider(CloudProvider):
             logger.info(f"Using Subnet ID: {subnet_id}")
 
         # 2. Find Availability Domain (pick first one)
-        ad = run_cmd(
-            f"oci iam availability-domain list --compartment-id {compartment_id} --query 'data[0].name' --raw-output",
-            logger=logger
-        )
+        ad = self._get_availability_domain_for_instance(inst)
+        if not ad:
+            ad = run_cmd(
+                f"{cmd_prefix}oci iam availability-domain list --compartment-id {compartment_id} --query 'data[0].name' --raw-output",
+                logger=logger
+            )
         if not ad:
             if logger:
                 logger.error("Failed to get Availability Domain")
@@ -2678,7 +2790,7 @@ class OCIProvider(CloudProvider):
                 logger.info(f"Searching for {op_sys} {os_ver_major} image (normalized from {os_version})...")
 
         image_query = (
-            f"oci compute image list --compartment-id {compartment_id} "
+            f"{cmd_prefix}oci compute image list --compartment-id {compartment_id} "
             f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
             f"--shape {inst['type']} --sort-by TIMECREATED --sort-order DESC "
             f"--query 'data[0].id' --raw-output"
@@ -2689,7 +2801,7 @@ class OCIProvider(CloudProvider):
         if not image_id or image_id == "None":
             # Fallback: try searching without shape filter
             image_query_fallback = (
-                f"oci compute image list --compartment-id {compartment_id} "
+                f"{cmd_prefix}oci compute image list --compartment-id {compartment_id} "
                 f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
                 f"--sort-by TIMECREATED --sort-order DESC "
                 f"--query 'data[0].id' --raw-output"
@@ -2734,7 +2846,7 @@ class OCIProvider(CloudProvider):
             logger.info("Launching OCI instance...")
 
         launch_cmd = (
-            f"oci compute instance launch "
+            f"{cmd_prefix}oci compute instance launch "
             f"--compartment-id {compartment_id} "
             f"--availability-domain \"{ad}\" "
             f"--shape \"{inst['type']}\" "
@@ -2763,14 +2875,14 @@ class OCIProvider(CloudProvider):
 
         # Get Primary VNIC attachment
         vnic_att_query = (
-            f"oci compute vnic-attachment list --compartment-id {compartment_id} --instance-id {instance_id} "
+            f"{cmd_prefix}oci compute vnic-attachment list --compartment-id {compartment_id} --instance-id {instance_id} "
             f"--query 'data[0].\"vnic-id\"' --raw-output"
         )
         vnic_id = run_cmd(vnic_att_query, logger=logger)
 
         if vnic_id and vnic_id != "None":
             ip_query = (
-                f"oci network vnic get --vnic-id {vnic_id} "
+                f"{cmd_prefix}oci network vnic get --vnic-id {vnic_id} "
                 f"--query 'data.\"public-ip\"' --raw-output"
             )
             ip = run_cmd(ip_query, logger=logger)
@@ -2784,9 +2896,10 @@ class OCIProvider(CloudProvider):
 
     def terminate_instance(self, instance_id: str, inst: Dict[str, Any], logger=None) -> bool:
         """Terminate OCI instance."""
+        cmd_prefix = self._oci_cmd_prefix(inst)
         try:
             run_cmd(
-                f"oci compute instance terminate --instance-id {instance_id} --force",
+                f"{cmd_prefix}oci compute instance terminate --instance-id {instance_id} --force",
                 timeout=600,
                 logger=logger
             )
@@ -2798,9 +2911,10 @@ class OCIProvider(CloudProvider):
 
     def get_instance_status(self, instance_id: str, inst: Dict[str, Any], logger=None) -> str:
         """Get OCI instance status."""
+        cmd_prefix = self._oci_cmd_prefix(inst)
         try:
             status = run_cmd(
-                f"oci compute instance get --instance-id {instance_id} "
+                f"{cmd_prefix}oci compute instance get --instance-id {instance_id} "
                 f"--query 'data.\"lifecycle-state\"' --raw-output",
                 capture=True,
                 ignore=True,
@@ -2843,7 +2957,10 @@ def cleanup_instance_safely(provider: CloudProvider, instance_id: str, inst: Dic
             provider.csp_config.get('name', 'unknown'),
             instance_id,
             inst['name'],
-            provider.shared_resources
+            provider.shared_resources,
+            region=inst.get('region'),
+            project=provider.shared_resources.get('project'),
+            zone=inst.get('zone')
         )
         logger.error(f"MANUAL CLEANUP REQUIRED:")
         logger.error(f"  {manual_cmd}")
@@ -2890,7 +3007,7 @@ def process_instance(
     logger = InstanceLogger(instance_name, DASHBOARD, log_dir)
 
     # Check for name conflicts
-    if check_instance_name_conflict(provider, sanitized_name, logger):
+    if check_instance_name_conflict(provider, sanitized_name, inst, logger):
         logger.error(f"Instance name conflict detected. Skipping {sanitized_name}")
         DASHBOARD.update(instance_name, status="ERROR", step="Name conflict", color=DASHBOARD.FAIL)
         return
@@ -2901,6 +3018,14 @@ def process_instance(
     DASHBOARD.register(instance_name, csp_name, inst['type'], cpu_cost, storage_cost)
 
     logger.info(f"Processing instance: {sanitized_name}")
+
+    # Resolve per-instance location overrides (used by status checks and cleanup)
+    if isinstance(provider, AWSProvider):
+        inst['region'] = provider._get_region_for_instance(inst)
+    elif isinstance(provider, GCPProvider):
+        inst['zone'] = provider._get_zone_for_instance(inst)
+    elif isinstance(provider, OCIProvider):
+        inst['region'] = provider._get_region_for_instance(inst)
 
     instance_id = None
     ip = None
@@ -2927,9 +3052,9 @@ def process_instance(
             cloud=provider.csp_config.get('name', 'unknown'),
             instance_id=instance_id,
             name=sanitized_name,
-            region=provider.shared_resources.get('region'),
+            region=inst.get('region') or provider.shared_resources.get('region'),
             project=provider.shared_resources.get('project'),
-            zone=provider.shared_resources.get('zone')
+            zone=inst.get('zone') or provider.shared_resources.get('zone')
         )
 
         progress(instance_name, f"Instance launched (IP: {ip})", logger)
