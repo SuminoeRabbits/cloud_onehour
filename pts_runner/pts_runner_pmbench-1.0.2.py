@@ -594,6 +594,7 @@ class PmbenchRunner:
                         'export LIBS="$XML2_LIBS $LIBS_EXTRA"',
                         'export LDLIBS="$XML2_LIBS $LIBS_EXTRA"',
                         'export LDFLAGS="${LDFLAGS} $XML2_LIBS $LIBS_EXTRA"',
+                        'export CPPFLAGS="${CPPFLAGS} -I/usr/include/libxml2"',
                         'echo "[DEBUG] CPPFLAGS=${CPPFLAGS}"',
                         'echo "[DEBUG] CFLAGS=${CFLAGS}"',
                         'if command -v gcc >/dev/null 2>&1; then',
