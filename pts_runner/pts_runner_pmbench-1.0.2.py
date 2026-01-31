@@ -542,13 +542,44 @@ class PmbenchRunner:
 
         try:
             content = install_sh.read_text()
-            if "-m64" not in content:
-                return True
 
-            # Remove all occurrences of -m64 and normalize whitespace
-            patched = content.replace("-m64", "")
-            patched = re.sub(r"[ \t]+", " ", patched)
-            install_sh.write_text(patched)
+            # Inject a pre-build scrub to remove -m64 in extracted sources
+            patch_marker = "# ARM64 workaround: strip -m64 from build scripts"
+            if patch_marker not in content:
+                lines = content.splitlines()
+                if lines and lines[0].startswith("#!"):
+                    shebang = lines[0]
+                    rest = "\n".join(lines[1:])
+                    patch_block = (
+                        f"{patch_marker}\n"
+                        "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\n"
+                        "  if command -v find >/dev/null 2>&1; then\n"
+                        "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" "
+                        "-o -name \"configure\" -o -name \"*.sh\" \\) -print0 2>/dev/null | \\\n"
+                        "      xargs -0 sed -i 's/-m64//g' 2>/dev/null || true\n"
+                        "  fi\n"
+                        "fi\n"
+                    )
+                    content = "\n".join([shebang, patch_block, rest])
+                else:
+                    patch_block = (
+                        f"{patch_marker}\n"
+                        "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\n"
+                        "  if command -v find >/dev/null 2>&1; then\n"
+                        "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" "
+                        "-o -name \"configure\" -o -name \"*.sh\" \\) -print0 2>/dev/null | \\\n"
+                        "      xargs -0 sed -i 's/-m64//g' 2>/dev/null || true\n"
+                        "  fi\n"
+                        "fi\n"
+                    )
+                    content = f"{patch_block}\n{content}"
+
+            # Remove all occurrences of -m64 in install.sh itself
+            if "-m64" in content:
+                content = content.replace("-m64", "")
+                content = re.sub(r"[ \t]+", " ", content)
+
+            install_sh.write_text(content)
             print("  [OK] Patched install.sh: removed -m64 for ARM64")
             return True
         except Exception as e:
