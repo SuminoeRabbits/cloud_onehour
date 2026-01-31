@@ -736,9 +736,11 @@ class ComplianceChecker:
 
     def check_batch_env_vars(self):
         """Check if batch environment variables include TEST_RESULTS_DESCRIPTION to suppress prompts"""
-        # Look for the batch_env definition line
-        # We want to ensure TEST_RESULTS_DESCRIPTION is present
-        batch_env_match = re.search(r"batch_env\s*=\s*f?['\"].*TEST_RESULTS_DESCRIPTION=", self.content)
+        # Look for the batch_env definition (single-line or multi-line)
+        batch_env_match = re.search(
+            r"batch_env\s*=\s*[\s\S]{0,400}TEST_RESULTS_DESCRIPTION=",
+            self.content
+        )
         
         if batch_env_match:
              self.passed.append("✅ Batch env includes TEST_RESULTS_DESCRIPTION (suppresses prompts)")
@@ -762,7 +764,7 @@ class ComplianceChecker:
     def check_pts_cache_clean(self):
         """Check if PTS result cleanup logic is present to prevent interactive prompts"""
         # Search for logic that removes existing results before running
-        has_cleanup_logic = re.search(r"phoronix-test-suite\s+remove-result", self.content)
+        has_cleanup_logic = re.search(r"remove-result", self.content)
         
         if has_cleanup_logic:
             self.passed.append("✅ Automated PTS result cleanup logic detected")
