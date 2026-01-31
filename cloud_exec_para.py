@@ -1826,18 +1826,18 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             print(f"  [Debug] Checking workload output log: {workload_log_path}...")
                             
                         workload_log = run_cmd(
-                            f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {workload_log_path} 2>/dev/null || echo \"No workload log found\"'",
+                            f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {workload_log_path} 2>/dev/null || echo \"No workload log found\"'",
                             capture=True, timeout=30, ignore=True, logger=logger
                         )
                         
                         if logger:
                             if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
-                                logger.info(f"Last 50 lines from {workload_log_path}:")
+                                logger.info(f"Last 100 lines from {workload_log_path}:")
                                 for line in workload_log.strip().split('\n'):
                                     logger.info(f"  {line}")
                         else:
                             if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
-                                print(f"  [Workload Log] Last 50 lines from {workload_log_path}:")
+                                print(f"  [Workload Log] Last 100 lines from {workload_log_path}:")
                                 print("  " + "="*78)
                                 for line in workload_log.strip().split('\n'):
                                     print(f"  {line}")
@@ -1876,23 +1876,23 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             print(f"  [DIAG] Process tree (top 100 processes):\n{ps_output}")
 
                         # Get last 50 lines of log
-                        log_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {remote_log_path} 2>/dev/null || echo \"[No log available]\"'",
+                        log_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {remote_log_path} 2>/dev/null || echo \"[No log available]\"'",
                                           capture=True, ignore=True, timeout=30, logger=logger)
                         if logger and log_tail:
-                            logger.warn(f"Last 50 lines of wrapper log ({remote_log_path}):\n{log_tail}")
+                            logger.warn(f"Last 100 lines of wrapper log ({remote_log_path}):\n{log_tail}")
                         elif log_tail:
-                            print(f"  [DIAG] Last 50 lines of wrapper log:\n{log_tail}")
+                            print(f"  [DIAG] Last 100 lines of wrapper log:\n{log_tail}")
 
                         # Get last 50 lines of workload log if available
                         workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', cmd)
                         if workload_log_match:
                             workload_log_path = workload_log_match.group(1)
-                            wl_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -50 {workload_log_path} 2>/dev/null || echo \"[No workload log]\"'",
+                            wl_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {workload_log_path} 2>/dev/null || echo \"[No workload log]\"'",
                                              capture=True, ignore=True, timeout=30, logger=logger)
                             if logger and wl_tail:
-                                logger.warn(f"Last 50 lines of workload log ({workload_log_path}):\n{wl_tail}")
+                                logger.warn(f"Last 100 lines of workload log ({workload_log_path}):\n{wl_tail}")
                             elif wl_tail:
-                                print(f"  [DIAG] Last 50 lines of workload log:\n{wl_tail}")
+                                print(f"  [DIAG] Last 100 lines of workload log:\n{wl_tail}")
 
                         # Get memory/disk info
                         mem_info = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'free -h'",
