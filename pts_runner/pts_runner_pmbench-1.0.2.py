@@ -543,13 +543,10 @@ class PmbenchRunner:
             return False
 
         try:
-            patch_marker = "# ARM64 workaround: strip -m64 from build scripts"
+            patch_marker = "# ARM64 workaround: force rebuild to avoid stale x86 objects"
 
             def _has_make_line(text):
                 return re.search(r'^\s*(?:g?make)\b', text, flags=re.MULTILINE) is not None
-
-            def _is_pristine(text):
-                return (patch_marker not in text) and _has_make_line(text)
 
             def _refresh_profile():
                 profile_dir = install_sh.parent
@@ -561,109 +558,53 @@ class PmbenchRunner:
                     stderr=subprocess.DEVNULL
                 )
 
-            # Use a pristine copy to avoid cumulative corruption from past patches
+            # Always start from a pristine copy to avoid cumulative corruption
             orig_path = install_sh.with_suffix(install_sh.suffix + ".orig")
             content = None
 
             if orig_path.exists():
                 content = orig_path.read_text()
-                if not _is_pristine(content):
+                if not _has_make_line(content):
                     _refresh_profile()
-                    if install_sh.exists():
-                        content = install_sh.read_text()
-                        orig_path.write_text(content)
+                    content = install_sh.read_text() if install_sh.exists() else content
+                    orig_path.write_text(content)
             else:
-                content = install_sh.read_text()
-                if not _is_pristine(content):
-                    _refresh_profile()
-                    if install_sh.exists():
-                        content = install_sh.read_text()
-                orig_path.write_text(content)
+                _refresh_profile()
+                content = install_sh.read_text() if install_sh.exists() else None
+                if content:
+                    orig_path.write_text(content)
 
-            if content is None:
+            if not content:
                 raise RuntimeError("Failed to load pristine install.sh")
 
-            # Inject a pre-build scrub to remove -m64 and hardcoded /usr/bin/gcc in extracted sources
-            if patch_marker not in content:
-                lines = content.splitlines()
-                if lines and lines[0].startswith("#!"):
-                    shebang = lines[0]
-                    rest = "\n".join(lines[1:])
-                    patch_block = (
-                        f"{patch_marker}\n"
-                        "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\n"
-                        "  if command -v find >/dev/null 2>&1; then\n"
-                        "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" "
-                        "-o -name \"configure\" -o -name \"*.sh\" \\) "
-                        "-exec sed -i "
-                        "-e 's/-m64//g' "
-                        "-e 's#/usr/bin/gcc#gcc#g' "
-                        "-e 's#/usr/bin/g\\+\\+#g++#g' "
-                        "{} + 2>/dev/null || true\n"
-                        "  fi\n"
-                        "fi\n"
-                    )
-                    content = "\n".join([shebang, patch_block, rest])
-                else:
-                    patch_block = (
-                        f"{patch_marker}\n"
-                        "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\n"
-                        "  if command -v find >/dev/null 2>&1; then\n"
-                        "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" "
-                        "-o -name \"configure\" -o -name \"*.sh\" \\) "
-                        "-exec sed -i "
-                        "-e 's/-m64//g' "
-                        "-e 's#/usr/bin/gcc#gcc#g' "
-                        "-e 's#/usr/bin/g\\+\\+#g++#g' "
-                        "{} + 2>/dev/null || true\n"
-                        "  fi\n"
-                        "fi\n"
-                    )
-                    content = f"{patch_block}\n{content}"
+            lines = content.splitlines()
+            new_lines = []
+            injected = False
+            for line in lines:
+                if not injected and re.match(r'^\s*(?:g?make)\b', line):
+                    rebuilt = line
+                    if "-B" not in line:
+                        rebuilt = re.sub(r'(^\s*(?:g?make)\b)', r'\1 -B', line)
+                    block = [
+                        patch_marker,
+                        'if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then',
+                        '  find . -type f \\( -name "*.o" -o -name "*.a" -o -name "*.obj" \\) -delete 2>/dev/null || true',
+                        f"  {rebuilt}",
+                        "else",
+                        f"  {line}",
+                        "fi",
+                    ]
+                    new_lines.extend(block)
+                    injected = True
+                    continue
+                new_lines.append(line)
 
-            # Ensure scrub runs right before the first make invocation (post-extract)
-            if patch_marker in content:
-                make_strip = (
-                    "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\n"
-                    "  if command -v find >/dev/null 2>&1; then\n"
-                    "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" \\) "
-                    "-exec sed -i "
-                    "-e 's/-m64//g' "
-                    "-e 's#/usr/bin/gcc#gcc#g' "
-                    "-e 's#/usr/bin/g\\+\\+#g++#g' "
-                    "{} + 2>/dev/null || true\n"
-                    "    find . -type f \\( -name \"*.o\" -o -name \"*.a\" -o -name \"*.obj\" \\) "
-                    "-delete 2>/dev/null || true\n"
-                    "  fi\n"
-                    "fi\n"
-                )
-                def _inject_make_strip(match):
-                    line = match.group(1)
-                    if "-B" in line:
-                        return make_strip + line
-                    return make_strip + re.sub(r'(^\s*(?:g?make)\b)', r'\\1 -B', line)
+            if not injected:
+                print("  [WARN] No make line found to patch in install.sh")
 
-                content = re.sub(
-                    r'(^\s*(?:g?make)\b.*$)',
-                    _inject_make_strip,
-                    content,
-                    count=1,
-                    flags=re.MULTILINE
-                )
-
-            # Remove -m64 only on non-sed lines (avoid corrupting our sed patterns)
-            if "-m64" in content:
-                cleaned_lines = []
-                for line in content.splitlines():
-                    if "sed -i" in line:
-                        cleaned_lines.append(line)
-                        continue
-                    cleaned_lines.append(line.replace("-m64", ""))
-                content = "\n".join(cleaned_lines)
-                content = re.sub(r"[ \t]+", " ", content)
-
+            content = "\n".join(new_lines)
             install_sh.write_text(content)
-            print("  [OK] Patched install.sh: removed -m64 for ARM64")
+            print("  [OK] Patched install.sh: force rebuild on ARM64")
             if self.dry_run:
                 self.print_install_script_snippet(install_sh)
             return True
