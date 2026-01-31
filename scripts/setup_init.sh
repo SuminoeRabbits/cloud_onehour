@@ -15,6 +15,8 @@ sudo apt-get install -y python3-tabulate libexpat1-dev
 sudo apt-get install -y cl-ppcre libpcre3-dev
 sudo apt-get install -y python3-pip
 sudo apt-get -y install p7zip-full
+sudo apt-get install -y libc6-dev
+
 # 1. Architecture Detection
 ARCH=$(uname -m)
 OS_ID=$(lsb_release -is)
