@@ -184,7 +184,7 @@ class PreSeedDownloader:
             return False
 
 class PmbenchRunner:
-    def __init__(self, threads_arg=None, quick_mode=False):
+    def __init__(self, threads_arg=None, quick_mode=False, dry_run=False, force_arm64=False):
         """
         Initialize pmbench (paging/virtual memory benchmark) runner.
 
@@ -216,6 +216,8 @@ class PmbenchRunner:
 
         # Quick mode for development
         self.quick_mode = quick_mode
+        self.dry_run = dry_run
+        self.force_arm64 = force_arm64
 
         # Detect environment for logging
         self.is_wsl_env = self.is_wsl()
@@ -517,7 +519,7 @@ class PmbenchRunner:
         Patch PTS install.sh to remove x86-only flags (e.g., -m64) on ARM64.
         """
         arch = os.uname().machine
-        if arch not in {"aarch64", "arm64"}:
+        if not (self.force_arm64 or arch in {"aarch64", "arm64"}):
             return True
 
         # Ensure test profile exists locally
@@ -541,10 +543,47 @@ class PmbenchRunner:
             return False
 
         try:
-            content = install_sh.read_text()
+            patch_marker = "# ARM64 workaround: strip -m64 from build scripts"
+
+            def _has_make_line(text):
+                return re.search(r'^\s*(?:g?make)\b', text, flags=re.MULTILINE) is not None
+
+            def _is_pristine(text):
+                return (patch_marker not in text) and _has_make_line(text)
+
+            def _refresh_profile():
+                profile_dir = install_sh.parent
+                if profile_dir.exists():
+                    shutil.rmtree(profile_dir)
+                subprocess.run(
+                    ['phoronix-test-suite', 'info', self.benchmark_full],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+
+            # Use a pristine copy to avoid cumulative corruption from past patches
+            orig_path = install_sh.with_suffix(install_sh.suffix + ".orig")
+            content = None
+
+            if orig_path.exists():
+                content = orig_path.read_text()
+                if not _is_pristine(content):
+                    _refresh_profile()
+                    if install_sh.exists():
+                        content = install_sh.read_text()
+                        orig_path.write_text(content)
+            else:
+                content = install_sh.read_text()
+                if not _is_pristine(content):
+                    _refresh_profile()
+                    if install_sh.exists():
+                        content = install_sh.read_text()
+                orig_path.write_text(content)
+
+            if content is None:
+                raise RuntimeError("Failed to load pristine install.sh")
 
             # Inject a pre-build scrub to remove -m64 and hardcoded /usr/bin/gcc in extracted sources
-            patch_marker = "# ARM64 workaround: strip -m64 from build scripts"
             if patch_marker not in content:
                 lines = content.splitlines()
                 if lines and lines[0].startswith("#!"):
@@ -582,39 +621,67 @@ class PmbenchRunner:
                     )
                     content = f"{patch_block}\n{content}"
 
-            # Ensure -m64 scrub runs right before the first make invocation (post-extract)
+            # Ensure scrub runs right before the first make invocation (post-extract)
             if patch_marker in content:
                 make_strip = (
-                    "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\\n"
-                    "  if command -v find >/dev/null 2>&1; then\\n"
+                    "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\n"
+                    "  if command -v find >/dev/null 2>&1; then\n"
                     "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" \\) "
                     "-exec sed -i "
                     "-e 's/-m64//g' "
                     "-e 's#/usr/bin/gcc#gcc#g' "
                     "-e 's#/usr/bin/g\\+\\+#g++#g' "
-                    "{} + 2>/dev/null || true\\n"
-                    "  fi\\n"
-                    "fi\\n"
+                    "{} + 2>/dev/null || true\n"
+                    "  fi\n"
+                    "fi\n"
                 )
+                def _inject_make_strip(match):
+                    return make_strip + match.group(1)
+
                 content = re.sub(
-                    r'(^\s*(?:g?make)\b)',
-                    make_strip + r'\\1',
+                    r'(^\s*(?:g?make)\b.*$)',
+                    _inject_make_strip,
                     content,
                     count=1,
                     flags=re.MULTILINE
                 )
 
-            # Remove all occurrences of -m64 in install.sh itself
+            # Remove -m64 only on non-sed lines (avoid corrupting our sed patterns)
             if "-m64" in content:
-                content = content.replace("-m64", "")
+                cleaned_lines = []
+                for line in content.splitlines():
+                    if "sed -i" in line:
+                        cleaned_lines.append(line)
+                        continue
+                    cleaned_lines.append(line.replace("-m64", ""))
+                content = "\n".join(cleaned_lines)
                 content = re.sub(r"[ \t]+", " ", content)
 
             install_sh.write_text(content)
             print("  [OK] Patched install.sh: removed -m64 for ARM64")
+            if self.dry_run:
+                self.print_install_script_snippet(install_sh)
             return True
         except Exception as e:
             print(f"  [ERROR] Failed to patch install.sh: {e}")
             return False
+
+    def print_install_script_snippet(self, install_sh, head_lines=80):
+        print(f"\n>>> install.sh snippet: {install_sh}")
+        try:
+            lines = install_sh.read_text().splitlines()
+        except Exception as e:
+            print(f"  [ERROR] Failed to read install.sh: {e}")
+            return
+
+        for idx, line in enumerate(lines[:head_lines], start=1):
+            print(f"{idx:4d}: {line}")
+
+        keywords = ("ARM64 workaround", "find . -type f", "sed -i", "make", "gmake")
+        print("\n>>> install.sh matches:")
+        for idx, line in enumerate(lines, start=1):
+            if any(k in line for k in keywords):
+                print(f"{idx:4d}: {line}")
 
     def prepare_compiler_wrapper(self):
         """
@@ -622,7 +689,7 @@ class PmbenchRunner:
         This guards against Makefiles that hardcode gcc without honoring CC/CXX.
         """
         arch = os.uname().machine
-        if arch not in {"aarch64", "arm64"}:
+        if not (self.force_arm64 or arch in {"aarch64", "arm64"}):
             return None
 
         wrapper_dir = Path("/tmp/pts_ccwrap")
@@ -699,6 +766,9 @@ eval "$REAL_CC" $ARGS
 
         print(f"\n>>> Installing {self.benchmark_full}...")
         self.patch_install_script()
+        if self.dry_run:
+            print("\n>>> Dry run enabled: skipping installation.")
+            return True
 
         print(f"  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
@@ -1062,6 +1132,9 @@ eval "$REAL_CC" $ARGS
         # Clean and install
         self.clean_pts_cache()
         self.install_benchmark()
+        if self.dry_run:
+            print("\n>>> Dry run enabled: skipping benchmark run.")
+            return True
 
         # Run for each thread count
         failed = []
@@ -1261,6 +1334,16 @@ def main():
         action='store_true',
         help='Quick mode: Run each test only once (for development/testing)'
     )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Dry run: patch install.sh and print snippet, but skip install/run'
+    )
+    parser.add_argument(
+        '--force-arm64',
+        action='store_true',
+        help='Force ARM64 patching on non-ARM64 hosts (for local verification)'
+    )
 
     args = parser.parse_args()
 
@@ -1271,7 +1354,12 @@ def main():
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
 
-    runner = PmbenchRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = PmbenchRunner(
+        threads_arg=threads,
+        quick_mode=args.quick,
+        dry_run=args.dry_run,
+        force_arm64=args.force_arm64
+    )
     success = runner.run()
 
     sys.exit(0 if success else 1)
