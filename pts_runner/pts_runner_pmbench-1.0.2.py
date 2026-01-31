@@ -1120,8 +1120,67 @@ eval "$REAL_CC" $ARGS
             return
 
         cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
-        if not cache_dir.exists():
-            return
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        def _download(url, target_path):
+            if shutil.which("aria2c"):
+                cmd = ["aria2c", "-x", "16", "-s", "16", "-d", str(cache_dir), "-o", target_path.name, url]
+                try:
+                    subprocess.run(cmd, check=True)
+                    return True
+                except subprocess.CalledProcessError:
+                    if target_path.exists():
+                        target_path.unlink()
+            if shutil.which("curl"):
+                cmd = ["curl", "-L", "-o", str(target_path), url]
+                try:
+                    subprocess.run(cmd, check=True)
+                    return True
+                except subprocess.CalledProcessError:
+                    if target_path.exists():
+                        target_path.unlink()
+            if shutil.which("wget"):
+                cmd = ["wget", "-O", str(target_path), url]
+                try:
+                    subprocess.run(cmd, check=True)
+                    return True
+                except subprocess.CalledProcessError:
+                    if target_path.exists():
+                        target_path.unlink()
+            return False
+
+        # Ensure tarball exists by reading downloads.xml if needed
+        if not any(cache_dir.glob("jisooy-pmbench-*.tar.xz")):
+            profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark / "downloads.xml"
+            if not profile_path.exists():
+                subprocess.run(
+                    ['phoronix-test-suite', 'info', self.benchmark_full],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            if profile_path.exists():
+                try:
+                    import xml.etree.ElementTree as ET
+                    tree = ET.parse(profile_path)
+                    root = tree.getroot()
+                    downloads_node = root.find('Downloads')
+                    if downloads_node is not None:
+                        for package in downloads_node.findall('Package'):
+                            url_node = package.find('URL')
+                            filename_node = package.find('FileName')
+                            if url_node is None or filename_node is None:
+                                continue
+                            url = url_node.text.strip()
+                            filename = filename_node.text.strip()
+                            if "pmbench" not in filename:
+                                continue
+                            target_path = cache_dir / filename
+                            if target_path.exists():
+                                break
+                            if _download(url, target_path):
+                                break
+                except Exception:
+                    pass
 
         candidates = sorted(cache_dir.glob("jisooy-pmbench-*.tar.xz"), key=lambda p: p.stat().st_mtime)
         if not candidates:
