@@ -129,6 +129,19 @@
         "cpu_cost_hour[730h-mo]": 0.3602,
         "extra_150g_storage": true,
         "extra_150g_storage_cost_hour": 0.0267
+      },
+      {
+        "enable": true,
+        "testloads": false,
+        "type": "t2a-standard-8",
+        "arch": "arm64",
+        "hostname": "gcp-t2a-standard-8-arm64",
+        "vcpus": 8,
+        "name": "gcp-t2a-standard-8-arm64-vcpu-8",
+        "cpu_cost_hour[730h-mo]": 0.37984,
+        "extra_150g_storage": true,
+        "extra_150g_storage_cost_hour": 0.0267,
+        "zone": "asia-southeast1-b"
       }
     ]
   },
@@ -151,7 +164,7 @@
         "extra_150g_storage_cost_hour": 0.0087
       },
       {
-        "enable": false,
+        "enable": true,
         "testloads": false,
         "type": "VM.Standard.E6.Flex",
         "arch": "amd64",
