@@ -512,6 +512,49 @@ class PmbenchRunner:
 
         print("  [OK] PTS cache cleaned")
 
+    def patch_install_script(self):
+        """
+        Patch PTS install.sh to remove x86-only flags (e.g., -m64) on ARM64.
+        """
+        arch = os.uname().machine
+        if arch not in {"aarch64", "arm64"}:
+            return True
+
+        # Ensure test profile exists locally
+        subprocess.run(
+            ['phoronix-test-suite', 'info', self.benchmark_full],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        install_sh = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "install.sh"
+        )
+
+        if not install_sh.exists():
+            print(f"  [WARN] install.sh not found for patching: {install_sh}")
+            return False
+
+        try:
+            content = install_sh.read_text()
+            if "-m64" not in content:
+                return True
+
+            # Remove all occurrences of -m64 and normalize whitespace
+            patched = content.replace("-m64", "")
+            patched = re.sub(r"[ \t]+", " ", patched)
+            install_sh.write_text(patched)
+            print("  [OK] Patched install.sh: removed -m64 for ARM64")
+            return True
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch install.sh: {e}")
+            return False
+
     def get_cpu_affinity_list(self, n):
         """Generate CPU affinity list for HyperThreading optimization."""
         half = self.vcpu_count // 2
@@ -535,6 +578,7 @@ class PmbenchRunner:
 
 
         print(f"\n>>> Installing {self.benchmark_full}...")
+        self.patch_install_script()
 
         print(f"  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
