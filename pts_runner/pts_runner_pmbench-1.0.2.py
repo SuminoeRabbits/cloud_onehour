@@ -586,6 +586,54 @@ class PmbenchRunner:
             print(f"  [ERROR] Failed to patch install.sh: {e}")
             return False
 
+    def prepare_compiler_wrapper(self):
+        """
+        Create gcc/g++ wrappers that strip -m64 on ARM64.
+        This guards against Makefiles that hardcode gcc without honoring CC/CXX.
+        """
+        arch = os.uname().machine
+        if arch not in {"aarch64", "arm64"}:
+            return None
+
+        wrapper_dir = Path("/tmp/pts_ccwrap")
+        wrapper_dir.mkdir(parents=True, exist_ok=True)
+
+        wrapper_script = """#!/bin/sh
+REAL_CC="$1"
+shift
+ARGS=""
+for a in "$@"; do
+  if [ "$a" != "-m64" ]; then
+    ARGS="$ARGS \"$a\""
+  fi
+done
+eval "$REAL_CC" $ARGS
+"""
+
+        def _add_wrapper(name, real):
+            target = wrapper_dir / name
+            content = wrapper_script.replace("REAL_CC=\"$1\"", f"REAL_CC=\"{real}\"")
+            target.write_text(content)
+            target.chmod(0o755)
+
+        # Core compiler names
+        for name, real in [
+            ("gcc", "/usr/bin/gcc"),
+            ("g++", "/usr/bin/g++"),
+            ("clang", "/usr/bin/clang"),
+            ("clang++", "/usr/bin/clang++"),
+        ]:
+            _add_wrapper(name, real)
+
+        # Versioned compiler binaries (gcc-*, g++-*, clang-*, clang++-*)
+        for pattern in ("gcc-*", "g++-*", "clang-*", "clang++-*"):
+            for real_path in Path("/usr/bin").glob(pattern):
+                if real_path.is_file():
+                    _add_wrapper(real_path.name, str(real_path))
+
+        print("  [OK] Compiler wrapper enabled: stripping -m64 on ARM64")
+        return wrapper_dir
+
     def get_cpu_affinity_list(self, n):
         """Generate CPU affinity list for HyperThreading optimization."""
         half = self.vcpu_count // 2
@@ -616,7 +664,14 @@ class PmbenchRunner:
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        wrapper_dir = self.prepare_compiler_wrapper()
+        path_prefix = f'PATH="{wrapper_dir}:$PATH" ' if wrapper_dir else ""
+        install_cmd = (
+            f'{path_prefix}MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 '
+            f'CFLAGS="-O3 -march=native -mtune=native" '
+            f'CXXFLAGS="-O3 -march=native -mtune=native" '
+            f'phoronix-test-suite batch-install {self.benchmark_full}'
+        )
 
         print(f"\n{'>'*80}")
         print(f"[PTS INSTALL COMMAND]")
