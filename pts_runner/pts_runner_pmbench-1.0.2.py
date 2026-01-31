@@ -676,6 +676,16 @@ class PmbenchRunner:
             print(f"  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
+            # Attempt to surface PTS install-failed log for easier debugging
+            install_failed_log = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark / "install-failed.log"
+            if install_failed_log.exists():
+                try:
+                    print(f"  [INFO] install-failed.log (tail):")
+                    tail = install_failed_log.read_text().splitlines()[-50:]
+                    for line in tail:
+                        print(f"    {line}")
+                except Exception as e:
+                    print(f"  [WARN] Failed to read install-failed.log: {e}")
             sys.exit(1)
 
         # Verify installation by checking if directory exists
