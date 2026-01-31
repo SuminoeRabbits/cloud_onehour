@@ -750,6 +750,27 @@ eval "$REAL_CC" $ARGS
 
         print(f"\n>>> Installing {self.benchmark_full}...")
         self.patch_install_script()
+        # Emit debug info to runner log to ensure it shows up in cloud_exec tail
+        if os.environ.get("PTS_DEBUG_HEADERS", "").strip().lower() in {"1", "true", "yes"}:
+            print("\n>>> [DEBUG] Compiler include search paths (gcc -v):")
+            try:
+                debug_out = subprocess.run(
+                    "echo | gcc -E -x c - -v",
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                print(debug_out.stderr.strip())
+            except Exception as e:
+                print(f"[DEBUG] Failed to dump gcc include paths: {e}")
+            print("\n>>> [DEBUG] install.sh snippet (first 120 lines):")
+            try:
+                self.print_install_script_snippet(
+                    Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark / "install.sh",
+                    head_lines=120
+                )
+            except Exception as e:
+                print(f"[DEBUG] Failed to dump install.sh snippet: {e}")
         if self.dry_run:
             print("\n>>> Dry run enabled: skipping installation.")
             return True
