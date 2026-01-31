@@ -585,10 +585,21 @@ class PmbenchRunner:
                     rebuilt = line
                     if "-B" not in line:
                         rebuilt = re.sub(r'(^\s*(?:g?make)\b)', r'\1 -B', line)
+                    lib_block = [
+                        'XML2_LIBS=""',
+                        'if command -v pkg-config >/dev/null 2>&1; then',
+                        '  XML2_LIBS="$(pkg-config --libs libxml-2.0 2>/dev/null)"',
+                        'fi',
+                        'LIBS_EXTRA="-lxml2 -lm -luuid -pthread"',
+                        'export LIBS="$XML2_LIBS $LIBS_EXTRA"',
+                        'export LDLIBS="$XML2_LIBS $LIBS_EXTRA"',
+                        'export LDFLAGS="${LDFLAGS} $XML2_LIBS $LIBS_EXTRA"',
+                    ]
                     block = [
                         patch_marker,
                         'if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then',
                         '  find . -type f \\( -name "*.o" -o -name "*.a" -o -name "*.obj" \\) -delete 2>/dev/null || true',
+                        *[f"  {l}" for l in lib_block],
                         f"  {rebuilt}",
                         "else",
                         f"  {line}",
