@@ -632,11 +632,16 @@ class PmbenchRunner:
                     "-e 's#/usr/bin/gcc#gcc#g' "
                     "-e 's#/usr/bin/g\\+\\+#g++#g' "
                     "{} + 2>/dev/null || true\n"
+                    "    find . -type f \\( -name \"*.o\" -o -name \"*.a\" -o -name \"*.obj\" \\) "
+                    "-delete 2>/dev/null || true\n"
                     "  fi\n"
                     "fi\n"
                 )
                 def _inject_make_strip(match):
-                    return make_strip + match.group(1)
+                    line = match.group(1)
+                    if "-B" in line:
+                        return make_strip + line
+                    return make_strip + re.sub(r'(^\s*(?:g?make)\b)', r'\\1 -B', line)
 
                 content = re.sub(
                     r'(^\s*(?:g?make)\b.*$)',
@@ -762,10 +767,6 @@ eval "$REAL_CC" $ARGS
         print(f"\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
-
-        # Sanitize cached tarball on ARM64 to avoid x86_64 object files
-        self.sanitize_pmbench_tarball()
-
 
         print(f"\n>>> Installing {self.benchmark_full}...")
         self.patch_install_script()
@@ -1113,112 +1114,6 @@ eval "$REAL_CC" $ARGS
 
         return True
 
-    def sanitize_pmbench_tarball(self):
-        """Remove prebuilt object files from cached pmbench tarball on ARM64."""
-        arch = os.uname().machine
-        if not (self.force_arm64 or arch in {"aarch64", "arm64"}):
-            return
-
-        cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
-        def _download(url, target_path):
-            if shutil.which("aria2c"):
-                cmd = ["aria2c", "-x", "16", "-s", "16", "-d", str(cache_dir), "-o", target_path.name, url]
-                try:
-                    subprocess.run(cmd, check=True)
-                    return True
-                except subprocess.CalledProcessError:
-                    if target_path.exists():
-                        target_path.unlink()
-            if shutil.which("curl"):
-                cmd = ["curl", "-L", "-o", str(target_path), url]
-                try:
-                    subprocess.run(cmd, check=True)
-                    return True
-                except subprocess.CalledProcessError:
-                    if target_path.exists():
-                        target_path.unlink()
-            if shutil.which("wget"):
-                cmd = ["wget", "-O", str(target_path), url]
-                try:
-                    subprocess.run(cmd, check=True)
-                    return True
-                except subprocess.CalledProcessError:
-                    if target_path.exists():
-                        target_path.unlink()
-            return False
-
-        # Ensure tarball exists by reading downloads.xml if needed
-        if not any(cache_dir.glob("jisooy-pmbench-*.tar.xz")):
-            profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark / "downloads.xml"
-            if not profile_path.exists():
-                subprocess.run(
-                    ['phoronix-test-suite', 'info', self.benchmark_full],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-            if profile_path.exists():
-                try:
-                    import xml.etree.ElementTree as ET
-                    tree = ET.parse(profile_path)
-                    root = tree.getroot()
-                    downloads_node = root.find('Downloads')
-                    if downloads_node is not None:
-                        for package in downloads_node.findall('Package'):
-                            url_node = package.find('URL')
-                            filename_node = package.find('FileName')
-                            if url_node is None or filename_node is None:
-                                continue
-                            url = url_node.text.strip()
-                            filename = filename_node.text.strip()
-                            if "pmbench" not in filename:
-                                continue
-                            target_path = cache_dir / filename
-                            if target_path.exists():
-                                break
-                            if _download(url, target_path):
-                                break
-                except Exception:
-                    pass
-
-        candidates = sorted(cache_dir.glob("jisooy-pmbench-*.tar.xz"), key=lambda p: p.stat().st_mtime)
-        if not candidates:
-            return
-
-        tar_path = candidates[-1]
-        backup_path = tar_path.with_suffix(tar_path.suffix + ".orig")
-        if not backup_path.exists():
-            shutil.copy2(tar_path, backup_path)
-
-        print(f"\n>>> Sanitizing cached tarball: {tar_path}")
-        tmp_dir = Path("/tmp") / f"pmbench_sanitize_{os.getpid()}"
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            with tarfile.open(tar_path, "r:xz") as tf:
-                tf.extractall(tmp_dir)
-
-            removed = 0
-            for pattern in ("*.o", "*.a", "*.obj"):
-                for obj in tmp_dir.rglob(pattern):
-                    try:
-                        obj.unlink()
-                        removed += 1
-                    except Exception:
-                        pass
-
-            with tarfile.open(tar_path, "w:xz") as tf:
-                for path in tmp_dir.rglob("*"):
-                    tf.add(path, arcname=path.relative_to(tmp_dir))
-
-            print(f"  [OK] Sanitized tarball (removed {removed} object files)")
-        except Exception as e:
-            print(f"  [WARN] Failed to sanitize tarball: {e}")
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def run(self):
         """Main execution flow."""
