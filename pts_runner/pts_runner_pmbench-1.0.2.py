@@ -543,7 +543,7 @@ class PmbenchRunner:
         try:
             content = install_sh.read_text()
 
-            # Inject a pre-build scrub to remove -m64 in extracted sources
+            # Inject a pre-build scrub to remove -m64 and hardcoded /usr/bin/gcc in extracted sources
             patch_marker = "# ARM64 workaround: strip -m64 from build scripts"
             if patch_marker not in content:
                 lines = content.splitlines()
@@ -556,7 +556,11 @@ class PmbenchRunner:
                         "  if command -v find >/dev/null 2>&1; then\n"
                         "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" "
                         "-o -name \"configure\" -o -name \"*.sh\" \\) -print0 2>/dev/null | \\\n"
-                        "      xargs -0 sed -i 's/-m64//g' 2>/dev/null || true\n"
+                        "      xargs -0 sed -i "
+                        " -e 's/-m64//g' "
+                        " -e 's#/usr/bin/gcc#gcc#g' "
+                        " -e 's#/usr/bin/g\\+\\+#g++#g' "
+                        " 2>/dev/null || true\n"
                         "  fi\n"
                         "fi\n"
                     )
@@ -568,11 +572,38 @@ class PmbenchRunner:
                         "  if command -v find >/dev/null 2>&1; then\n"
                         "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" "
                         "-o -name \"configure\" -o -name \"*.sh\" \\) -print0 2>/dev/null | \\\n"
-                        "      xargs -0 sed -i 's/-m64//g' 2>/dev/null || true\n"
+                        "      xargs -0 sed -i "
+                        " -e 's/-m64//g' "
+                        " -e 's#/usr/bin/gcc#gcc#g' "
+                        " -e 's#/usr/bin/g\\+\\+#g++#g' "
+                        " 2>/dev/null || true\n"
                         "  fi\n"
                         "fi\n"
                     )
                     content = f"{patch_block}\n{content}"
+
+            # Ensure -m64 scrub runs right before the first make invocation (post-extract)
+            if patch_marker in content:
+                make_strip = (
+                    "if [ \"$(uname -m)\" = \"aarch64\" ] || [ \"$(uname -m)\" = \"arm64\" ]; then\\n"
+                    "  if command -v find >/dev/null 2>&1; then\\n"
+                    "    find . -type f \\( -name \"Makefile\" -o -name \"Makefile.in\" -o -name \"*.mk\" \\) "
+                    "-print0 2>/dev/null | \\\\\\n"
+                    "      xargs -0 sed -i "
+                    " -e 's/-m64//g' "
+                    " -e 's#/usr/bin/gcc#gcc#g' "
+                    " -e 's#/usr/bin/g\\+\\+#g++#g' "
+                    " 2>/dev/null || true\\n"
+                    "  fi\\n"
+                    "fi\\n"
+                )
+                content = re.sub(
+                    r'(^\s*(?:g?make)\b)',
+                    make_strip + r'\\1',
+                    content,
+                    count=1,
+                    flags=re.MULTILINE
+                )
 
             # Remove all occurrences of -m64 in install.sh itself
             if "-m64" in content:
@@ -599,8 +630,17 @@ class PmbenchRunner:
         wrapper_dir.mkdir(parents=True, exist_ok=True)
 
         wrapper_script = """#!/bin/sh
+WRAP_NAME="__WRAP_NAME__"
 REAL_CC="$1"
 shift
+if [ ! -x "$REAL_CC" ]; then
+  # Fallback if the expected compiler path is missing
+  if echo "$WRAP_NAME" | grep -q '\\+\\+'; then
+    REAL_CC="$(command -v g++ 2>/dev/null || command -v c++ 2>/dev/null || command -v gcc 2>/dev/null)"
+  else
+    REAL_CC="$(command -v gcc 2>/dev/null || command -v cc 2>/dev/null)"
+  fi
+fi
 ARGS=""
 for a in "$@"; do
   if [ "$a" != "-m64" ]; then
@@ -613,6 +653,7 @@ eval "$REAL_CC" $ARGS
         def _add_wrapper(name, real):
             target = wrapper_dir / name
             content = wrapper_script.replace("REAL_CC=\"$1\"", f"REAL_CC=\"{real}\"")
+            content = content.replace("__WRAP_NAME__", name)
             target.write_text(content)
             target.chmod(0o755)
 
@@ -623,7 +664,8 @@ eval "$REAL_CC" $ARGS
             ("clang", "/usr/bin/clang"),
             ("clang++", "/usr/bin/clang++"),
         ]:
-            _add_wrapper(name, real)
+            if Path(real).exists():
+                _add_wrapper(name, real)
 
         # Versioned compiler binaries (gcc-*, g++-*, clang-*, clang++-*)
         for pattern in ("gcc-*", "g++-*", "clang-*", "clang++-*"):
@@ -664,10 +706,26 @@ eval "$REAL_CC" $ARGS
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         nproc = os.cpu_count() or 1
+        env_cc = os.environ.get("CC", "").strip()
+        env_cxx = os.environ.get("CXX", "").strip()
+
+        def _pick_compiler(primary, fallback):
+            if primary and shutil.which(primary):
+                return primary
+            if shutil.which(fallback):
+                return fallback
+            return primary or fallback
+
+        cc = _pick_compiler(env_cc, "gcc-14")
+        cxx = _pick_compiler(env_cxx, "g++-14")
+        if not shutil.which(cc):
+            cc = _pick_compiler(env_cc, "gcc")
+        if not shutil.which(cxx):
+            cxx = _pick_compiler(env_cxx, "g++")
         wrapper_dir = self.prepare_compiler_wrapper()
         path_prefix = f'PATH="{wrapper_dir}:$PATH" ' if wrapper_dir else ""
         install_cmd = (
-            f'{path_prefix}MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 '
+            f'{path_prefix}MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
             f'CFLAGS="-O3 -march=native -mtune=native" '
             f'CXXFLAGS="-O3 -march=native -mtune=native" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
