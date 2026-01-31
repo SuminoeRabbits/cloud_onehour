@@ -100,5 +100,14 @@ else
     echo "[OK] libxml2-dev is installed"
 fi
 
+# Ensure pkg-config is available for libxml2 flags
+if ! command -v pkg-config >/dev/null 2>&1; then
+    echo "[WARN] pkg-config not installed. Installing pkgconf..."
+    sudo apt-get update -y
+    sudo apt-get install -y pkgconf
+else
+    echo "[OK] pkg-config is available"
+fi
+
 # Re-enable unattended upgrades
 enable_unattended_upgrades

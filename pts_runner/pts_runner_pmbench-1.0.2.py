@@ -587,14 +587,18 @@ class PmbenchRunner:
                         rebuilt = re.sub(r'(^\s*(?:g?make)\b)', r'\1 -B', line)
                     lib_block = [
                         'XML2_LIBS=""',
+                        'XML2_CFLAGS=""',
                         'if command -v pkg-config >/dev/null 2>&1; then',
                         '  XML2_LIBS="$(pkg-config --libs libxml-2.0 2>/dev/null)"',
+                        '  XML2_CFLAGS="$(pkg-config --cflags libxml-2.0 2>/dev/null)"',
                         'fi',
                         'LIBS_EXTRA="-lxml2 -lm -luuid -pthread"',
                         'export LIBS="$XML2_LIBS $LIBS_EXTRA"',
                         'export LDLIBS="$XML2_LIBS $LIBS_EXTRA"',
                         'export LDFLAGS="${LDFLAGS} $XML2_LIBS $LIBS_EXTRA"',
                         'export CPPFLAGS="${CPPFLAGS} -I/usr/include/libxml2"',
+                        'export CFLAGS="${CFLAGS} $XML2_CFLAGS -I/usr/include/libxml2"',
+                        'echo "[DEBUG] XML2_CFLAGS=${XML2_CFLAGS}"',
                         'echo "[DEBUG] CPPFLAGS=${CPPFLAGS}"',
                         'echo "[DEBUG] CFLAGS=${CFLAGS}"',
                         'if command -v gcc >/dev/null 2>&1; then',
@@ -621,6 +625,8 @@ class PmbenchRunner:
                         "  grep -nE '^(LIBS|LDLIBS|LDFLAGS)\\s*=' Makefile || true",
                         "  echo \"[DEBUG] make line:\",",
                         "  grep -nE '^\\s*(g?make)\\b' Makefile || true",
+                        '  echo "[DEBUG] Makefile link lines (pmbench/xmlgen):"',
+                        "  grep -nE '(pmbench|xmlgen)' Makefile || true",
                         "fi",
                     ]
                     make_with_libs = f'{rebuilt} LIBS="$LIBS" LDLIBS="$LDLIBS" LDFLAGS="$LDFLAGS"'
