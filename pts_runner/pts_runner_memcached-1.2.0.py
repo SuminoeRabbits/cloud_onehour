@@ -329,6 +329,14 @@ class MemcachedRunner:
         nproc = os.cpu_count() or 1
         install_cmd = f'NUM_CPU_CORES={nproc} phoronix-test-suite batch-install {self.benchmark_full}'
         
+        install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
+        install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
+        use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
+        install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_f = open(install_log, 'w') if use_install_log else None
+        if log_f:
+            log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
+            log_f.flush()
         process = subprocess.Popen(
             ['bash', '-c', install_cmd],
             stdout=subprocess.PIPE,
@@ -340,12 +348,19 @@ class MemcachedRunner:
         output = []
         for line in process.stdout:
             print(line, end='')
+            if log_f:
+                log_f.write(line)
+                log_f.flush()
             output.append(line)
         process.wait()
+        if log_f:
+            log_f.close()
         
         full_output = ''.join(output)
         if process.returncode != 0 or 'FAILED' in full_output:
             print(f"  [ERROR] Installation failed")
+            if use_install_log:
+                print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
             
         # Verify

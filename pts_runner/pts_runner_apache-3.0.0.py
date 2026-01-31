@@ -893,6 +893,14 @@ class ApacheRunner:
 
         # Execute install command with real-time output streaming
         print(f"[INFO] Starting installation (this may take a few minutes)...")
+        install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
+        install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
+        use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
+        install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_f = open(install_log, 'w') if use_install_log else None
+        if log_f:
+            log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
+            log_f.flush()
         process = subprocess.Popen(
             ['bash', '-c', install_cmd],
             stdout=subprocess.PIPE,
@@ -904,10 +912,15 @@ class ApacheRunner:
         install_output = []
         for line in process.stdout:
             print(line, end='')
+            if log_f:
+                log_f.write(line)
+                log_f.flush()
             install_output.append(line)
 
         process.wait()
         returncode = process.returncode
+        if log_f:
+            log_f.close()
 
         # Check for installation failure
         install_failed = False
@@ -923,6 +936,8 @@ class ApacheRunner:
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
             print(f"  [INFO] Check output above for details")
+            if use_install_log:
+                print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
 
         # Verify installation by checking if directory exists

@@ -548,23 +548,42 @@ class PmbenchRunner:
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
-        # Execute install command with real-time output streaming
+        # Execute install command with real-time output streaming (stdout+stderr)
         print(f"  Running installation...")
-        process = subprocess.Popen(
-            ['bash', '-c', install_cmd],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
+        install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
+        install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
+        use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
+        install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
 
-        install_output = []
-        for line in process.stdout:
-            print(line, end='')
-            install_output.append(line)
+        def _run_install(log_f=None):
+            if log_f:
+                log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
+                log_f.flush()
 
-        process.wait()
-        returncode = process.returncode
+            process = subprocess.Popen(
+                ['bash', '-c', install_cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+            install_output = []
+            for line in process.stdout:
+                print(line, end='')
+                if log_f:
+                    log_f.write(line)
+                    log_f.flush()
+                install_output.append(line)
+
+            process.wait()
+            return process.returncode, install_output
+
+        if use_install_log:
+            with open(install_log, 'w') as log_f:
+                returncode, install_output = _run_install(log_f)
+        else:
+            returncode, install_output = _run_install()
 
         # Check for installation failure
         install_failed = False
@@ -580,6 +599,8 @@ class PmbenchRunner:
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
             print(f"  [INFO] Check output above for details")
+            if use_install_log:
+                print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
 
         # Verify installation by checking if directory exists

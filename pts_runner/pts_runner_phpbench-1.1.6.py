@@ -302,12 +302,25 @@ class PhpBenchRunner:
         subprocess.run(['bash', '-c', f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         install_cmd = f'phoronix-test-suite batch-install {self.benchmark_full}'
+        install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
+        install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
+        use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
+        install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_f = open(install_log, 'w') if use_install_log else None
+        if log_f:
+            log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
+            log_f.flush()
         process = subprocess.Popen(['bash', '-c', install_cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         out = []
         for line in process.stdout:
             print(line, end='')
+            if log_f:
+                log_f.write(line)
+                log_f.flush()
             out.append(line)
         process.wait()
+        if log_f:
+            log_f.close()
         
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         if subprocess.run(['bash', '-c', verify_cmd], capture_output=True).returncode == 0:
