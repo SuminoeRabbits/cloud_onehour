@@ -112,6 +112,7 @@ class ComplianceChecker:
         self.check_perf_events_implementation()
 
         self.check_install_verification()
+        self.check_install_log_toggle()
         self.check_argparse_setup()
         self.check_upload_safety()
         self.check_batch_env_vars()
@@ -691,6 +692,20 @@ class ComplianceChecker:
 
                 "   Recommended: Check installed-tests directory and use 'phoronix-test-suite test-installed'"
 
+            )
+
+    def check_install_log_toggle(self):
+        """Check if install_benchmark supports optional install log via env toggle."""
+        has_install_method = re.search(r'def\s+install_benchmark\s*\(', self.content)
+        if not has_install_method:
+            return
+
+        if "PTS_INSTALL_LOG" in self.content or "PTS_INSTALL_LOG_PATH" in self.content:
+            self.passed.append("✅ install_benchmark supports optional install log via env toggle")
+        else:
+            self.warnings.append(
+                "⚠️  WARNING: install_benchmark missing optional install log toggle "
+                "(PTS_INSTALL_LOG / PTS_INSTALL_LOG_PATH)"
             )
 
    

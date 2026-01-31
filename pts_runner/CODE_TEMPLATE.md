@@ -794,6 +794,24 @@ def run_benchmark(self, num_threads):
 
 ---
 
+## オプション: install ログの有効化
+
+インストール時の stdout/stderr をファイルに保存したい場合は、環境変数で有効化できます。
+通常は無効（冗長回避）にしておき、必要時だけオンにする運用を想定します。
+
+- `PTS_INSTALL_LOG=1` を設定すると `results/install.log` に保存
+- `PTS_INSTALL_LOG_PATH=/path/to/file` を設定すると指定パスへ保存
+
+**サンプル（install_benchmark内）**
+```python
+install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
+install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
+use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
+install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+```
+
+---
+
 ## トラブルシューティングパターン
 
 ### ドット除去問題への対応
