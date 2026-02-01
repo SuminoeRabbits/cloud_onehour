@@ -967,6 +967,9 @@ eval "$REAL_CC" $ARGS
             install_failed_log = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark / "install-failed.log"
             if install_failed_log.exists():
                 try:
+                    dest_log = self.results_dir / "install-failed.log"
+                    shutil.copy2(install_failed_log, dest_log)
+                    print(f"  [INFO] Copied install-failed.log -> {dest_log}")
                     print(f"  [INFO] install-failed.log (tail):")
                     tail = install_failed_log.read_text().splitlines()[-50:]
                     for line in tail:
