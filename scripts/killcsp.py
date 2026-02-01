@@ -80,14 +80,9 @@ def get_aws_regions(only_region=None):
 def get_oci_regions(only_region=None):
     if only_region:
         return [only_region]
-    cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--raw-output"]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
-            regions = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-            return regions if regions else []
-    except Exception:
-        pass
+    success, data, _ = run_command(["oci", "iam", "region", "list", "--query", "data[].name", "--output", "json"])
+    if success and isinstance(data, list):
+        return data
     return []
 
 def get_oci_compartment_id():

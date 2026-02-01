@@ -37,14 +37,10 @@ def get_aws_regions():
     return AWS_REGIONS_FALLBACK
 
 def get_oci_regions():
-    cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--raw-output"]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
-            regions = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-            return regions if regions else []
-    except Exception:
-        pass
+    cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--output", "json"]
+    success, data, _ = run_command(cmd)
+    if success and isinstance(data, list):
+        return data
     return []
 
 def get_oci_compartment_id():
