@@ -21,6 +21,15 @@
                     "sve2_support": true,
                     "notes": "N/A - single-threaded benchmark only",
                     "exe_time_v8cpu": "10.0"
+                },
+                "pts/cpuminer-opt-1.8.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "10.0"
                 }
             }
         },
@@ -266,13 +275,13 @@
                     "exe_time_v8cpu": "20.0"
                 },
                 "pts/pmbench-1.0.2": {
-                    "enabled": true,
+                    "enabled": false,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "test-option:-j",
                     "sve2_support": false,
-                    "notes": "Thread count controlled via -j option in test settings (1/2/4/8/16/32). Need to revisit.",
-                    "exe_time_v8cpu": "300.0"
+                    "notes": "Issue in arm64 build. Dont' use now, Need to revisit.",
+                    "exe_time_v8cpu": "70.0"
                 },
                 "pts/memcached-1.2.0": {
                     "enabled": true,
@@ -282,6 +291,15 @@
                     "sve2_support": true,
                     "notes": "Uses -threads $NUM_CPU_CORES runtime option.",
                     "exe_time_v8cpu": "20.0"
+                },
+                "pts/cachebench-1.2.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "linear by scaling.",
+                    "sve2_support": true,
+                    "notes": "Uses -threads $NUM_CPU_CORES runtime option.",
+                    "exe_time_v8cpu": "10.0"
                 }
             }
         },
