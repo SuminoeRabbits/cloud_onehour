@@ -2,6 +2,7 @@
 import subprocess
 import json
 import sys
+import argparse
 from datetime import datetime, timedelta, timezone
 from tabulate import tabulate
 
@@ -140,13 +141,66 @@ def get_oci_instances():
     return rows if rows else [["OCI", "N/A", "(No Instances Found)", "-", "-", "-"]]
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="List cloud instances across AWS, GCP, and OCI",
+        epilog="""
+Examples:
+  %(prog)s                 # Scan all clouds and show active regions/zones
+  %(prog)s --show-all      # Show all regions/zones (including empty)
+  %(prog)s --aws           # Scan AWS only
+  %(prog)s --gcp           # Scan GCP only
+  %(prog)s --oci           # Scan OCI only
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    csp_group = parser.add_mutually_exclusive_group()
+    csp_group.add_argument("--all", action="store_true", help="Scan all CSPs (default)")
+    csp_group.add_argument("--aws", action="store_true", help="Scan AWS only")
+    csp_group.add_argument("--gcp", action="store_true", help="Scan GCP only")
+    csp_group.add_argument("--oci", action="store_true", help="Scan OCI only")
+    parser.add_argument("--show-all", action="store_true", help="Show all regions/zones (including empty)")
+    args = parser.parse_args()
+
     print("Gathering status from AWS, GCP, and OCI...")
     
     all_data = []
-    for region in get_aws_regions():
-        all_data.extend(get_aws_instances(region))
-    all_data.extend(get_gcp_instances())
-    all_data.extend(get_oci_instances())
+    if args.aws:
+        enabled_csps = {"aws"}
+    elif args.gcp:
+        enabled_csps = {"gcp"}
+    elif args.oci:
+        enabled_csps = {"oci"}
+    else:
+        enabled_csps = {"aws", "gcp", "oci"}
+
+    if "aws" in enabled_csps:
+        for region in get_aws_regions():
+            all_data.extend(get_aws_instances(region))
+    if "gcp" in enabled_csps:
+        all_data.extend(get_gcp_instances())
+    if "oci" in enabled_csps:
+        all_data.extend(get_oci_instances())
+
+    # Show only regions/zones that have active instances (search still covers all regions)
+    active_keys = set()
+    for row in all_data:
+        cloud, region, name, _, status, _ = row
+        if name and name.startswith("("):
+            continue
+        if status in {"N/A", "ERROR"}:
+            continue
+        active_keys.add((cloud, region))
+
+    filtered = [
+        row for row in all_data
+        if (row[0], row[1]) in active_keys and not (row[2] and row[2].startswith("("))
+    ]
+
+    if not args.show_all:
+        if filtered:
+            all_data = filtered
+        else:
+            all_data = [["ALL", "-", "(No Active Instances Found)", "-", "-", "-"]]
 
     headers = ["Cloud", "Region/Zone", "Name", "ID", "Status/Error", "Start(JST)"]
     print("\n" + tabulate(all_data, headers=headers, tablefmt="grid"))
