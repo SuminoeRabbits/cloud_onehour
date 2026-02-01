@@ -815,16 +815,34 @@ eval "$REAL_CC" $ARGS
                 ).stdout.strip()
         except Exception:
             xml2_cflags = ""
-        if Path("/usr/include/libxml2").exists() and "-I/usr/include/libxml2" not in xml2_cflags:
-            xml2_cflags = f"{xml2_cflags} -I/usr/include/libxml2".strip()
+        include_dir = "/usr/include/libxml2"
+        if Path(include_dir).exists() and f"-I{include_dir}" not in xml2_cflags:
+            xml2_cflags = f"{xml2_cflags} -I{include_dir}".strip()
 
         wrapper_dir = self.prepare_compiler_wrapper()
         path_prefix = f'PATH="{wrapper_dir}:$PATH" ' if wrapper_dir else ""
         cflags_value = f'-O3 -march=native -mtune=native {xml2_cflags}'.strip()
         cxxflags_value = f'-O3 -march=native -mtune=native {xml2_cflags}'.strip()
         cppflags_prefix = f'CPPFLAGS="{xml2_cflags}" ' if xml2_cflags else ""
+        include_path_prefix = ""
+        if Path(include_dir).exists():
+            def _merge_env_path(var_name, value):
+                current = os.environ.get(var_name, "").strip()
+                if current:
+                    parts = current.split(":")
+                    if value in parts:
+                        return current
+                    return f"{value}:{current}"
+                return value
+
+            cpath = _merge_env_path("CPATH", include_dir)
+            c_include = _merge_env_path("C_INCLUDE_PATH", include_dir)
+            cplus_include = _merge_env_path("CPLUS_INCLUDE_PATH", include_dir)
+            include_path_prefix = (
+                f'CPATH="{cpath}" C_INCLUDE_PATH="{c_include}" CPLUS_INCLUDE_PATH="{cplus_include}" '
+            )
         install_cmd = (
-            f'{path_prefix}{cppflags_prefix}MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
+            f'{path_prefix}{include_path_prefix}{cppflags_prefix}MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
             f'CFLAGS="{cflags_value}" '
             f'CXXFLAGS="{cxxflags_value}" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
