@@ -258,6 +258,59 @@ class PmbenchRunner:
             except Exception as e:
                 print(f"  [WARN] Failed to copy {tmp_log}: {e}")
 
+    def _collect_pts_diagnostics(self, stage: str = "install-failed"):
+        if not self.debug_dump:
+            return
+        diag_dir = self.results_dir / "pts_diagnostics"
+        diag_dir.mkdir(parents=True, exist_ok=True)
+        pts_home = Path.home() / ".phoronix-test-suite"
+        profile_dir = pts_home / "test-profiles" / "pts" / self.benchmark
+        installed_dir = pts_home / "installed-tests" / "pts" / self.benchmark
+        core_log = pts_home / "pts-core.log"
+
+        def _copy_tree(src: Path, dest: Path):
+            if not src.exists():
+                return
+            try:
+                shutil.copytree(src, dest, dirs_exist_ok=True)
+                print(f"  [INFO] Copied {src} -> {dest}")
+            except Exception as e:
+                print(f"  [WARN] Failed to copy {src}: {e}")
+
+        _copy_tree(profile_dir, diag_dir / "test-profiles")
+        _copy_tree(installed_dir, diag_dir / "installed-tests")
+        if core_log.exists():
+            try:
+                shutil.copy2(core_log, diag_dir / "pts-core.log")
+                print(f"  [INFO] Copied {core_log} -> {diag_dir / 'pts-core.log'}")
+            except Exception as e:
+                print(f"  [WARN] Failed to copy {core_log}: {e}")
+
+        try:
+            (diag_dir / "ls_profile.txt").write_text(
+                subprocess.run(
+                    ["bash", "-c", f'ls -la "{profile_dir}"'],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+            )
+            (diag_dir / "ls_installed.txt").write_text(
+                subprocess.run(
+                    ["bash", "-c", f'ls -la "{installed_dir}"'],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+            )
+            (diag_dir / "find_pmbench.txt").write_text(
+                subprocess.run(
+                    ["bash", "-c", f'find "{pts_home}" -type f -name "pmbench" -print'],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+            )
+        except Exception as e:
+            print(f"  [WARN] Failed to write diagnostics listings: {e}")
+
     def get_os_name(self):
         """Get OS name and version formatted as <Distro>_<Version>."""
         try:
@@ -1037,6 +1090,7 @@ eval "$REAL_CC" $ARGS
                 except Exception as e:
                     print(f"  [WARN] Failed to read install-failed.log: {e}")
             self._copy_debug_dump("install-failed")
+            self._collect_pts_diagnostics("install-failed")
             sys.exit(1)
 
         # Verify installation by checking if directory exists
@@ -1050,6 +1104,7 @@ eval "$REAL_CC" $ARGS
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             _collect_install_failed_log()
             self._copy_debug_dump("install-verify-failed")
+            self._collect_pts_diagnostics("install-verify-failed")
             sys.exit(1)
         pmbench_bin = installed_dir / "pmbench"
         if not pmbench_bin.exists():
@@ -1058,6 +1113,7 @@ eval "$REAL_CC" $ARGS
             print(f"  [INFO] Installation may have failed silently")
             _collect_install_failed_log()
             self._copy_debug_dump("install-verify-failed")
+            self._collect_pts_diagnostics("install-verify-failed")
             sys.exit(1)
 
         # Check if test is recognized by PTS
