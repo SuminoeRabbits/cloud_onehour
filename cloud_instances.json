@@ -20,6 +20,47 @@
           {
             "enable": true,
             "testloads": false,
+            "type": "m7i.2xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m7i-2xlarge-amd64",
+            "vcpus": 8,
+            "name": "aws-m7i-2xlarge-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.5208,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m8g.2xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m8g-2xlarge-arm64",
+            "vcpus": 8,
+            "name": "aws-m8g-2xlarge-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.46376,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m7g.2xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m7g-2xlarge-arm64",
+            "vcpus": 8,
+            "name": "aws-m7g-2xlarge-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]":  0.4216,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          }
+        ]
+      },
+      "ap-northeast-1": {
+        "enable": true,
+        "instances": [
+          {
+            "enable": true,
+            "testloads": false,
             "type": "m8a.2xlarge",
             "arch": "amd64",
             "hostname": "aws-m8a-2xlarge-amd64",
@@ -50,47 +91,6 @@
             "vcpus": 8,
             "name": "aws-i7ie-2xlarge-amd64-vcpu-8",
             "cpu_cost_hour[730h-mo]": 1.2236,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.0197
-          },
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "m7i.2xlarge",
-            "arch": "amd64",
-            "hostname": "aws-m7i-2xlarge-amd64",
-            "vcpus": 8,
-            "name": "aws-m7i-2xlarge-amd64-vcpu-8",
-            "cpu_cost_hour[730h-mo]": 0.5208,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.0197
-          }
-        ]
-      },
-      "ap-northeast-1": {
-        "enable": true,
-        "instances": [
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "m8g.2xlarge",
-            "arch": "arm64",
-            "hostname": "aws-m8g-2xlarge-arm64",
-            "vcpus": 8,
-            "name": "aws-m8g-2xlarge-arm64-vcpu-8",
-            "cpu_cost_hour[730h-mo]": 0.46376,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.0197
-          },
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "m7g.2xlarge",
-            "arch": "arm64",
-            "hostname": "aws-m7g-2xlarge-arm64",
-            "vcpus": 8,
-            "name": "aws-m7g-2xlarge-arm64-vcpu-8",
-            "cpu_cost_hour[730h-mo]":  0.4216,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0197
           }
