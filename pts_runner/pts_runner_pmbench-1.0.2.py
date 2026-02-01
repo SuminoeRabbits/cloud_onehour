@@ -935,7 +935,22 @@ eval "$REAL_CC" $ARGS
         use_install_log = True
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
 
+        extra_log_paths = []
+        if self.debug_dump:
+            extra_log_paths = [
+                self.results_dir / "pts_runner_pmbench.log",
+                Path("/tmp/pts_runner_pmbench.log"),
+            ]
+
         def _run_install(log_f=None):
+            extra_logs = []
+            for path in extra_log_paths:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    extra_logs.append(open(path, "a"))
+                except Exception:
+                    pass
+
             if log_f:
                 log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
                 log_f.flush()
@@ -954,9 +969,20 @@ eval "$REAL_CC" $ARGS
                 if log_f:
                     log_f.write(line)
                     log_f.flush()
+                for extra_log in extra_logs:
+                    try:
+                        extra_log.write(line)
+                        extra_log.flush()
+                    except Exception:
+                        pass
                 install_output.append(line)
 
             process.wait()
+            for extra_log in extra_logs:
+                try:
+                    extra_log.close()
+                except Exception:
+                    pass
             return process.returncode, install_output
 
         if use_install_log:
