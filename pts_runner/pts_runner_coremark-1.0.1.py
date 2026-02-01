@@ -105,8 +105,21 @@ class PreSeedDownloader:
 
         if not xml_path.exists():
             print(f"  [INFO] downloads.xml not found at {xml_path}")
-            # Try to fetch profile if missing? For now just skip.
-            return
+            print(f"  [INFO] Attempting to fetch test profile via phoronix-test-suite info {benchmark_name}...")
+            try:
+                subprocess.run(
+                    ['phoronix-test-suite', 'info', benchmark_name],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                print(f"  [WARN] Failed to run phoronix-test-suite info: {e}")
+                return
+
+            if not xml_path.exists():
+                print(f"  [WARN] downloads.xml still missing after info: {xml_path}")
+                return
 
         try:
             tree = ET.parse(xml_path)
