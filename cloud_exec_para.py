@@ -528,7 +528,7 @@ def cleanup_active_instances(signum=None, frame=None):
 
                 elif cloud == 'gcp':
                     project = inst_info.get('project')
-                    zone = inst_info.get('zone')
+                    zone = inst_info.get('region') or inst_info.get('zone')
                     subprocess.run(
                         f"gcloud compute instances delete {instance_name} "
                         f"--project={project} --zone={zone} --quiet",
@@ -560,7 +560,8 @@ def cleanup_active_instances(signum=None, frame=None):
                 if cloud == 'aws':
                     print(f"[CLEANUP] Manual cleanup: aws ec2 terminate-instances --region {inst_info.get('region')} --instance-ids {instance_id}")
                 elif cloud == 'gcp':
-                    print(f"[CLEANUP] Manual cleanup: gcloud compute instances delete {instance_name} --project={inst_info.get('project')} --zone={inst_info.get('zone')}")
+                    zone = inst_info.get('region') or inst_info.get('zone')
+                    print(f"[CLEANUP] Manual cleanup: gcloud compute instances delete {instance_name} --project={inst_info.get('project')} --zone={zone}")
                 elif cloud == 'oci':
                     region = inst_info.get('region')
                     prefix = f"OCI_REGION={region} " if region else ""
@@ -601,7 +602,7 @@ def get_manual_cleanup_command(
         return f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}"
     elif cloud == 'gcp':
         project = project or shared_resources.get('project')
-        zone = zone or shared_resources.get('zone')
+        zone = zone or shared_resources.get('region') or shared_resources.get('zone')
         return f"gcloud compute instances delete {name} --project={project} --zone={zone}"
     elif cloud == 'oci':
         prefix = f"OCI_REGION={region} " if region else ""
@@ -1434,6 +1435,7 @@ def get_instance_status(cloud, instance_id, region=None, project=None, zone=None
         elif cloud == 'gcp':
             # GCP status: PROVISIONING, STAGING, RUNNING, STOPPING, SUSPENDING, SUSPENDED, REPAIRING, and TERMINATED.
             # If instance is deleted, this command usually fails.
+            zone = zone or region
             status = run_cmd(
                 f"gcloud compute instances describe {instance_id} --project={project} --zone={zone} "
                 f"--format='get(status)'",
@@ -1727,7 +1729,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             instance_id=inst.get('instance_id'),
                             region=inst.get('region'),
                             project=inst.get('project'),
-                            zone=inst.get('zone'),
+                            zone=inst.get('region') or inst.get('zone'),
                             logger=logger
                         )
                         
@@ -1826,18 +1828,18 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             print(f"  [Debug] Checking workload output log: {workload_log_path}...")
                             
                         workload_log = run_cmd(
-                            f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {workload_log_path} 2>/dev/null || echo \"No workload log found\"'",
+                            f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -200 {workload_log_path} 2>/dev/null || echo \"No workload log found\"'",
                             capture=True, timeout=30, ignore=True, logger=logger
                         )
                         
                         if logger:
                             if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
-                                logger.info(f"Last 100 lines from {workload_log_path}:")
+                                logger.info(f"Last 200 lines from {workload_log_path}:")
                                 for line in workload_log.strip().split('\n'):
                                     logger.info(f"  {line}")
                         else:
                             if workload_log and workload_log.strip() and "No workload log found" not in workload_log:
-                                print(f"  [Workload Log] Last 100 lines from {workload_log_path}:")
+                                print(f"  [Workload Log] Last 200 lines from {workload_log_path}:")
                                 print("  " + "="*78)
                                 for line in workload_log.strip().split('\n'):
                                     print(f"  {line}")
@@ -1876,23 +1878,23 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             print(f"  [DIAG] Process tree (top 100 processes):\n{ps_output}")
 
                         # Get last 50 lines of log
-                        log_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {remote_log_path} 2>/dev/null || echo \"[No log available]\"'",
+                        log_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -200 {remote_log_path} 2>/dev/null || echo \"[No log available]\"'",
                                           capture=True, ignore=True, timeout=30, logger=logger)
                         if logger and log_tail:
-                            logger.warn(f"Last 100 lines of wrapper log ({remote_log_path}):\n{log_tail}")
+                            logger.warn(f"Last 200 lines of wrapper log ({remote_log_path}):\n{log_tail}")
                         elif log_tail:
-                            print(f"  [DIAG] Last 100 lines of wrapper log:\n{log_tail}")
+                            print(f"  [DIAG] Last 200 lines of wrapper log:\n{log_tail}")
 
                         # Get last 50 lines of workload log if available
                         workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', cmd)
                         if workload_log_match:
                             workload_log_path = workload_log_match.group(1)
-                            wl_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -100 {workload_log_path} 2>/dev/null || echo \"[No workload log]\"'",
+                            wl_tail = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'tail -200 {workload_log_path} 2>/dev/null || echo \"[No workload log]\"'",
                                              capture=True, ignore=True, timeout=30, logger=logger)
                             if logger and wl_tail:
-                                logger.warn(f"Last 100 lines of workload log ({workload_log_path}):\n{wl_tail}")
+                                logger.warn(f"Last 200 lines of workload log ({workload_log_path}):\n{wl_tail}")
                             elif wl_tail:
-                                print(f"  [DIAG] Last 100 lines of workload log:\n{wl_tail}")
+                                print(f"  [DIAG] Last 200 lines of workload log:\n{wl_tail}")
 
                         # Get memory/disk info
                         mem_info = run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} 'free -h'",
@@ -2411,23 +2413,27 @@ class GCPProvider(CloudProvider):
     """GCP-specific implementation of CloudProvider."""
 
     def initialize_shared_resources(self, logger=None) -> Dict[str, Any]:
-        """Initialize GCP shared resources (Project, Zone)."""
+        """Initialize GCP shared resources (Project, Region-as-Zone)."""
         project = get_gcp_project(logger)
-        zone = self.csp_config.get('zone', 'us-central1-a')
+        region = self.csp_config.get('region') or self.csp_config.get('zone') or 'us-central1-a'
 
         self.shared_resources = {
             'project': project,
-            # Default zone (can be overridden per instance)
-            'zone': zone
+            # Default region-as-zone (can be overridden per instance)
+            'region': region,
+            'zone': region
         }
 
         return self.shared_resources
 
     def _get_zone_for_instance(self, inst: Dict[str, Any]) -> str:
-        """Resolve zone for an instance (instance override > CSP default > fallback)."""
+        """Resolve region-as-zone for an instance (instance override > CSP default > fallback)."""
         return (
-            inst.get('zone')
+            inst.get('region')
+            or inst.get('zone')
+            or self.shared_resources.get('region')
             or self.shared_resources.get('zone')
+            or self.csp_config.get('region')
             or self.csp_config.get('zone')
             or 'us-central1-a'
         )
@@ -2960,7 +2966,7 @@ def cleanup_instance_safely(provider: CloudProvider, instance_id: str, inst: Dic
             provider.shared_resources,
             region=inst.get('region'),
             project=provider.shared_resources.get('project'),
-            zone=inst.get('zone')
+            zone=inst.get('region') or inst.get('zone')
         )
         logger.error(f"MANUAL CLEANUP REQUIRED:")
         logger.error(f"  {manual_cmd}")
@@ -3023,7 +3029,7 @@ def process_instance(
     if isinstance(provider, AWSProvider):
         inst['region'] = provider._get_region_for_instance(inst)
     elif isinstance(provider, GCPProvider):
-        inst['zone'] = provider._get_zone_for_instance(inst)
+        inst['region'] = provider._get_zone_for_instance(inst)
     elif isinstance(provider, OCIProvider):
         inst['region'] = provider._get_region_for_instance(inst)
 
@@ -3054,7 +3060,7 @@ def process_instance(
             name=sanitized_name,
             region=inst.get('region') or provider.shared_resources.get('region'),
             project=provider.shared_resources.get('project'),
-            zone=inst.get('zone') or provider.shared_resources.get('zone')
+            zone=inst.get('region') or provider.shared_resources.get('region')
         )
 
         progress(instance_name, f"Instance launched (IP: {ip})", logger)
@@ -3194,7 +3200,11 @@ def validate_instance_definitions(instances_def: Dict[str, Any], csp_filter: Opt
         if not isinstance(csp_config, dict):
             continue
 
-        instances = csp_config.get('instances', [])
+        instances, enabled_regions = collect_instances_for_csp(csp_config)
+        if csp_config.get('enable', False) and not enabled_regions:
+            warnings.append(
+                f"[{csp.upper()}] WARNING: CSP enabled but no enabled regions found."
+            )
         if not instances:
             continue
 
@@ -3277,6 +3287,78 @@ def validate_instance_definitions(instances_def: Dict[str, Any], csp_filter: Opt
         error_msg += f"\n{'='*80}\n"
         error_msg += "\nPlease fix these errors in cloud_instances.json before running.\n"
         raise ValueError(error_msg)
+
+
+def collect_instances_for_csp(csp_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Collect instances for a CSP with region expansion.
+
+    Returns:
+        (instances, enabled_regions)
+    """
+    instances: List[Dict[str, Any]] = []
+    enabled_regions: List[str] = []
+
+    regions = csp_config.get('regions')
+    if isinstance(regions, dict):
+        for region_name, region_cfg in regions.items():
+            if not isinstance(region_cfg, dict):
+                continue
+            if not region_cfg.get('enable', False):
+                continue
+            enabled_regions.append(region_name)
+            for inst in region_cfg.get('instances', []):
+                if not isinstance(inst, dict):
+                    continue
+                if not inst.get('region'):
+                    inst['region'] = region_name
+                instances.append(inst)
+    else:
+        default_region = csp_config.get('region') or csp_config.get('zone')
+        if default_region:
+            enabled_regions.append(default_region)
+        for inst in csp_config.get('instances', []):
+            if not isinstance(inst, dict):
+                continue
+            if default_region and not inst.get('region'):
+                inst['region'] = default_region
+            instances.append(inst)
+
+    return instances, enabled_regions
+
+
+def order_instances_by_region(instances: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Reorder instances to enforce at least one instance per region first.
+
+    Returns:
+        (ordered_instances, regions)
+    """
+    region_map: Dict[str, List[Dict[str, Any]]] = {}
+    for inst in instances:
+        region = inst.get('region') or 'unknown-region'
+        region_map.setdefault(region, []).append(inst)
+
+    regions = list(region_map.keys())
+    ordered: List[Dict[str, Any]] = []
+
+    # First pass: one per region
+    for region in regions:
+        bucket = region_map[region]
+        if bucket:
+            ordered.append(bucket.pop(0))
+
+    # Round-robin the rest to keep distribution
+    remaining = True
+    while remaining:
+        remaining = False
+        for region in regions:
+            bucket = region_map[region]
+            if bucket:
+                ordered.append(bucket.pop(0))
+                remaining = True
+
+    return ordered, regions
 
 
 def load_config(config_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -3384,8 +3466,15 @@ Examples:
         print(f"[WARN] CSP '{args.csp}' is disabled in configuration")
         sys.exit(0)
 
+    # Expand region-based definitions
+    instances, enabled_regions = collect_instances_for_csp(csp_config)
+    if enabled_regions and not csp_config.get('region'):
+        csp_config['region'] = enabled_regions[0]
+        csp_config['zone'] = enabled_regions[0]
+
     # Filter enabled instances
-    instances = [inst for inst in csp_config.get('instances', []) if inst.get('enable', False)]
+    instances = [inst for inst in instances if inst.get('enable', False)]
+    instances, regions = order_instances_by_region(instances)
 
     if not instances:
         print(f"[WARN] No enabled instances found for {args.csp}")
@@ -3417,12 +3506,18 @@ Examples:
         print(f"{'='*80}")
         print(f"Max Workers: {max_workers}")
         print(f"Launch Delay: {provider.get_launch_delay_between_instances()}s")
+        if regions:
+            print(f"Regions (ordered): {', '.join(regions)}")
+            if max_workers < len(regions):
+                print(f"[WARN] max_workers ({max_workers}) < regions ({len(regions)}): "
+                      f"cannot start one per region concurrently.")
         if args.test:
             print(f"Mode: Testloads only (quick verification)")
         print(f"\nInstances to execute ({len(instances)}):")
         for i, inst in enumerate(instances, 1):
             testloads = " [testloads]" if inst.get('testloads') or args.test else ""
-            print(f"  {i}. {inst['name']} ({inst['type']}){testloads}")
+            region = inst.get('region') or "unknown-region"
+            print(f"  {i}. {inst['name']} ({inst['type']}) @ {region}{testloads}")
         print(f"{'='*80}\n")
         sys.exit(0)
 

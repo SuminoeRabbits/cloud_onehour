@@ -1,224 +1,250 @@
 {
   "aws": {
     "enable": true,
-    "region": "ap-northeast-1",
-    "instances": [
-      {
-        "enable": false,
-        "testloads": true,
-        "type": "t3.medium",
-        "arch": "amd64",
-        "hostname": "aws-t3-medium-amd64",
-        "vcpus": 2,
-        "name": "aws-t3-medium-amd64-vcpu-2",
-        "cpu_cost_hour[730h-mo]": 0.0183,
-        "extra_150g_storage": false,
-        "extra_150g_storage_cost_hour": 0.0197
-      },
-      {
+    "regions": {
+      "ap-northeast-1": {
         "enable": true,
-        "testloads": false,
-        "type": "m8a.2xlarge",
-        "arch": "amd64",
-        "hostname": "aws-m8a-2xlarge-amd64",
-        "vcpus": 8,
-        "name": "aws-m8a-2xlarge-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.2967,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0197
+        "instances": [
+          {
+            "enable": false,
+            "testloads": true,
+            "type": "t3.medium",
+            "arch": "amd64",
+            "hostname": "aws-t3-medium-amd64",
+            "vcpus": 2,
+            "name": "aws-t3-medium-amd64-vcpu-2",
+            "cpu_cost_hour[730h-mo]": 0.0183,
+            "extra_150g_storage": false,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m8a.2xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m8a-2xlarge-amd64",
+            "vcpus": 8,
+            "name": "aws-m8a-2xlarge-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.2967,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m8i.2xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m8i-2xlarge-amd64",
+            "vcpus": 8,
+            "name": "aws-m8i-2xlarge-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.2397,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "i7ie.2xlarge",
+            "arch": "amd64",
+            "hostname": "aws-i7ie-2xlarge-amd64",
+            "vcpus": 8,
+            "name": "aws-i7ie-2xlarge-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 1.2236,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m7i.2xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m7i-2xlarge-amd64",
+            "vcpus": 8,
+            "name": "aws-m7i-2xlarge-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.5208,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          }
+        ]
       },
-      {
+      "ap-northeast-3": {
         "enable": true,
-        "testloads": false,
-        "type": "m8i.2xlarge",
-        "arch": "amd64",
-        "hostname": "aws-m8i-2xlarge-amd64",
-        "vcpus": 8,
-        "name": "aws-m8i-2xlarge-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.2397,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0197
-      },
-      {
-        "enable": true,
-        "testloads": false,
-        "type": "m8g.2xlarge",
-        "arch": "arm64",
-        "hostname": "aws-m8g-2xlarge-arm64",
-        "vcpus": 8,
-        "name": "aws-m8g-2xlarge-arm64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.2077,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0197
-      },
-      {
-        "enable": true,
-        "testloads": false,
-        "type": "i7ie.2xlarge",
-        "arch": "amd64",
-        "hostname": "aws-i7ie-2xlarge-amd64",
-        "vcpus": 8,
-        "name": "aws-i7ie-2xlarge-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 1.2236,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0197
-      },
-      {
-        "enable": true,
-        "testloads": false,
-        "type": "m7i.2xlarge",
-        "arch": "amd64",
-        "hostname": "aws-m7i-2xlarge-amd64",
-        "vcpus": 8,
-        "name": "aws-m7i-2xlarge-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.5208,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0197
+        "instances": [
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m8g.2xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m8g-2xlarge-arm64",
+            "vcpus": 8,
+            "name": "aws-m8g-2xlarge-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.2077,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          }
+        ]
       }
-    ]
+    }
   },
   "gcp": {
     "enable": true,
     "project_id": "AUTO_DETECT",
-    "zone": "asia-northeast1-b",
-    "instances": [
-      {
-        "enable": false,
-        "testloads": true,
-        "type": "e2-standard-2",
-        "arch": "amd64",
-        "hostname": "gcp-e2-standard-2-amd64",
-        "vcpus": 2,
-        "name": "gcp-e2-standard-2-amd64-vcpu-2",
-        "cpu_cost_hour[730h-mo]": 0.0683,
-        "extra_150g_storage": false,
-        "extra_150g_storage_cost_hour": 0.0267
-      },
-      {
+    "regions": {
+      "asia-northeast1-b": {
         "enable": true,
-        "testloads": false,
-        "type": "c4d-standard-8",
-        "arch": "amd64",
-        "hostname": "gcp-c4d-standard-8-amd64",
-        "vcpus": 8,
-        "name": "gcp-c4d-standard-8-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.379,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0267
+        "instances": [
+          {
+            "enable": false,
+            "testloads": true,
+            "type": "e2-standard-2",
+            "arch": "amd64",
+            "hostname": "gcp-e2-standard-2-amd64",
+            "vcpus": 2,
+            "name": "gcp-e2-standard-2-amd64-vcpu-2",
+            "cpu_cost_hour[730h-mo]": 0.0683,
+            "extra_150g_storage": false,
+            "extra_150g_storage_cost_hour": 0.0267
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "c4d-standard-8",
+            "arch": "amd64",
+            "hostname": "gcp-c4d-standard-8-amd64",
+            "vcpus": 8,
+            "name": "gcp-c4d-standard-8-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.379,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0267
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "c4-standard-8",
+            "arch": "amd64",
+            "hostname": "gcp-c4-standard-8-amd64",
+            "vcpus": 8,
+            "name": "gcp-c4-standard-8-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.3964,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0267
+          }
+        ]
       },
-      {
+      "asia-northeast2-b": {
         "enable": true,
-        "testloads": false,
-        "type": "c4-standard-8",
-        "arch": "amd64",
-        "hostname": "gcp-c4-standard-8-amd64",
-        "vcpus": 8,
-        "name": "gcp-c4-standard-8-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.3964,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0267
+        "instances": [
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "c4a-standard-8",
+            "arch": "arm64",
+            "hostname": "gcp-c4a-standard-8-arm64",
+            "vcpus": 8,
+            "name": "gcp-c4a-standard-8-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.3602,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0267
+          }
+        ]
       },
-      {
+      "asia-southeast1-b": {
         "enable": true,
-        "testloads": false,
-        "type": "c4a-standard-8",
-        "arch": "arm64",
-        "hostname": "gcp-c4a-standard-8-arm64",
-        "vcpus": 8,
-        "name": "gcp-c4a-standard-8-arm64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.3602,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0267
-      },
-      {
-        "enable": true,
-        "testloads": false,
-        "type": "t2a-standard-8",
-        "arch": "arm64",
-        "hostname": "gcp-t2a-standard-8-arm64",
-        "vcpus": 8,
-        "name": "gcp-t2a-standard-8-arm64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.37984,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0267,
-        "zone": "asia-southeast1-b"
+        "instances": [
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "t2a-standard-8",
+            "arch": "arm64",
+            "hostname": "gcp-t2a-standard-8-arm64",
+            "vcpus": 8,
+            "name": "gcp-t2a-standard-8-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.37984,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0267
+          }
+        ]
       }
-    ]
+    }
   },
   "oci": {
     "enable": true,
-    "region": "us-ashburn-1",
-    "instances": [
-      {
-        "enable": false,
-        "testloads": true,
-        "type": "VM.Standard.E5.Flex",
-        "arch": "amd64",
-        "hostname": "oci-e5-flex-amd64",
-        "ocpus": 4,
-        "vcpus": 8,
-        "memory_gb": 32,
-        "name": "oci-e5-flex-amd64-vcpu-8-test",
-        "cpu_cost_hour[730h-mo]": 0.164,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0087
-      },
-      {
+    "regions": {
+      "us-ashburn-1": {
         "enable": true,
-        "testloads": false,
-        "type": "VM.Standard.E6.Flex",
-        "arch": "amd64",
-        "hostname": "oci-e6-flex-amd64",
-        "ocpus": 4,
-        "vcpus": 8,
-        "memory_gb": 32,
-        "name": "oci-e6-flex-amd64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.184,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0087
-      },
-      {
-        "enable": true,
-        "testloads": false,
-        "type": "VM.Standard.A1.Flex",
-        "arch": "arm64",
-        "hostname": "oci-a1-flex-arm64",
-        "ocpus": 8,
-        "vcpus": 8,
-        "memory_gb": 32,
-        "name": "oci-a1-flex-arm64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.128,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0087
-      },
-      {
-        "enable": true,
-        "testloads": false,
-        "type": "VM.Standard.A2.Flex",
-        "arch": "arm64",
-        "hostname": "oci-a2-flex-arm64",
-        "ocpus": 4,
-        "vcpus": 8,
-        "memory_gb": 32,
-        "name": "oci-a2-flex-arm64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.120,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0087
-      },
-      {
-        "enable": false,
-        "testloads": false,
-        "type": "VM.Standard.A4.Flex",
-        "arch": "arm64",
-        "hostname": "oci-a4-flex-arm64",
-        "ocpus": 4,
-        "vcpus": 8,
-        "memory_gb": 32,
-        "name": "oci-a4-flex-arm64-vcpu-8",
-        "cpu_cost_hour[730h-mo]": 0.1416,
-        "extra_150g_storage": true,
-        "extra_150g_storage_cost_hour": 0.0087
+        "instances": [
+          {
+            "enable": false,
+            "testloads": true,
+            "type": "VM.Standard.E5.Flex",
+            "arch": "amd64",
+            "hostname": "oci-e5-flex-amd64",
+            "ocpus": 4,
+            "vcpus": 8,
+            "memory_gb": 32,
+            "name": "oci-e5-flex-amd64-vcpu-8-test",
+            "cpu_cost_hour[730h-mo]": 0.164,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0087
+          },
+          {
+            "enable": false,
+            "testloads": false,
+            "type": "VM.Standard.E6.Flex",
+            "arch": "amd64",
+            "hostname": "oci-e6-flex-amd64",
+            "ocpus": 4,
+            "vcpus": 8,
+            "memory_gb": 32,
+            "name": "oci-e6-flex-amd64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.184,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0087
+          },
+          {
+            "enable": false,
+            "testloads": false,
+            "type": "VM.Standard.A1.Flex",
+            "arch": "arm64",
+            "hostname": "oci-a1-flex-arm64",
+            "ocpus": 8,
+            "vcpus": 8,
+            "memory_gb": 32,
+            "name": "oci-a1-flex-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.128,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0087
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "VM.Standard.A2.Flex",
+            "arch": "arm64",
+            "hostname": "oci-a2-flex-arm64",
+            "ocpus": 4,
+            "vcpus": 8,
+            "memory_gb": 32,
+            "name": "oci-a2-flex-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.120,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0087
+          },
+          {
+            "enable": false,
+            "testloads": false,
+            "type": "VM.Standard.A4.Flex",
+            "arch": "arm64",
+            "hostname": "oci-a4-flex-arm64",
+            "ocpus": 4,
+            "vcpus": 8,
+            "memory_gb": 32,
+            "name": "oci-a4-flex-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.1416,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0087
+          }
+        ]
       }
-    ]
+    }
   }
 }
