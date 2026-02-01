@@ -678,6 +678,17 @@ class Dashboard:
             if instance_name in self.instances:
                 data = self.instances[instance_name]
 
+                # Track total workloads if available in step name
+                try:
+                    m = re.search(r'Workload\s+(\d+)\s*/\s*(\d+)', step_name)
+                    if m:
+                        total = int(m.group(2))
+                        prev_total = data.get('workload_total')
+                        if not prev_total or total > prev_total:
+                            data['workload_total'] = total
+                except Exception:
+                    pass
+
                 # Format duration
                 if duration_sec < 60:
                     dur_str = f"{int(duration_sec)}s"
@@ -791,7 +802,14 @@ class Dashboard:
                 lines.append(f"{display_name:<30} | {status_str:<4} | {duration_str:<7} | {cost_str:<7}")
 
                 # History
-                for item in data.get('history', []):
+                history_items = data.get('history', [])
+                workload_total = data.get('workload_total')
+                if workload_total and workload_total <= 10:
+                    display_history = history_items
+                else:
+                    display_history = history_items[-5:]
+
+                for item in display_history:
                     stat = item['status']
                     color = self.GREEN if stat == "OK" else (self.FAIL if stat in ["ERR", "TO"] else self.BOLD)
                     item_str = f"  [{color}{stat}{self.ENDC}] {item['name']} ({item['duration']})"
@@ -1742,7 +1760,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                         status = get_instance_status(
                             cloud=inst.get('cloud'),
-                            instance_id=inst.get('instance_id'),
+                            instance_id=inst.get('instance_id') or inst.get('name'),
                             region=inst.get('region'),
                             project=inst.get('project'),
                             zone=inst.get('region') or inst.get('zone'),
@@ -3133,6 +3151,8 @@ def process_instance(
         if not ip or ip == "None":
             logger.error(f"Failed to get IP for {sanitized_name}")
             return
+
+        inst['instance_id'] = instance_id
 
         # Register for cleanup
         register_instance(
