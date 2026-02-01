@@ -912,9 +912,8 @@ eval "$REAL_CC" $ARGS
 
         # Execute install command with real-time output streaming (stdout+stderr)
         print(f"  Running installation...")
-        install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
-        use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
+        use_install_log = True
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
 
         def _run_install(log_f=None):
@@ -947,6 +946,24 @@ eval "$REAL_CC" $ARGS
         else:
             returncode, install_output = _run_install()
 
+        def _collect_install_failed_log():
+            install_failed_log = (
+                Path.home()
+                / ".phoronix-test-suite"
+                / "installed-tests"
+                / "pts"
+                / self.benchmark
+                / "install-failed.log"
+            )
+            if install_failed_log.exists():
+                try:
+                    dest_log = self.results_dir / "install-failed.log"
+                    shutil.copy2(install_failed_log, dest_log)
+                    print(f"  [INFO] Copied install-failed.log -> {dest_log}")
+                except Exception as e:
+                    print(f"  [WARN] Failed to copy install-failed.log: {e}")
+            return install_failed_log
+
         # Check for installation failure
         install_failed = False
         full_output = ''.join(install_output)
@@ -964,12 +981,9 @@ eval "$REAL_CC" $ARGS
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             # Attempt to surface PTS install-failed log for easier debugging
-            install_failed_log = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark / "install-failed.log"
+            install_failed_log = _collect_install_failed_log()
             if install_failed_log.exists():
                 try:
-                    dest_log = self.results_dir / "install-failed.log"
-                    shutil.copy2(install_failed_log, dest_log)
-                    print(f"  [INFO] Copied install-failed.log -> {dest_log}")
                     print(f"  [INFO] install-failed.log (tail):")
                     tail = install_failed_log.read_text().splitlines()[-50:]
                     for line in tail:
@@ -987,6 +1001,7 @@ eval "$REAL_CC" $ARGS
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
             print(f"  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
+            _collect_install_failed_log()
             sys.exit(1)
 
         # Check if test is recognized by PTS
