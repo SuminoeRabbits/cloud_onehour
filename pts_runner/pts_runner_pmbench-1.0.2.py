@@ -702,6 +702,7 @@ fi
 ARGS=""
 HAS_O=0
 HAS_C=0
+OUT_FILE=""
 for a in "$@"; do
   if [ "$a" = "-o" ]; then
     HAS_O=1
@@ -709,10 +710,18 @@ for a in "$@"; do
   if [ "$a" = "-c" ]; then
     HAS_C=1
   fi
+  if [ "$HAS_O" = "1" ] && [ -z "$OUT_FILE" ] && [ "$a" != "-o" ]; then
+    OUT_FILE="$a"
+  fi
   if [ "$a" != "-m64" ]; then
     ARGS="$ARGS \"$a\""
   fi
 done
+if [ "$HAS_C" = "0" ] && [ -n "$OUT_FILE" ]; then
+  case "$OUT_FILE" in
+    *.o|*.obj) ARGS="$ARGS -c" ;;
+  esac
+fi
 if [ "$HAS_O" = "1" ] && [ "$HAS_C" = "0" ] && [ -n "$PTS_EXTRA_LINK_LIBS" ]; then
   ARGS="$ARGS $PTS_EXTRA_LINK_LIBS"
 fi
