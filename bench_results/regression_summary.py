@@ -314,6 +314,10 @@ def main() -> int:
             return 1
 
         for tar_path in tarballs:
+            if tar_path.stat().st_size == 0:
+                print(f"Skipping empty tar.gz: {tar_path}", file=sys.stderr)
+                tar_path.unlink(missing_ok=True)
+                continue
             machinename = infer_machine_name(tar_path)
             machine_dir = workdir / machinename
             machine_dir.mkdir(parents=True, exist_ok=True)
