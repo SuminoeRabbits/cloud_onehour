@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 from tabulate import tabulate
 
 # --- 設定エリア ---
-AWS_REGION = "ap-northeast-1"
-# GCPとOCIは全リージョン検索のため設定不要
+AWS_REGIONS_FALLBACK = ["ap-northeast-1"]
+# GCPは全リージョン・全ゾーン検索
+# OCIは全リージョン検索
 # ----------------
 
 def run_command(cmd):
@@ -26,6 +27,42 @@ def run_command(cmd):
         return False, None, f"Command '{cmd[0]}' not found"
     except Exception as e:
         return False, None, str(e)
+
+def get_aws_regions():
+    cmd = ["aws", "ec2", "describe-regions", "--query", "Regions[].RegionName", "--output", "json"]
+    success, data, err = run_command(cmd)
+    if success and isinstance(data, list) and data:
+        return sorted(data)
+    return AWS_REGIONS_FALLBACK
+
+def get_oci_regions():
+    cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--raw-output"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            regions = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            return regions if regions else []
+    except Exception:
+        pass
+    return []
+
+def get_oci_compartment_id():
+    cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"]
+    try:
+        cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
+        if cid_proc.returncode != 0:
+            err_msg = cid_proc.stderr.strip().split('\n')[0] if cid_proc.stderr else "Unknown error"
+            return None, f"Auth/Config error: {err_msg[:40]}..."
+        compartment_id = cid_proc.stdout.strip()
+        if not compartment_id:
+            return None, "No compartment found"
+        return compartment_id, None
+    except FileNotFoundError:
+        return None, "OCI CLI not installed"
+    except subprocess.TimeoutExpired:
+        return None, "Timeout (Network unreachable)"
+    except Exception as e:
+        return None, f"Exception: {str(e)[:40]}"
 
 def format_start_jst(iso_timestamp):
     if not iso_timestamp:
@@ -70,52 +107,44 @@ def get_gcp_instances():
     return rows if rows else [["GCP", "ALL", "(No Instances Found)", "-", "-", "-"]]
 
 def get_oci_instances():
-    # 1. テナンシーID（ルートコンパートメント）を取得
-    # compartment listの最初の項目のcompartment-idがテナンシーID
-    cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"]
-    try:
-        cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
-        if cid_proc.returncode != 0:
-            # 詳細なエラーメッセージを取得
-            err_msg = cid_proc.stderr.strip().split('\n')[0] if cid_proc.stderr else "Unknown error"
-            return [["OCI", "N/A", "ERROR", "N/A", f"Auth/Config error: {err_msg[:40]}...", "-"]]
-        compartment_id = cid_proc.stdout.strip()
-        if not compartment_id:
-            return [["OCI", "N/A", "ERROR", "N/A", "No compartment found", "-"]]
-    except FileNotFoundError:
-        return [["OCI", "N/A", "ERROR", "N/A", "OCI CLI not installed", "-"]]
-    except subprocess.TimeoutExpired:
-        return [["OCI", "N/A", "ERROR", "N/A", "Timeout (Network unreachable)", "-"]]
-    except Exception as e:
-        return [["OCI", "N/A", "ERROR", "N/A", f"Exception: {str(e)[:40]}", "-"]]
-
-    # 2. インスタンス取得
-    cmd = ["oci", "compute", "instance", "list", "--compartment-id", compartment_id, "--output", "json"]
-    success, data, err = run_command(cmd)
-    if not success:
+    compartment_id, err = get_oci_compartment_id()
+    if err:
         return [["OCI", "N/A", "ERROR", "N/A", err, "-"]]
 
+    regions = get_oci_regions()
+    if not regions:
+        regions = [None]
+
     rows = []
-    for inst in data.get("data", []):
-        # TERMINATEDインスタンスは除外
-        lifecycle_state = inst.get("lifecycle-state", "UNKNOWN")
-        if lifecycle_state != "TERMINATED":
-            start_jst = format_start_jst(inst.get("time-created"))
-            rows.append([
-                "OCI",
-                inst.get("region", "N/A"),
-                inst.get("display-name", "N/A"),
-                inst.get("id", "")[-10:],
-                lifecycle_state,
-                start_jst
-            ])
+    for region in regions:
+        cmd_prefix = ["env", f"OCI_REGION={region}"] if region else []
+        cmd = cmd_prefix + ["oci", "compute", "instance", "list", "--compartment-id", compartment_id, "--output", "json"]
+        success, data, err = run_command(cmd)
+        if not success:
+            rows.append(["OCI", region or "N/A", "ERROR", "N/A", err, "-"])
+            continue
+
+        for inst in data.get("data", []):
+            lifecycle_state = inst.get("lifecycle-state", "UNKNOWN")
+            if lifecycle_state != "TERMINATED":
+                start_jst = format_start_jst(inst.get("time-created"))
+                rows.append([
+                    "OCI",
+                    region or inst.get("region", "N/A"),
+                    inst.get("display-name", "N/A"),
+                    inst.get("id", "")[-10:],
+                    lifecycle_state,
+                    start_jst
+                ])
+
     return rows if rows else [["OCI", "N/A", "(No Instances Found)", "-", "-", "-"]]
 
 def main():
     print("Gathering status from AWS, GCP, and OCI...")
     
     all_data = []
-    all_data.extend(get_aws_instances(AWS_REGION))
+    for region in get_aws_regions():
+        all_data.extend(get_aws_instances(region))
     all_data.extend(get_gcp_instances())
     all_data.extend(get_oci_instances())
 

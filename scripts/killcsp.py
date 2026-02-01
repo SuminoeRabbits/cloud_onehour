@@ -6,8 +6,9 @@ import argparse
 from tabulate import tabulate
 
 # --- 設定エリア ---
-AWS_REGION = "ap-northeast-1"
-# GCPとOCIは全リージョン検索のため設定不要
+AWS_REGIONS_FALLBACK = ["ap-northeast-1"]
+# GCPは全リージョン・全ゾーン検索
+# OCIは全リージョン検索
 # ----------------
 
 def run_command(cmd):
@@ -20,6 +21,34 @@ def run_command(cmd):
         return False, None, f"Command '{cmd[0]}' not found"
     except Exception as e:
         return False, None, str(e)
+
+def get_aws_regions():
+    success, data, _ = run_command(["aws", "ec2", "describe-regions", "--query", "Regions[].RegionName", "--output", "json"])
+    if success and isinstance(data, list) and data:
+        return sorted(data)
+    return AWS_REGIONS_FALLBACK
+
+def get_oci_regions():
+    cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--raw-output"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            regions = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            return regions if regions else []
+    except Exception:
+        pass
+    return []
+
+def get_oci_compartment_id():
+    cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"]
+    try:
+        cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
+        if cid_proc.returncode != 0:
+            return None
+        compartment_id = cid_proc.stdout.strip()
+        return compartment_id if compartment_id else None
+    except Exception:
+        return None
 
 def get_all_instances(csp_filter=None):
     """
@@ -42,14 +71,15 @@ def get_all_instances(csp_filter=None):
 
     # --- AWS ---
     if 'aws' in enabled_csps:
-        success, data, _ = run_command(["aws", "ec2", "describe-instances", "--region", AWS_REGION, "--output", "json"])
-        if success:
-            for res in data.get("Reservations", []):
-                for inst in res.get("Instances", []):
-                    if inst["State"]["Name"] != "terminated":
-                        name = next((t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), "N/A")
-                        # [cloud, location, name, display_id, full_id, state]
-                        all_instances.append(["AWS", AWS_REGION, name, inst["InstanceId"], inst["InstanceId"], inst["State"]["Name"]])
+        for region in get_aws_regions():
+            success, data, _ = run_command(["aws", "ec2", "describe-instances", "--region", region, "--output", "json"])
+            if success:
+                for res in data.get("Reservations", []):
+                    for inst in res.get("Instances", []):
+                        if inst["State"]["Name"] != "terminated":
+                            name = next((t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), "N/A")
+                            # [cloud, location, name, display_id, full_id, state]
+                            all_instances.append(["AWS", region, name, inst["InstanceId"], inst["InstanceId"], inst["State"]["Name"]])
 
     # --- GCP --- (全リージョン・全ゾーン検索)
     if 'gcp' in enabled_csps:
@@ -63,20 +93,20 @@ def get_all_instances(csp_filter=None):
 
     # --- OCI ---
     if 'oci' in enabled_csps:
-        try:
-            # テナンシーID（ルートコンパートメント）を取得
-            cid_proc = subprocess.run(["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"], capture_output=True, text=True, timeout=10)
-            if cid_proc.returncode == 0:
-                compartment_id = cid_proc.stdout.strip()
-                success, data, _ = run_command(["oci", "compute", "instance", "list", "--compartment-id", compartment_id, "--output", "json"])
+        compartment_id = get_oci_compartment_id()
+        if compartment_id:
+            regions = get_oci_regions()
+            if not regions:
+                regions = [None]
+            for region in regions:
+                cmd_prefix = ["env", f"OCI_REGION={region}"] if region else []
+                success, data, _ = run_command(cmd_prefix + ["oci", "compute", "instance", "list", "--compartment-id", compartment_id, "--output", "json"])
                 if success:
                     for inst in data.get("data", []):
                         if inst["lifecycle-state"] != "TERMINATED":
                             full_id = inst.get("id")
                             display_id = full_id[-10:] if full_id else "N/A"
-                            all_instances.append(["OCI", inst.get("region", "N/A"), inst.get("display-name"), display_id, full_id, inst.get("lifecycle-state")])
-        except:
-            pass
+                            all_instances.append(["OCI", region or inst.get("region", "N/A"), inst.get("display-name"), display_id, full_id, inst.get("lifecycle-state")])
 
     return all_instances
 
@@ -98,7 +128,10 @@ def execute_kill(instances):
             subprocess.run(["gcloud", "compute", "instances", "delete", full_id, "--zone", loc, "--quiet"], capture_output=True)
         elif cloud == "OCI":
             # OCIはフルIDを使用
-            subprocess.run(["oci", "compute", "instance", "terminate", "--instance-id", full_id, "--force"], capture_output=True)
+            if loc and loc != "N/A":
+                subprocess.run(["env", f"OCI_REGION={loc}", "oci", "compute", "instance", "terminate", "--instance-id", full_id, "--force"], capture_output=True)
+            else:
+                subprocess.run(["oci", "compute", "instance", "terminate", "--instance-id", full_id, "--force"], capture_output=True)
 
 def main():
     parser = argparse.ArgumentParser(
