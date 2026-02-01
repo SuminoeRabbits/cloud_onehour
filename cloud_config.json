@@ -49,7 +49,8 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_stream-1.3.4.py > /tmp/pts_runner_stream.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tinymembench-1.0.2.py 1 --quick > /tmp/pts_runner_tinymembench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_memcached-1.2.0.py --quick > /tmp/pts_runner_memcached.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_cachebench-1.2.0.py > /tmp/pts_runner_cachebench.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_cachebench-1.2.0.py 288 > /tmp/pts_runner_cachebench.log 2>&1",
+      "cd ~/cloud_onehour && ./pts_runner/pts_runner_cachebench-1.2.0.py 4 > /tmp/pts_runner_cachebench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_numpy-1.2.1.py > /tmp/pts_runner_numpy.log 2>&1",
       "cd ~/cloud_onehour/results && ./pts_runner_postmortem.py > /tmp/pts_runner_postmortem.log 2>&1",
@@ -59,15 +60,14 @@
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "workload_timeout": 12000,
+    "workload_timeout": 6000,
     "ssh_strict_host_key_checking": false,
     "debug_stdout": true,
     "long_running_indicators": [
       "pts_regression.py",
       "benchmark",
       "phoronix-test-suite",
-      "pts_runner",
-      "prepare_tools.sh"
+      "pts_runner"
     ]
   },
   "instance_definitions_file": "cloud_instances.json"
