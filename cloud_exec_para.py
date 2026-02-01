@@ -486,6 +486,40 @@ def verify_pts_runner_syntax() -> List[str]:
 
     return errors
 
+
+def verify_json_files(config_path: str) -> bool:
+    """
+    Verify JSON syntax for cloud_config.json and cloud_instances.json.
+    """
+    try:
+        with open(config_path, 'r') as f:
+            json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"[✗] JSON syntax error in {config_path}: Line {e.lineno} Col {e.colno}")
+        print(f"    {e.msg}")
+        return False
+    except Exception as e:
+        print(f"[✗] Failed to read {config_path}: {e}")
+        return False
+
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        inst_def_file = config.get('instance_definitions_file', 'cloud_instances.json')
+        inst_def_path = Path(config_path).parent / inst_def_file
+        with open(inst_def_path, 'r') as f:
+            json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"[✗] JSON syntax error in {inst_def_path}: Line {e.lineno} Col {e.colno}")
+        print(f"    {e.msg}")
+        return False
+    except Exception as e:
+        print(f"[✗] Failed to read {inst_def_path}: {e}")
+        return False
+
+    print("[✓] JSON syntax check passed: cloud_config.json / cloud_instances.json")
+    return True
+
 def cleanup_active_instances(signum=None, frame=None):
     """
     Emergency cleanup on interruption (Ctrl+C or kill signal).
@@ -662,7 +696,7 @@ class Dashboard:
                 data = self.instances[instance_name]
                 if status:
                     data['status'] = status
-                    if status in ['COMPLETED', 'TERMINATED'] and data['end_time'] is None:
+                    if status in ['COMPLETED', 'TERMINATED', 'ERROR', 'TERM_TIMEOUT', 'TERM_FAILED'] and data['end_time'] is None:
                         data['end_time'] = datetime.now()
                 if step:
                     if data['step'] != step:
@@ -3498,6 +3532,11 @@ def main():
     if not verify_syntax():
         print("[ERROR] Syntax errors detected. Aborting execution.")
         print("[ERROR] Please fix syntax errors before launching instances.")
+        sys.exit(1)
+
+    # 1.5 JSON SYNTAX CHECK
+    if not verify_json_files('cloud_config.json'):
+        print("[ERROR] JSON syntax errors detected. Aborting execution.")
         sys.exit(1)
 
     # Optional: Check pts_runner scripts
