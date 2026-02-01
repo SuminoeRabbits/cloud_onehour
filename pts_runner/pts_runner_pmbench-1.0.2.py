@@ -1025,6 +1025,14 @@ eval "$REAL_CC" $ARGS
             _collect_install_failed_log()
             self._copy_debug_dump("install-verify-failed")
             sys.exit(1)
+        pmbench_bin = installed_dir / "pmbench"
+        if not pmbench_bin.exists():
+            print(f"  [ERROR] Installation verification failed")
+            print(f"  [ERROR] Expected test executable not found: {pmbench_bin}")
+            print(f"  [INFO] Installation may have failed silently")
+            _collect_install_failed_log()
+            self._copy_debug_dump("install-verify-failed")
+            sys.exit(1)
 
         # Check if test is recognized by PTS
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
@@ -1039,6 +1047,24 @@ eval "$REAL_CC" $ARGS
             print(f"  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
+        try:
+            print("  [INFO] Locating pmbench binary...")
+            find_cmd = f'find "{installed_dir}" -type f -name "pmbench" -print'
+            find_result = subprocess.run(
+                ['bash', '-c', find_cmd],
+                capture_output=True,
+                text=True
+            )
+            if find_result.stdout.strip():
+                for line in find_result.stdout.strip().splitlines():
+                    print(f"  [INFO] pmbench binary: {line}")
+            else:
+                print("  [WARN] No pmbench binary found under installed dir")
+            if find_result.stderr.strip():
+                print(f"  [WARN] find stderr: {find_result.stderr.strip()}")
+        except Exception as e:
+            print(f"  [WARN] Failed to locate pmbench binary: {e}")
+        self._copy_debug_dump("install-success")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
