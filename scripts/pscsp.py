@@ -36,7 +36,12 @@ def get_aws_regions():
         return sorted(data)
     return AWS_REGIONS_FALLBACK
 
-def get_oci_regions():
+def get_oci_regions(tenancy_id=None):
+    if tenancy_id:
+        cmd = ["oci", "iam", "region-subscription", "list", "--tenancy-id", tenancy_id, "--query", "data[].region-name", "--output", "json"]
+        success, data, _ = run_command(cmd)
+        if success and isinstance(data, list) and data:
+            return data
     cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--output", "json"]
     success, data, _ = run_command(cmd)
     if success and isinstance(data, list):
@@ -108,7 +113,7 @@ def get_oci_instances():
     if err:
         return [["OCI", "N/A", "ERROR", "N/A", err, "-"]]
 
-    regions = get_oci_regions()
+    regions = get_oci_regions(compartment_id)
     if not regions:
         regions = [None]
 
@@ -124,6 +129,9 @@ def get_oci_instances():
         for inst in data.get("data", []):
             lifecycle_state = inst.get("lifecycle-state", "UNKNOWN")
             if lifecycle_state != "TERMINATED":
+                inst_region = inst.get("region")
+                if region and inst_region and inst_region != region:
+                    continue
                 start_jst = format_start_jst(inst.get("time-created"))
                 rows.append([
                     "OCI",

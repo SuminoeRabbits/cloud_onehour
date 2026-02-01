@@ -2336,6 +2336,11 @@ class AWSProvider(CloudProvider):
             f"aws ec2 describe-key-pairs --region {region} --query 'KeyPairs[0].KeyName' --output text",
             logger=logger
         )
+        if not key_name or key_name == "None":
+            msg = f"AWS key pair not found in region {region}. Create a key pair before launching instances."
+            if logger:
+                logger.error(msg)
+            raise ValueError(msg)
 
         self._region_resources[region] = {
             'sg_id': sg_id,
@@ -2372,6 +2377,11 @@ class AWSProvider(CloudProvider):
                 f"aws ec2 describe-key-pairs --region {region} --query 'KeyPairs[0].KeyName' --output text",
                 logger=logger
             )
+            if not key_name or key_name == "None":
+                msg = f"AWS key pair not found in region {region}. Create a key pair before launching instances."
+                if logger:
+                    logger.error(msg)
+                raise ValueError(msg)
             resources = {'sg_id': sg_id, 'key_name': key_name}
             self._region_resources[region] = resources
 

@@ -77,9 +77,13 @@ def get_aws_regions(only_region=None):
         return sorted(data)
     return AWS_REGIONS_FALLBACK
 
-def get_oci_regions(only_region=None):
+def get_oci_regions(only_region=None, tenancy_id=None):
     if only_region:
         return [only_region]
+    if tenancy_id:
+        success, data, _ = run_command(["oci", "iam", "region-subscription", "list", "--tenancy-id", tenancy_id, "--query", "data[].region-name", "--output", "json"])
+        if success and isinstance(data, list) and data:
+            return data
     success, data, _ = run_command(["oci", "iam", "region", "list", "--query", "data[].name", "--output", "json"])
     if success and isinstance(data, list):
         return data
@@ -148,7 +152,7 @@ def get_all_instances(csp_filter=None, aws_region=None, oci_region=None):
     if 'oci' in enabled_csps:
         compartment_id = get_oci_compartment_id()
         if compartment_id:
-            regions = get_oci_regions(oci_region)
+            regions = get_oci_regions(oci_region, tenancy_id=compartment_id)
             if not regions:
                 regions = [None]
             with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as executor:
@@ -163,6 +167,9 @@ def get_all_instances(csp_filter=None, aws_region=None, oci_region=None):
                     if success:
                         for inst in data.get("data", []):
                             if inst["lifecycle-state"] != "TERMINATED":
+                                inst_region = inst.get("region")
+                                if region and inst_region and inst_region != region:
+                                    continue
                                 full_id = inst.get("id")
                                 display_id = full_id[-10:] if full_id else "N/A"
                                 all_instances.append(["OCI", region or inst.get("region", "N/A"), inst.get("display-name"), display_id, full_id, inst.get("lifecycle-state"), inst.get("time-created")])
