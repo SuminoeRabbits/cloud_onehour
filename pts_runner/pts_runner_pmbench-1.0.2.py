@@ -213,11 +213,17 @@ class PmbenchRunner:
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
         self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
+        self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # Quick mode for development
         self.quick_mode = quick_mode
         self.dry_run = dry_run
         self.force_arm64 = force_arm64
+        # Debug dump is disabled by default; enable via hardcoded flag for this runner only.
+        self.debug_dump = False
+        ENABLE_DEBUG_DUMP = True
+        if ENABLE_DEBUG_DUMP:
+            self.debug_dump = True
 
         # Detect environment for logging
         self.is_wsl_env = self.is_wsl()
@@ -238,6 +244,19 @@ class PmbenchRunner:
             print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
+    def _copy_debug_dump(self, stage: str = "runtime"):
+        if not self.debug_dump:
+            return
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        tmp_log = Path("/tmp/pts_runner_pmbench.log")
+        if tmp_log.exists():
+            try:
+                dest = self.results_dir / "pts_runner_pmbench.log"
+                shutil.copy2(tmp_log, dest)
+                print(f"  [INFO] Copied {tmp_log} -> {dest} ({stage})")
+            except Exception as e:
+                print(f"  [WARN] Failed to copy {tmp_log}: {e}")
 
     def get_os_name(self):
         """Get OS name and version formatted as <Distro>_<Version>."""
@@ -945,6 +964,7 @@ eval "$REAL_CC" $ARGS
                 returncode, install_output = _run_install(log_f)
         else:
             returncode, install_output = _run_install()
+        self._copy_debug_dump("after-install")
 
         def _collect_install_failed_log():
             install_failed_log = (
@@ -990,6 +1010,7 @@ eval "$REAL_CC" $ARGS
                         print(f"    {line}")
                 except Exception as e:
                     print(f"  [WARN] Failed to read install-failed.log: {e}")
+            self._copy_debug_dump("install-failed")
             sys.exit(1)
 
         # Verify installation by checking if directory exists
@@ -1002,6 +1023,7 @@ eval "$REAL_CC" $ARGS
             print(f"  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             _collect_install_failed_log()
+            self._copy_debug_dump("install-verify-failed")
             sys.exit(1)
 
         # Check if test is recognized by PTS
