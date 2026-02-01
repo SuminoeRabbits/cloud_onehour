@@ -637,10 +637,11 @@ class Dashboard:
         self.BOLD = '\033[1m'
         self.WARN = self.WARNING  # Alias for compatibility
 
-    def register(self, instance_name, cloud_type, machine_type, cpu_cost=0.0, storage_cost=0.0):
+    def register(self, instance_name, cloud_type, machine_type, cpu_cost=0.0, storage_cost=0.0, region=None):
         with self.lock:
             self.instances[instance_name] = {
                 'cloud': cloud_type,
+                'region': region,
                 'type': machine_type,
                 'status': 'PENDING',
                 'step': 'Initializing...',
@@ -741,9 +742,22 @@ class Dashboard:
         lines.append("-" * 100)
 
         with self.lock:
-            sorted_insts = sorted(self.instances.items())
+            sorted_insts = sorted(
+                self.instances.items(),
+                key=lambda item: (
+                    item[1].get('cloud') or '',
+                    item[1].get('region') or '',
+                    item[0]
+                )
+            )
 
+            current_group = None
             for name, data in sorted_insts:
+                group_key = f"{data.get('cloud', 'UNKNOWN')} / {data.get('region', 'unknown-region')}"
+                if group_key != current_group:
+                    lines.append(f"{self.BOLD}{group_key}{self.ENDC}")
+                    lines.append("-" * 100)
+                    current_group = group_key
                 # Status
                 raw_stat = data['status']
                 stat_map = {
@@ -1134,10 +1148,12 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
     # Build storage configuration using centralized helper
     storage_config = build_storage_config(inst, 'aws')
 
+    tag_spec = f"--tag-specifications 'ResourceType=instance,Tags=[{{Key=Name,Value={inst['name']}}}]' "
     instance_id = run_cmd(
         f"aws ec2 run-instances --region {region} --image-id {ami} "
         f"--instance-type {inst['type']} --key-name {key_name} "
         f"--security-group-ids {sg_id} {storage_config}"
+        f"{tag_spec}"
         f"--query 'Instances[0].InstanceId' --output text",
         logger=logger
     )
@@ -2240,7 +2256,7 @@ def process_instance(cloud, inst, config, key_path, log_dir):
         storage_cost = inst.get('extra_150g_storage_cost_hour', 0.0)
 
     # Register with dashboard
-    DASHBOARD.register(instance_name, cloud.upper(), inst['type'], cpu_cost=cpu_cost, storage_cost=storage_cost)
+    DASHBOARD.register(instance_name, cloud.upper(), inst['type'], cpu_cost=cpu_cost, storage_cost=storage_cost, region=inst.get('region'))
     
     # Inject cloud provider into instance dict for downstream use
     inst['cloud'] = cloud
@@ -2320,7 +2336,7 @@ class AWSProvider(CloudProvider):
         result = run_cmd(
             f"aws ec2 describe-instances --region {region} "
             f"--filters 'Name=tag:Name,Values={instance_name}' "
-            f"'Name=instance-state-name,Values=pending,running' "
+            f"'Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down' "
             f"--query 'Reservations[*].Instances[*].InstanceId' "
             f"--output text",
             capture=True,
@@ -2670,6 +2686,70 @@ class OCIProvider(CloudProvider):
         region = self._get_region_for_instance(inst)
         return f"OCI_REGION={region} " if region else ""
 
+    def _find_existing_instance(self, inst: Dict[str, Any], logger=None) -> Optional[Dict[str, str]]:
+        """Find existing instance by display-name in any non-terminated state."""
+        name = inst.get('name')
+        if not name:
+            return None
+
+        compartment_id = self._get_compartment_id_for_instance(inst)
+        cmd_prefix = self._oci_cmd_prefix(inst)
+
+        query = (
+            f"{cmd_prefix}oci compute instance list "
+            f"--compartment-id {compartment_id} "
+            f"--query 'data[?\"display-name\"==\"{name}\"] | [0].{{id:id,state:\"lifecycle-state\"}}' "
+            f"--output json"
+        )
+        result = run_cmd(query, capture=True, ignore=True, logger=logger)
+        if not result:
+            return None
+        try:
+            data = json.loads(result)
+            if isinstance(data, dict) and data.get("id"):
+                state = data.get("state", "UNKNOWN")
+                if state != "TERMINATED":
+                    return {"id": data["id"], "state": state}
+        except Exception:
+            return None
+        return None
+
+    def _wait_for_instance_running(self, inst: Dict[str, Any], instance_id: str, logger=None, timeout=600) -> bool:
+        """Wait until instance reaches RUNNING or timeout."""
+        cmd_prefix = self._oci_cmd_prefix(inst)
+        start = time.time()
+        while time.time() - start < timeout:
+            status = run_cmd(
+                f"{cmd_prefix}oci compute instance get --instance-id {instance_id} "
+                f"--query 'data.\"lifecycle-state\"' --raw-output",
+                capture=True,
+                ignore=True,
+                logger=logger
+            )
+            state = status.strip().upper() if status else "UNKNOWN"
+            if state == "RUNNING":
+                return True
+            if state == "TERMINATED":
+                return False
+            time.sleep(10)
+        return False
+
+    def _get_instance_ip(self, inst: Dict[str, Any], instance_id: str, logger=None) -> Optional[str]:
+        """Fetch public IP for an existing instance."""
+        cmd_prefix = self._oci_cmd_prefix(inst)
+        vnic_att_query = (
+            f"{cmd_prefix}oci compute vnic-attachment list --compartment-id {self._get_compartment_id_for_instance(inst)} "
+            f"--instance-id {instance_id} --query 'data[0].\"vnic-id\"' --raw-output"
+        )
+        vnic_id = run_cmd(vnic_att_query, logger=logger)
+        if vnic_id and vnic_id != "None":
+            ip_query = (
+                f"{cmd_prefix}oci network vnic get --vnic-id {vnic_id} "
+                f"--query 'data.\"public-ip\"' --raw-output"
+            )
+            return run_cmd(ip_query, logger=logger)
+        return None
+
     def validate_instance_name(self, name: str) -> None:
         """Validate OCI instance name (1-255 chars)."""
         if len(name) > 255:
@@ -2680,26 +2760,11 @@ class OCIProvider(CloudProvider):
     def check_instance_exists(self, instance_name: str, inst: Optional[Dict[str, Any]] = None, logger=None) -> bool:
         """Check if OCI instance exists."""
         inst = inst or {}
-        compartment_id = self._get_compartment_id_for_instance(inst)
-        cmd_prefix = self._oci_cmd_prefix(inst)
-
-        result = run_cmd(
-            f"{cmd_prefix}oci compute instance list "
-            f"--compartment-id {compartment_id} "
-            f"--display-name '{instance_name}' "
-            f"--lifecycle-state RUNNING "
-            f"--query 'data[*].id' "
-            f"--raw-output",
-            capture=True,
-            ignore=True,
-            logger=logger
-        )
-
-        if result and result.strip() and result != "None":
+        existing = self._find_existing_instance(inst, logger=logger)
+        if existing:
             if logger:
-                logger.warn(f"Found existing OCI instance with name '{instance_name}'")
+                logger.warn(f"Found existing OCI instance with name '{instance_name}' (state={existing['state']})")
             return True
-
         return False
 
     def is_rate_limit_error(self, exception: Exception) -> bool:
@@ -2734,12 +2799,34 @@ class OCIProvider(CloudProvider):
 
     def launch_instance(self, inst: Dict[str, Any], logger=None) -> Tuple[Optional[str], Optional[str]]:
         """Launch OCI instance and return (instance_id, ip)."""
+        region = self._get_region_for_instance(inst)
+        if logger:
+            logger.info(f"OCI target region: {region}")
+        if not region:
+            msg = "OCI region is not set; aborting launch to prevent cross-region creation."
+            if logger:
+                logger.error(msg)
+            return None, None
+
         compartment_id = self._get_compartment_id_for_instance(inst)
         cmd_prefix = self._oci_cmd_prefix(inst)
         name = inst['name']
 
         if logger:
             logger.info(f"Launching OCI instance: {name} ({inst['type']})")
+
+        # If instance already exists in non-terminated state, do not create a new one
+        existing = self._find_existing_instance(inst, logger=logger)
+        if existing:
+            if logger:
+                logger.warn(f"Existing OCI instance found (state={existing['state']}), skipping create.")
+            if existing["state"].upper() != "RUNNING":
+                if logger:
+                    logger.info("Waiting for existing instance to reach RUNNING...")
+                if not self._wait_for_instance_running(inst, existing["id"], logger=logger):
+                    return None, None
+            ip = self._get_instance_ip(inst, existing["id"], logger=logger)
+            return existing["id"], ip
 
         # 1. Find Subnet ID (from config or auto-detect public subnet)
         subnet_id = self._get_subnet_id_for_instance(inst)
@@ -2873,29 +2960,24 @@ class OCIProvider(CloudProvider):
         if not instance_id or "opc-request-id" in instance_id:
             if logger:
                 logger.error(f"Launch failed or returned invalid ID: {instance_id}")
+            # Re-check existing instance by name before giving up (retry-safe)
+            existing = self._find_existing_instance(inst, logger=logger)
+            if existing:
+                if existing["state"].upper() != "RUNNING":
+                    if not self._wait_for_instance_running(inst, existing["id"], logger=logger):
+                        return None, None
+                ip = self._get_instance_ip(inst, existing["id"], logger=logger)
+                return existing["id"], ip
             return None, None
 
         # 7. Get Public IP
         if logger:
             logger.info(f"Instance launched ({instance_id}), fetching IP...")
 
-        # Get Primary VNIC attachment
-        vnic_att_query = (
-            f"{cmd_prefix}oci compute vnic-attachment list --compartment-id {compartment_id} --instance-id {instance_id} "
-            f"--query 'data[0].\"vnic-id\"' --raw-output"
-        )
-        vnic_id = run_cmd(vnic_att_query, logger=logger)
-
-        if vnic_id and vnic_id != "None":
-            ip_query = (
-                f"{cmd_prefix}oci network vnic get --vnic-id {vnic_id} "
-                f"--query 'data.\"public-ip\"' --raw-output"
-            )
-            ip = run_cmd(ip_query, logger=logger)
-
+        ip = self._get_instance_ip(inst, instance_id, logger=logger)
+        if ip:
             if logger:
                 logger.info(f"Instance ready: {name} @ {ip}")
-
             return instance_id, ip
 
         return None, None
@@ -3018,20 +3100,19 @@ def process_instance(
         DASHBOARD.update(instance_name, status="ERROR", step="Name conflict", color=DASHBOARD.FAIL)
         return
 
-    # Register instance on dashboard
-    cpu_cost = inst.get('cpu_cost_hour[730h-mo]', 0.0)
-    storage_cost = inst.get('extra_150g_storage_cost_hour', 0.0) if inst.get('extra_150g_storage') else 0.0
-    DASHBOARD.register(instance_name, csp_name, inst['type'], cpu_cost, storage_cost)
-
-    logger.info(f"Processing instance: {sanitized_name}")
-
-    # Resolve per-instance location overrides (used by status checks and cleanup)
     if isinstance(provider, AWSProvider):
         inst['region'] = provider._get_region_for_instance(inst)
     elif isinstance(provider, GCPProvider):
         inst['region'] = provider._get_zone_for_instance(inst)
     elif isinstance(provider, OCIProvider):
         inst['region'] = provider._get_region_for_instance(inst)
+
+    # Register instance on dashboard
+    cpu_cost = inst.get('cpu_cost_hour[730h-mo]', 0.0)
+    storage_cost = inst.get('extra_150g_storage_cost_hour', 0.0) if inst.get('extra_150g_storage') else 0.0
+    DASHBOARD.register(instance_name, csp_name, inst['type'], cpu_cost, storage_cost, region=inst.get('region'))
+
+    logger.info(f"Processing instance: {sanitized_name}")
 
     instance_id = None
     ip = None

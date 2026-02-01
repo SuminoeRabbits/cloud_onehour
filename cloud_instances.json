@@ -94,6 +94,23 @@
         "enable": true,
         "instances": [
           {
+            "enable": true,
+            "testloads": false,
+            "type": "c4a-standard-8",
+            "arch": "arm64",
+            "hostname": "gcp-c4a-standard-8-arm64",
+            "vcpus": 8,
+            "name": "gcp-c4a-standard-8-arm64-vcpu-8",
+            "cpu_cost_hour[730h-mo]": 0.3602,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0267
+          }
+        ]
+      },
+      "asia-northeast2-b": {
+        "enable": true,
+        "instances": [
+          {
             "enable": false,
             "testloads": true,
             "type": "e2-standard-2",
@@ -126,23 +143,6 @@
             "vcpus": 8,
             "name": "gcp-c4-standard-8-amd64-vcpu-8",
             "cpu_cost_hour[730h-mo]": 0.3964,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.0267
-          }
-        ]
-      },
-      "asia-northeast2-b": {
-        "enable": true,
-        "instances": [
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "c4a-standard-8",
-            "arch": "arm64",
-            "hostname": "gcp-c4a-standard-8-arm64",
-            "vcpus": 8,
-            "name": "gcp-c4a-standard-8-arm64-vcpu-8",
-            "cpu_cost_hour[730h-mo]": 0.3602,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0267
           }
