@@ -917,8 +917,8 @@ eval "$REAL_CC" $ARGS
             )
         extra_link_libs = "-lxml2 -lm -luuid -pthread"
         install_cmd = (
-            f'{path_prefix}{include_path_prefix}{cppflags_prefix}PTS_EXTRA_LINK_LIBS="{extra_link_libs}" '
-            f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
+            f'{path_prefix}{include_path_prefix}{cppflags_prefix}PTS_DEBUG=1 PTS_EXTRA_LINK_LIBS="{extra_link_libs}" '
+            f'MAKEFLAGS="-j{nproc} V=1" CC={cc} CXX={cxx} '
             f'CFLAGS="{cflags_value}" '
             f'CXXFLAGS="{cxxflags_value}" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
