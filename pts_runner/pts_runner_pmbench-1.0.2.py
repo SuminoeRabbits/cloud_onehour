@@ -700,11 +700,22 @@ if [ ! -x "$REAL_CC" ]; then
   fi
 fi
 ARGS=""
+HAS_O=0
+HAS_C=0
 for a in "$@"; do
+  if [ "$a" = "-o" ]; then
+    HAS_O=1
+  fi
+  if [ "$a" = "-c" ]; then
+    HAS_C=1
+  fi
   if [ "$a" != "-m64" ]; then
     ARGS="$ARGS \"$a\""
   fi
 done
+if [ "$HAS_O" = "1" ] && [ "$HAS_C" = "0" ] && [ -n "$PTS_EXTRA_LINK_LIBS" ]; then
+  ARGS="$ARGS $PTS_EXTRA_LINK_LIBS"
+fi
 eval "$REAL_CC" $ARGS
 """
 
@@ -841,8 +852,10 @@ eval "$REAL_CC" $ARGS
             include_path_prefix = (
                 f'CPATH="{cpath}" C_INCLUDE_PATH="{c_include}" CPLUS_INCLUDE_PATH="{cplus_include}" '
             )
+        extra_link_libs = "-lxml2 -lm -luuid -pthread"
         install_cmd = (
-            f'{path_prefix}{include_path_prefix}{cppflags_prefix}MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
+            f'{path_prefix}{include_path_prefix}{cppflags_prefix}PTS_EXTRA_LINK_LIBS="{extra_link_libs}" '
+            f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
             f'CFLAGS="{cflags_value}" '
             f'CXXFLAGS="{cxxflags_value}" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
