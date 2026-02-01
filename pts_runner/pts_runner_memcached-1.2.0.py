@@ -411,6 +411,11 @@ class MemcachedRunner:
         subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_start_file}'])
 
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
+            stdout_f.write(f"\n{'='*80}\n")
+            stdout_f.write(f"[PTS BENCHMARK COMMAND - {num_threads} thread(s)]\n")
+            stdout_f.write(f"{pts_cmd}\n")
+            stdout_f.write(f"{'='*80}\n\n")
+            stdout_f.flush()
             process = subprocess.Popen(
                 ['bash', '-c', pts_cmd],
                 stdout=subprocess.PIPE,
@@ -423,11 +428,14 @@ class MemcachedRunner:
                 log_f.write(line)
                 stdout_f.write(line)
             process.wait()
+            returncode = process.returncode
+            stdout_f.write(f"\n[PTS EXIT CODE] {returncode}\n")
+            stdout_f.flush()
             
         # Record end freq
         subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_end_file}'])
         
-        if process.returncode == 0:
+        if returncode == 0:
              return True
         return False
 
