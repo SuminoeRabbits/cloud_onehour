@@ -803,12 +803,30 @@ eval "$REAL_CC" $ARGS
             cc = _pick_compiler(env_cc, "gcc")
         if not shutil.which(cxx):
             cxx = _pick_compiler(env_cxx, "g++")
+
+        xml2_cflags = ""
+        try:
+            if shutil.which("pkg-config"):
+                xml2_cflags = subprocess.run(
+                    ["pkg-config", "--cflags", "libxml-2.0"],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                ).stdout.strip()
+        except Exception:
+            xml2_cflags = ""
+        if Path("/usr/include/libxml2").exists() and "-I/usr/include/libxml2" not in xml2_cflags:
+            xml2_cflags = f"{xml2_cflags} -I/usr/include/libxml2".strip()
+
         wrapper_dir = self.prepare_compiler_wrapper()
         path_prefix = f'PATH="{wrapper_dir}:$PATH" ' if wrapper_dir else ""
+        cflags_value = f'-O3 -march=native -mtune=native {xml2_cflags}'.strip()
+        cxxflags_value = f'-O3 -march=native -mtune=native {xml2_cflags}'.strip()
+        cppflags_prefix = f'CPPFLAGS="{xml2_cflags}" ' if xml2_cflags else ""
         install_cmd = (
-            f'{path_prefix}MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
-            f'CFLAGS="-O3 -march=native -mtune=native" '
-            f'CXXFLAGS="-O3 -march=native -mtune=native" '
+            f'{path_prefix}{cppflags_prefix}MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
+            f'CFLAGS="{cflags_value}" '
+            f'CXXFLAGS="{cxxflags_value}" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
         )
 
