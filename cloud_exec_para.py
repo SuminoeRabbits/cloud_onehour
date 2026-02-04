@@ -702,6 +702,9 @@ class Dashboard:
                     if data['step'] != step:
                         data['step'] = step
                         data['step_start'] = datetime.now()
+                        # Reset instance timer at actual launch time
+                        if step.startswith("Instance launched"):
+                            data['start_time'] = datetime.now()
                 if color: data['color'] = color
                 data['last_update'] = datetime.now()
 
@@ -968,7 +971,13 @@ def run_cmd(cmd, capture=True, ignore=False, timeout=None, logger=None):
 
         start_time = time.time()
         res = subprocess.run(
-            cmd, shell=True, capture_output=capture, text=True, check=not ignore, timeout=timeout
+            cmd,
+            shell=True,
+            capture_output=capture,
+            text=True,
+            check=not ignore,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL
         )
         elapsed = time.time() - start_time
 
@@ -1627,7 +1636,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     """Execute all commands via SSH sequentially with output displayed."""
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=300 -o ServerAliveCountMax=3"
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=300 -o ServerAliveCountMax=3 -o BatchMode=yes -o NumberOfPasswordPrompts=0"
     ssh_user = config['common']['ssh_user']
     # Each workload timeout (backward compatible with command_timeout)
     workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
@@ -2240,7 +2249,7 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
         log(f"Collecting results from {ip}")
 
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
-    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -o ServerAliveCountMax=10"
+    ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -o ServerAliveCountMax=10 -o BatchMode=yes -o NumberOfPasswordPrompts=0"
     ssh_user = config['common']['ssh_user']
     cloud_rep_dir = config['common']['cloud_reports_dir']
 
