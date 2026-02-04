@@ -89,6 +89,23 @@ class NumpyBenchmarkRunner:
                 f"({self.system_python_executable})"
             )
 
+        # Check perf permissions (standard Linux check)
+        self.perf_paranoid = self.check_and_setup_perf_permissions()
+
+        # Detect environment for logging
+        self.is_wsl_env = self.is_wsl()
+        if self.is_wsl_env:
+            print("  [INFO] Running on WSL environment")
+
+        # Feature Detection: Check if perf is actually functional
+        self.perf_events = self.get_perf_events()
+        # Enforce safety
+        self.ensure_upload_disabled()
+        if self.perf_events:
+            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
+        else:
+            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
     def select_python_executable(self):
         """Pick Python 3.11 or 3.10 for running the PTS numpy test."""
         override = os.environ.get("PTS_PYTHON_BIN", "").strip()
@@ -145,23 +162,6 @@ class NumpyBenchmarkRunner:
         pts_env['PYTHON'] = self.python_executable
         pts_env['PYTHON3'] = self.python_executable
         return pts_env
-
-        # Check perf permissions (standard Linux check)
-        self.perf_paranoid = self.check_and_setup_perf_permissions()
-
-        # Detect environment for logging
-        self.is_wsl_env = self.is_wsl()
-        if self.is_wsl_env:
-            print("  [INFO] Running on WSL environment")
-
-        # Feature Detection: Check if perf is actually functional
-        self.perf_events = self.get_perf_events()
-        # Enforce safety
-        self.ensure_upload_disabled()
-        if self.perf_events:
-            print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
-        else:
-            print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
     def parse_version_tuple(self, version_str):
         """Convert a version string into a comparable tuple."""
@@ -386,11 +386,22 @@ class NumpyBenchmarkRunner:
         Returns:
             str: Comma-separated perf event list, or None if unavailable
         """
+        if self.is_wsl_env:
+            print("  [INFO] WSL detected; disabling perf to avoid kernel tool mismatch")
+            return None
         # Check if perf command exists in PATH
         perf_path = shutil.which("perf")
         if not perf_path:
             print("  [INFO] perf command not found in PATH")
             return None
+
+        def perf_unavailable(output):
+            lowered = output.lower()
+            return (
+                "perf not found for kernel" in lowered
+                or "you may need to install the following packages" in lowered
+                or "linux-tools-" in lowered
+            )
 
         # Test Hardware + Software events (Preferred for Native Linux)
         hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
@@ -405,6 +416,9 @@ class NumpyBenchmarkRunner:
             )
 
             output = result.stdout + result.stderr
+            if perf_unavailable(output):
+                print("  [INFO] perf kernel support missing; disabling perf")
+                return None
 
             # Check if all events are supported
             if result.returncode == 0 and '<not supported>' not in output:
@@ -420,6 +434,11 @@ class NumpyBenchmarkRunner:
                 text=True,
                 timeout=3
             )
+
+            output_sw = result_sw.stdout + result_sw.stderr
+            if perf_unavailable(output_sw):
+                print("  [INFO] perf kernel support missing; disabling perf")
+                return None
 
             if result_sw.returncode == 0:
                 print(f"  [INFO] Hardware PMU not available. Using software events: {sw_events}")
