@@ -136,7 +136,7 @@ def get_all_instances(csp_filter=None, aws_region=None, oci_region=None):
                             if inst["State"]["Name"] != "terminated":
                                 name = next((t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), "N/A")
                                 # [cloud, location, name, display_id, full_id, state]
-                        all_instances.append(["AWS", region, name, inst["InstanceId"], inst["InstanceId"], inst["State"]["Name"], inst.get("LaunchTime")])
+                                all_instances.append(["AWS", region, name, inst["InstanceId"], inst["InstanceId"], inst["State"]["Name"], inst.get("LaunchTime")])
 
     # --- GCP --- (全リージョン・全ゾーン検索)
     if 'gcp' in enabled_csps:
@@ -198,6 +198,31 @@ def execute_kill(instances):
                 subprocess.run(["env", f"OCI_REGION={loc}", "oci", "compute", "instance", "terminate", "--instance-id", full_id, "--force"], capture_output=True)
             else:
                 subprocess.run(["oci", "compute", "instance", "terminate", "--instance-id", full_id, "--force"], capture_output=True)
+
+def filter_by_region_interactive(instances):
+    """
+    Ask per cloud/region(zone) whether to delete.
+
+    Args:
+        instances: list of instances
+    Returns:
+        filtered list of instances
+    """
+    region_map = {}
+    for inst in instances:
+        cloud, loc = inst[0], inst[1]
+        region_map.setdefault((cloud, loc), []).append(inst)
+
+    selected = []
+    for (cloud, loc) in sorted(region_map.keys()):
+        count = len(region_map[(cloud, loc)])
+        confirm = input(f"Delete {cloud} instances in {loc} ({count} instance(s))? [y/N]: ")
+        if confirm.lower() == 'y':
+            selected.extend(region_map[(cloud, loc)])
+        else:
+            print(f"  Skipping {cloud} {loc}")
+
+    return selected
 
 def main():
     parser = argparse.ArgumentParser(
@@ -268,6 +293,10 @@ Examples:
 
     # 確認プロセス
     if not args.force:
+        targets = filter_by_region_interactive(targets)
+        if not targets:
+            print("\nNo regions/zones selected. Nothing was deleted.")
+            sys.exit(0)
         confirm = input("\nDo you want to DELETE ALL these instances? [y/N]: ")
         if confirm.lower() != 'y':
             print("Aborted. Nothing was deleted.")
