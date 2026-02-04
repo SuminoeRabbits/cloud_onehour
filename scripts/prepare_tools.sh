@@ -119,3 +119,8 @@ fi
 enable_unattended_upgrades
 
 echo "=== prepare_tools.sh end: $(date -Is) ==="
+
+# Copy log into cloud reports directory for collection
+RESULTS_LOG_DIR="$HOME/cloud_onehour/results"
+mkdir -p "$RESULTS_LOG_DIR"
+cp -f "$LOG_FILE" "$RESULTS_LOG_DIR/prepare_tools.log"
