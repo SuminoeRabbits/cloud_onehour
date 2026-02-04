@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 MIN_PYTHON_VERSION = (3, 7, 0)
+PREFERRED_PYTHON_VERSIONS = ("3.11", "3.10")
 
 if sys.version_info < MIN_PYTHON_VERSION:
     sys.stderr.write(
@@ -64,21 +65,86 @@ class NumpyBenchmarkRunner:
         # Quick mode for development
         self.quick_mode = quick_mode
 
-        # Pip / Python environment info
-        self.pip_executable = shutil.which('pip3') or shutil.which('pip')
-        if not self.pip_executable:
-            print("  [ERROR] Neither pip3 nor pip found in PATH")
-            sys.exit(1)
-
+        # Prefer Python 3.11 or 3.10 for PTS numpy test execution
+        self.system_python_executable = shutil.which('python3') or sys.executable
+        self.system_python_version = self.get_python_version(self.system_python_executable)
+        self.python_executable, self.python_version = self.select_python_executable()
         self.pip_version = self.detect_pip_version()
+        if not self.pip_version:
+            print("  [ERROR] pip not available for selected Python.")
+            print("  [ERROR] Install python3.11-venv/python3.10-venv or python3.11-pip/python3.10-pip.")
+            sys.exit(1)
         self.break_system_packages_supported = self.pip_supports_break_system_packages()
-
         py_version = sys.version_info
         pip_info = self.pip_version or "unknown"
         print(
-            f"  [INFO] Python {py_version.major}.{py_version.minor}.{py_version.micro} / "
+            f"  [INFO] Python (runner) {py_version.major}.{py_version.minor}.{py_version.micro} / "
+            f"Python (PTS) {self.python_version[0]}.{self.python_version[1]}.{self.python_version[2]} / "
             f"pip {pip_info}"
         )
+        if self.system_python_version:
+            print(
+                f"  [INFO] System default python3: "
+                f"{self.system_python_version[0]}.{self.system_python_version[1]}.{self.system_python_version[2]} "
+                f"({self.system_python_executable})"
+            )
+
+    def select_python_executable(self):
+        """Pick Python 3.11 or 3.10 for running the PTS numpy test."""
+        override = os.environ.get("PTS_PYTHON_BIN", "").strip()
+        candidates = [override] if override else []
+        candidates += [f"python{ver}" for ver in PREFERRED_PYTHON_VERSIONS]
+
+        for candidate in candidates:
+            if not candidate:
+                continue
+            path = shutil.which(candidate) if os.path.basename(candidate) == candidate else candidate
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                result = subprocess.run(
+                    [path, "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode != 0:
+                    continue
+                version_str = result.stdout.strip()
+                version = self.parse_version_tuple(version_str)
+                if version[:2] in [(3, 11), (3, 10)]:
+                    return path, version
+            except Exception:
+                continue
+
+        print("  [ERROR] Python 3.11 or 3.10 not found for PTS numpy test.")
+        print("  [ERROR] Install python3.11/python3.10, or set PTS_PYTHON_BIN to the desired interpreter.")
+        sys.exit(1)
+
+    def get_python_version(self, python_executable):
+        """Return (major, minor, micro) for the given python executable."""
+        if not python_executable:
+            return None
+        try:
+            result = subprocess.run(
+                [python_executable, "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                return None
+            version_str = result.stdout.strip()
+            return self.parse_version_tuple(version_str)
+        except Exception:
+            return None
+
+    def build_pts_env(self):
+        """Return environment for PTS execution using preferred Python only for this script."""
+        pts_env = os.environ.copy()
+        python_dir = str(Path(self.python_executable).parent)
+        pts_env['PATH'] = f"{python_dir}:{pts_env.get('PATH', '')}"
+        pts_env['PYTHON'] = self.python_executable
+        pts_env['PYTHON3'] = self.python_executable
+        return pts_env
 
         # Check perf permissions (standard Linux check)
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -115,20 +181,10 @@ class NumpyBenchmarkRunner:
         return tuple(components[:3])
 
     def detect_pip_version(self):
-        """Best-effort detection of the system pip version."""
-        try:
-            import pip  # type: ignore
-
-            return getattr(pip, '__version__', None)
-        except Exception:
-            pass
-
-        if not self.pip_executable:
-            return None
-
+        """Detect pip version for the selected Python."""
         try:
             result = subprocess.run(
-                [self.pip_executable, '--version'],
+                [self.python_executable, '-m', 'pip', '--version'],
                 capture_output=True,
                 text=True
             )
@@ -150,10 +206,7 @@ class NumpyBenchmarkRunner:
 
     def build_pip_install_command(self):
         """Construct the pip install command with conditional flags."""
-        if not self.pip_executable:
-            raise RuntimeError("pip executable not detected")
-
-        cmd = [self.pip_executable, 'install', '--user']
+        cmd = [self.python_executable, '-m', 'pip', 'install', '--user']
         if self.break_system_packages_supported:
             cmd.append('--break-system-packages')
         cmd.extend(['scipy', 'numpy'])
@@ -492,6 +545,7 @@ class NumpyBenchmarkRunner:
             print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute benchmark with real-time output streaming
+        pts_env = self.build_pts_env()
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
             stdout_f.write(f"\n{'='*80}\n")
             stdout_f.write(f"[PTS BENCHMARK COMMAND - {num_threads} thread(s)]\n")
@@ -504,7 +558,8 @@ class NumpyBenchmarkRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                env=pts_env
             )
 
             for line in process.stdout:
@@ -685,11 +740,13 @@ class NumpyBenchmarkRunner:
         if log_f:
             log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
             log_f.flush()
+        install_env = self.build_pts_env()
         process = subprocess.Popen(['bash', '-c', install_cmd],
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT,
                                    text=True,
-                                   bufsize=1)
+                                   bufsize=1,
+                                   env=install_env)
 
         for line in process.stdout:
             print(line, end='')
@@ -857,8 +914,16 @@ class NumpyBenchmarkRunner:
             stdout_f.write(f"{'='*80}\n")
             stdout_f.write("[RUNNER STARTUP]\n")
             stdout_f.write(f"Python: {sys.version.split()[0]}\n")
+            stdout_f.write(f"Python (PTS): {self.python_version[0]}.{self.python_version[1]}.{self.python_version[2]}\n")
+            stdout_f.write(f"Python (PTS) exec: {self.python_executable}\n")
+            if self.system_python_version:
+                stdout_f.write(
+                    f"Python (system default): "
+                    f"{self.system_python_version[0]}.{self.system_python_version[1]}.{self.system_python_version[2]}\n"
+                )
+                stdout_f.write(f"Python (system exec): {self.system_python_executable}\n")
             stdout_f.write(f"pip: {self.pip_version or 'unknown'}\n")
-            stdout_f.write(f"pip exec: {self.pip_executable or '-'}\n")
+            stdout_f.write(f"pip exec: {self.python_executable} -m pip\n")
             stdout_f.write(f"Machine: {self.machine_name}\n")
             stdout_f.write(f"OS: {self.os_name}\n")
             stdout_f.write(f"vCPU: {self.vcpu_count}\n")
