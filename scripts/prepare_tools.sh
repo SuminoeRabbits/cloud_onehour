@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+# Always log output for postmortem (collected in /tmp/reports.tar.gz)
+LOG_FILE="/tmp/prepare_tools.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+echo "=== prepare_tools.sh start: $(date -Is) ===" >> "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 # Source common utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/apt_utils.sh"
@@ -111,3 +117,5 @@ fi
 
 # Re-enable unattended upgrades
 enable_unattended_upgrades
+
+echo "=== prepare_tools.sh end: $(date -Is) ==="
