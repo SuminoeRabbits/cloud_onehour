@@ -19,12 +19,14 @@ Test Characteristics:
 """
 
 import argparse
+import atexit
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 MIN_PYTHON_VERSION = (3, 7, 0)
@@ -158,10 +160,44 @@ class NumpyBenchmarkRunner:
         """Return environment for PTS execution using preferred Python only for this script."""
         pts_env = os.environ.copy()
         python_dir = str(Path(self.python_executable).parent)
-        pts_env['PATH'] = f"{python_dir}:{pts_env.get('PATH', '')}"
+        # Prepend a temp bin that maps python3 -> preferred python
+        temp_bin = self._ensure_temp_python_bin()
+        pts_env['PATH'] = f"{temp_bin}:{python_dir}:{pts_env.get('PATH', '')}"
         pts_env['PYTHON'] = self.python_executable
         pts_env['PYTHON3'] = self.python_executable
         return pts_env
+
+    def _ensure_temp_python_bin(self):
+        """
+        Create a temporary bin dir with python3 symlink pointing to preferred python.
+        Ensures cleanup via atexit even on errors.
+        """
+        if hasattr(self, "_temp_python_bin") and self._temp_python_bin:
+            return self._temp_python_bin
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="pts-python-"))
+        bin_dir = temp_dir / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        link_path = bin_dir / "python3"
+        try:
+            if link_path.exists():
+                link_path.unlink()
+            link_path.symlink_to(self.python_executable)
+        except Exception:
+            # Fallback: create a wrapper script if symlink is not allowed
+            try:
+                wrapper = (
+                    "#!/bin/sh\n"
+                    f"exec \"{self.python_executable}\" \"$@\"\n"
+                )
+                link_path.write_text(wrapper)
+                link_path.chmod(0o755)
+            except Exception:
+                print("  [WARN] Failed to create python3 shim; PATH override may be insufficient")
+
+        self._temp_python_bin = str(bin_dir)
+        atexit.register(shutil.rmtree, temp_dir, True)
+        return self._temp_python_bin
 
     def parse_version_tuple(self, version_str):
         """Convert a version string into a comparable tuple."""
@@ -979,6 +1015,8 @@ class NumpyBenchmarkRunner:
         print(f"{'='*80}")
 
         return True
+
+    # Cleanup handled by atexit in _ensure_temp_python_bin
 
 
 def main():
