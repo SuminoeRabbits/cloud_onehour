@@ -2,10 +2,14 @@
 set -euo pipefail
 
 # Always log output for postmortem (collected in /tmp/reports.tar.gz)
-LOG_FILE="/tmp/prepare_tools.log"
+LOG_FILE="$HOME/cloud_onehour/results/prepare_tools.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 echo "=== prepare_tools.sh start: $(date -Is) ===" >> "$LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
+
+log_step() {
+    echo "=== [STEP] $1 @ $(date -Is) ==="
+}
 
 # Source common utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,39 +69,49 @@ install_python_with_ppa_if_needed() {
 
 # Wait for apt locks before any apt operations
 # This is critical for cloud instances where unattended-upgrades runs at boot
+log_step "Wait for apt locks"
 echo "=== Waiting for apt locks to be released ==="
 wait_for_apt_lock
 echo ""
 
 # Temporarily disable unattended upgrades to reduce apt lock contention
+log_step "Disable unattended upgrades"
 disable_unattended_upgrades
 
 # Ensure Python versions per Ubuntu release
+log_step "Ensure Python versions"
 install_python_with_ppa_if_needed
 
 # setup gcc14
+log_step "Setup GCC 14"
 ./setup_gcc14.sh
 ./setup_binutil244.sh
 
 # setup jdkxx, see the version in setup_jdkxx.sh.
+log_step "Setup JDK"
 ./setup_jdkxx.sh
 
 # build zlib
+log_step "Build zlib"
 ./build_zlib.sh
 
 # build openssl
 #./build_openssh.sh
 
 # build pts
+log_step "Setup PTS"
 ./setup_pts.sh
 
 # build others
+log_step "Setup init tools"
 ./setup_init.sh
 
 # setup rust
+log_step "Setup Rust"
 ./setup_rust.sh
 
 # Verify libxml2-dev is installed (for pmbench xmlgen build)
+log_step "Ensure libxml2-dev"
 if ! dpkg -s libxml2-dev >/dev/null 2>&1; then
     echo "[WARN] libxml2-dev not installed. Installing..."
     sudo apt-get update -y
@@ -107,6 +121,7 @@ else
 fi
 
 # Ensure pkg-config is available for libxml2 flags
+log_step "Ensure pkg-config"
 if ! command -v pkg-config >/dev/null 2>&1; then
     echo "[WARN] pkg-config not installed. Installing pkgconf..."
     sudo apt-get update -y
@@ -116,11 +131,7 @@ else
 fi
 
 # Re-enable unattended upgrades
+log_step "Enable unattended upgrades"
 enable_unattended_upgrades
 
 echo "=== prepare_tools.sh end: $(date -Is) ==="
-
-# Copy log into cloud reports directory for collection
-RESULTS_LOG_DIR="$HOME/cloud_onehour/results"
-mkdir -p "$RESULTS_LOG_DIR"
-cp -f "$LOG_FILE" "$RESULTS_LOG_DIR/prepare_tools.log"
