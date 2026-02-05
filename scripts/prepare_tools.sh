@@ -58,7 +58,12 @@ install_python_with_ppa_if_needed() {
                 sudo apt-get install -y software-properties-common
                 sudo add-apt-repository -y ppa:deadsnakes/ppa
                 sudo apt-get update -y
-                sudo apt-get install -y python3.11 python3.11-venv python3.11-pip python3.11-distutils
+                sudo apt-get install -y python3.11 python3.11-venv python3.11-distutils
+                # On noble, python3.11-pip may not exist; bootstrap pip via ensurepip
+                if command -v python3.11 >/dev/null 2>&1; then
+                    python3.11 -m ensurepip --upgrade || true
+                    python3.11 -m pip install --upgrade pip || true
+                fi
             else
                 echo "Ubuntu $ubuntu_version ($ubuntu_codename) detected: skipping Python PPA setup."
                 echo "  [INFO] deadsnakes PPA is not available for this release."
