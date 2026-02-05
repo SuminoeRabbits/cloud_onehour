@@ -1,6 +1,6 @@
 {
   "common": {
-    "os_version": "24.04",
+    "os_version": "22.04",
     "ssh_user": "ubuntu",
     "ssh_key_name": "cloud_onehour_project",
     "ssh_key_path": "${HOME}/.ssh/cloud_onehour_project.pem",
@@ -39,8 +39,6 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_nginx-3.0.1.py 4 --quick > /tmp/pts_runner_nginx1.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_java-jmh-1.0.1.py --quick > /tmp/pts_runner_java.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_apache-3.0.0.py 1 --quick > /tmp/pts_runner_apache.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_spark-1.0.1.py 288 --quick > /tmp/pts_runner_spark.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_spark-1.0.1.py 4 --quick > /tmp/pts_runner_spark.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_phpbench-1.1.6.py 1 > /tmp/pts_runner_phpbench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_ffmpeg-7.0.1.py 288 --quick > /tmp/pts_runner_ffmpeg0.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_ffmpeg-7.0.1.py 4 --quick > /tmp/pts_runner_ffmpeg1.log 2>&1",
@@ -52,7 +50,6 @@
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_cachebench-1.2.0.py 288 > /tmp/pts_runner_cachebench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_cachebench-1.2.0.py 4 > /tmp/pts_runner_cachebench.log 2>&1",
       "cd ~/cloud_onehour && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
-      "cd ~/cloud_onehour && ./pts_runner/pts_runner_numpy-1.2.1.py > /tmp/pts_runner_numpy.log 2>&1",
       "cd ~/cloud_onehour/results && ./pts_runner_postmortem.py > /tmp/pts_runner_postmortem.log 2>&1",
       "cd ~/cloud_onehour/results && ./make_one_big_json.py > /tmp/make_one_big_json.log 2>&1"
     ],
@@ -60,7 +57,7 @@
     "host_reports_dir": "bench_results",
     "security_group_name": "cloud-benchmarking-sg",
     "ssh_timeout": 20,
-    "workload_timeout": 6000,
+    "workload_timeout": 9000,
     "ssh_strict_host_key_checking": false,
     "debug_stdout": true,
     "long_running_indicators": [
