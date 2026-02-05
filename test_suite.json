@@ -188,7 +188,7 @@
                     "exe_time_v8cpu": "17.0"
                 },
                 "pts/spark-1.0.1": {
-                    "enabled": true,
+                    "enabled": false,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "spark-internal (auto-detect, configurable via spark-defaults.conf)",
@@ -316,12 +316,12 @@
                     "exe_time_v8cpu": "20.0"
                 },
                 "pts/numpy-1.2.1": {
-                    "enabled": true,
+                    "enabled": false,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
-                    "notes": "N/A",
+                    "notes": "Dependencies with Python/Numpy/scipy version. Need to revisit",
                     "exe_time_v8cpu": "0.5"
                 }
             }

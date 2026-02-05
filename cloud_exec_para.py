@@ -708,6 +708,14 @@ class Dashboard:
                 if color: data['color'] = color
                 data['last_update'] = datetime.now()
 
+    def remove(self, instance_name):
+        """Remove instance from dashboard (e.g., failed before instance_id)."""
+        if not self.enabled:
+            return
+        with self.lock:
+            if instance_name in self.instances:
+                del self.instances[instance_name]
+
     def add_history(self, instance_name, step_name, duration_sec, status="OK"):
         """Record a completed step in history."""
         if not self.enabled: return
@@ -921,10 +929,11 @@ class InstanceLogger:
         """Log info message to file."""
         self._write(f"[INFO] {message}")
 
-    def error(self, message):
-        """Log error message to file and update dashboard."""
+    def error(self, message, fatal=True):
+        """Log error message to file and optionally update dashboard."""
         self._write(f"[ERROR] {message}")
-        self.dashboard.update(self.name, status="ERROR", color=self.dashboard.FAIL)
+        if fatal:
+            self.dashboard.update(self.name, status="ERROR", color=self.dashboard.FAIL)
 
     def warn(self, message):
         """Log warning message to file."""
@@ -1983,9 +1992,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                     except Exception as e:
                         if logger:
-                            logger.error(f"Failed to collect 90% diagnostic info: {e}")
+                            logger.warn(f"Failed to collect 90% diagnostic info: {e}")
                         else:
-                            print(f"  [ERROR] Failed to collect 90% diagnostic info: {e}")
+                            print(f"  [WARN] Failed to collect 90% diagnostic info: {e}")
 
                 # Get CPU usage from remote instance
                 cpu_usage_cmd = (
@@ -2094,9 +2103,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                 except Exception as e:
                     if logger:
-                        logger.error(f"Failed to collect timeout diagnostic info: {e}")
+                        logger.warn(f"Failed to collect timeout diagnostic info: {e}")
                     else:
-                        print(f"  [ERROR] Failed to collect timeout diagnostic info: {e}")
+                        print(f"  [WARN] Failed to collect timeout diagnostic info: {e}")
 
                 duration = time.time() - workload_start
                 DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
@@ -2160,9 +2169,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                     except Exception as e:
                         if logger:
-                            logger.error(f"Failed to collect diagnostic info: {e}")
+                            logger.warn(f"Failed to collect diagnostic info: {e}")
                         else:
-                            print(f"  [ERROR] Failed to collect diagnostic info: {e}")
+                            print(f"  [WARN] Failed to collect diagnostic info: {e}")
 
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
@@ -3203,6 +3212,8 @@ def process_instance(
 
         if not ip or ip == "None":
             logger.error(f"Failed to get IP for {sanitized_name}")
+            if not instance_id:
+                DASHBOARD.remove(instance_name)
             return
 
         inst['instance_id'] = instance_id
@@ -3261,7 +3272,9 @@ def process_instance(
     except Exception as e:
         logger.error(f"Instance processing failed: {e}")
         import traceback
-        logger.error(traceback.format_exc())
+        logger.error(traceback.format_exc(), fatal=False)
+        if not instance_id:
+            DASHBOARD.remove(instance_name)
         DASHBOARD.update(instance_name, status="ERROR", color=DASHBOARD.FAIL)
 
     finally:

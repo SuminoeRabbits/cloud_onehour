@@ -297,7 +297,7 @@ Examples:
         if not targets:
             print("\nNo regions/zones selected. Nothing was deleted.")
             sys.exit(0)
-        confirm = input("\nDo you want to DELETE ALL these instances? [y/N]: ")
+        confirm = input("\nProceed to DELETE the selected instances above? [y/N]: ")
         if confirm.lower() != 'y':
             print("Aborted. Nothing was deleted.")
             sys.exit(0)

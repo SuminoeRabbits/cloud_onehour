@@ -197,7 +197,11 @@ Examples:
 
     filtered = [
         row for row in all_data
-        if (row[0], row[1]) in active_keys and not (row[2] and row[2].startswith("("))
+        if (
+            (row[0], row[1]) in active_keys
+            or row[4] == "ERROR"
+        )
+        and not (row[2] and row[2].startswith("("))
     ]
 
     if not args.show_all:
