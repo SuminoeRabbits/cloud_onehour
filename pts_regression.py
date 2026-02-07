@@ -40,7 +40,7 @@
 # 一度デバッグの為に標準出力に出力します。この出力はそのままターミナルに
 # コピー＆ペーストして実行できる形式にしてください。
 #
-# 6. 実行コマンドの実行（実行オプション--all の場合のみ実施）
+# 6. 実行コマンドの実行（実行オプション--run の場合のみ実施）
 # 5.で生成したコマンドを実際に実行します。
 #
 # 7. 実行オプションの追加
@@ -57,9 +57,16 @@
 # --split-3rd: 実行コマンドを総数の1/5に分割し、3番目の1/5のみを生成・実行します。
 # --split-4th: 実行コマンドを総数の1/5に分割し、4番目の1/5のみを生成・実行します。
 # --split-5th: 実行コマンドを総数の1/5に分割し、5番目の1/5のみを生成・実行します。
-# --regression: このオプションが付いた場合 "exe_time_v8cpu"値により "--quick"を上書きします。
-#                もし　"exe_time_v8cpu"値が150以上の場合は、実行しません、生成しません、表示されません。 
-#                もし　"exe_time_v8cpu"値が100以上の場合は、2通りの実行コマンドを生成します。
+# --long: --regression と併用。exe_time_v8cpu >= 120 のみ生成します。
+# --short: --regression と併用。exe_time_v8cpu < 15.25 のみ生成します。
+# --regression: "exe_time_v8cpu"値により "--quick" を上書きします。
+#               --regression 指定時は workloads 向け JSON 断片形式で出力します。
+#               生成されるテストは --long/--short の指定によりフィルタされます。
+#               - --regression --long : exe_time_v8cpu >= 120 のみ生成
+#               - --regression --short: exe_time_v8cpu < 15.25 のみ生成
+#               - --regression        : 15.25 <= exe_time_v8cpu < 120 のみ生成
+#               --long の場合は実行オプションとして 8/12/16 スレッド + --quick を生成します。
+#               もし　"exe_time_v8cpu"値が100以上の場合は、2通りの実行コマンドを生成します。
 # 　　　　　　　　　　　　１．"--quick"と"--max"を追加したもの。
 # 　　　　　　　　　　　　２． "--quick"と"4" を追加したもの。
 # 　　　　　　　　もし　"exe_time_v8cpu"値が15.25以上の場合は 必ず実行オプションに"--quick"を追加します。
@@ -107,7 +114,7 @@ def get_cpu_count():
     return os.cpu_count() or 1
 
 
-def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False):
+def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False, regression_filter=None):
     """
     Generate test commands from test_suite.json.
 
@@ -116,6 +123,7 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
         max_threads: If specified, override thread count to this value (except for single_threaded tests)
         quick_mode: If True, append --quick to all commands
         regression_mode: If True, override quick_mode based on exe_time_v8cpu value
+        regression_filter: One of {"long", "short", "normal"} to filter by exe_time_v8cpu
     """
     commands = []
     nproc = get_cpu_count()
@@ -192,11 +200,22 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                     exe_time = float(test_config.get("exe_time_v8cpu", "0.0"))
                 except ValueError:
                     exe_time = 0.0
+                # Bucket by exe_time_v8cpu
+                if exe_time >= 120:
+                    exe_bucket = "long"
+                elif exe_time < 15.25:
+                    exe_bucket = "short"
+                else:
+                    exe_bucket = "normal"
 
-                # Check if exe_time >= 150: skip this test entirely
-                if exe_time >= 150:
+                if regression_filter and exe_bucket != regression_filter:
                     skip_test = True
-                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 150 -> Skipping test (too long)")
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out")
+                elif regression_filter == "long":
+                    # Long mode: generate 8/12/16 threads with --quick
+                    run_configs.append(("8", True))
+                    run_configs.append(("12", True))
+                    run_configs.append(("16", True))
                 elif exe_time >= 100:
                     # Enforce --max (288 threads) and --quick, AND 4 threads and --quick
                     if number_arg == "1":
@@ -265,6 +284,41 @@ def print_commands(commands):
     print(f"{'='*80}")
     for cmd in commands:
         print(cmd)
+    print(f"{'='*80}\n")
+
+
+def _add_log_redirection(cmd: str) -> str:
+    """
+    Append log redirection using testname-derived log file.
+    """
+    import re
+
+    match = re.search(r'\./pts_runner/pts_runner_([^\\s]+?)\\.py', cmd)
+    if match:
+        testname = match.group(1)
+        log_path = f"/tmp/pts_runner_{testname}.log"
+    else:
+        log_path = "/tmp/pts_runner.log"
+
+    return f"{cmd} > {log_path} 2>&1"
+
+
+def print_commands_json_fragment(commands):
+    """
+    Print generated commands as JSON fragment for workloads.
+
+    Args:
+        commands: List of command strings
+    """
+    if not commands:
+        print("\n[WARN] No commands to generate")
+        return
+
+    payload = [_add_log_redirection(cmd) for cmd in commands]
+    print(f"\n{'='*80}")
+    print("Generated workloads JSON fragment (copy & paste)")
+    print(f"{'='*80}")
+    print(json.dumps(payload, indent=2))
     print(f"{'='*80}\n")
 
 
@@ -337,15 +391,18 @@ def main():
         epilog="""
 Examples:
   %(prog)s                         # Generate commands (dry-run mode)
-  %(prog)s --all                   # Generate and execute all commands
+  %(prog)s --run                   # Generate and execute all commands
   %(prog)s --max                   # Override thread count to 288 (except single-threaded)
-  %(prog)s --max --all             # Override to 288 threads and execute
+  %(prog)s --max --run             # Override to 288 threads and execute
   %(prog)s --suite custom.json     # Use custom test suite file
   %(prog)s --dry-run               # Generate commands but don't execute (default)
-  %(prog)s --split-1st --all       # Execute first 1/4 of tests only
-  %(prog)s --split-2nd --all       # Execute 2nd 1/4 of tests only
-  %(prog)s --split-3rd --all       # Execute 3rd 1/4 of tests only
-  %(prog)s --split-4th --all       # Execute last 1/4 of tests only
+  %(prog)s --split-1st --run       # Execute first 1/4 of tests only
+  %(prog)s --split-2nd --run       # Execute 2nd 1/4 of tests only
+  %(prog)s --split-3rd --run       # Execute 3rd 1/4 of tests only
+  %(prog)s --split-4th --run       # Execute last 1/4 of tests only
+  %(prog)s --regression            # Generate mid-range tests only (15.25 <= exe_time_v8cpu < 120)
+  %(prog)s --regression --short    # Generate short tests only (exe_time_v8cpu < 15.25)
+  %(prog)s --regression --long     # Generate long tests only (exe_time_v8cpu >= 120)
         """
     )
 
@@ -356,7 +413,7 @@ Examples:
     )
 
     parser.add_argument(
-        '--all',
+        '--run',
         action='store_true',
         help='Execute generated commands (default: dry-run mode)'
     )
@@ -418,7 +475,19 @@ Examples:
     parser.add_argument(
         '--regression',
         action='store_true',
-        help='Regression mode: overrides --quick based on exe_time_v8cpu value (>=15.25 adds --quick)'
+        help='Regression mode: overrides --quick and filters by exe_time_v8cpu with --long/--short'
+    )
+
+    parser.add_argument(
+        '--long',
+        action='store_true',
+        help='Regression long: exe_time_v8cpu >= 120 only (requires --regression)'
+    )
+
+    parser.add_argument(
+        '--short',
+        action='store_true',
+        help='Regression short: exe_time_v8cpu < 15.25 only (requires --regression)'
     )
 
     # Exception handling: Ignore invalid options and continue execution
@@ -432,7 +501,7 @@ Examples:
             # Create default args namespace
             args = argparse.Namespace(
                 suite='test_suite.json',
-                all=False,
+                run=False,
                 max=False,
                 quick=False,
                 dry_run=True,
@@ -442,18 +511,31 @@ Examples:
                 split_3rd=False,
                 split_4th=False,
                 split_5th=False,
-                regression=False
+                regression=False,
+                long=False,
+                short=False
             )
         else:
             # Normal exit (--help was called)
             sys.exit(0)
 
     # Determine if we should execute
-    # Execution requires --all flag explicitly
-    should_execute = args.all and not (args.dry_run or args.no_execute)
+    # Execution requires --run flag explicitly
+    should_execute = args.run and not (args.dry_run or args.no_execute)
 
     # Determine max_threads
     max_threads = 288 if args.max else None
+    regression_filter = None
+    if args.regression:
+        if args.long and args.short:
+            print("[ERROR] Cannot use --long and --short together")
+            sys.exit(1)
+        if args.long:
+            regression_filter = "long"
+        elif args.short:
+            regression_filter = "short"
+        else:
+            regression_filter = "normal"
 
     print(f"{'='*80}")
     print(f"PTS Regression Test Command Generator")
@@ -474,7 +556,8 @@ Examples:
         test_suite, 
         max_threads=max_threads, 
         quick_mode=args.quick,
-        regression_mode=args.regression
+        regression_mode=args.regression,
+        regression_filter=regression_filter
     )
 
     # Apply split filter if requested
@@ -523,7 +606,10 @@ Examples:
         print()
 
     # Print commands
-    print_commands(commands)
+    if args.regression:
+        print_commands_json_fragment(commands)
+    else:
+        print_commands(commands)
 
     # Execute commands (step 6)
     if should_execute:
@@ -531,7 +617,7 @@ Examples:
         sys.exit(1 if failed_count > 0 else 0)
     else:
         print("[INFO] Dry-run mode: Commands not executed")
-        print("[INFO] To execute commands, run with --all flag\n")
+        print("[INFO] To execute commands, run with --run flag\n")
 
 
 
