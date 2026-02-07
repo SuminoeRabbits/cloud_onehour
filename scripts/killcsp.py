@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
+import os
 import json
 import sys
 import argparse
@@ -80,16 +81,20 @@ def get_aws_regions(only_region=None):
 def get_oci_regions(only_region=None, tenancy_id=None):
     if only_region:
         return [only_region]
+    env_region = os.getenv("OCI_REGION")
+    if env_region:
+        return [env_region]
     if tenancy_id:
         success, data, _ = run_command(["oci", "iam", "region-subscription", "list", "--tenancy-id", tenancy_id, "--query", "data[].region-name", "--output", "json"])
         if success and isinstance(data, list) and data:
             return data
-    success, data, _ = run_command(["oci", "iam", "region", "list", "--query", "data[].name", "--output", "json"])
-    if success and isinstance(data, list):
-        return data
+    # No fallback to all regions; avoid noisy scans
     return []
 
 def get_oci_compartment_id():
+    env_cid = os.getenv("OCI_COMPARTMENT_ID")
+    if env_cid:
+        return env_cid
     cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"]
     try:
         cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
@@ -152,7 +157,8 @@ def get_all_instances(csp_filter=None, aws_region=None, oci_region=None):
     if 'oci' in enabled_csps:
         compartment_id = get_oci_compartment_id()
         if compartment_id:
-            regions = get_oci_regions(oci_region, tenancy_id=compartment_id)
+            tenancy_id = os.getenv("OCI_TENANCY_ID")
+            regions = get_oci_regions(oci_region, tenancy_id=tenancy_id)
             if not regions:
                 regions = [None]
             with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as executor:
@@ -167,9 +173,7 @@ def get_all_instances(csp_filter=None, aws_region=None, oci_region=None):
                     if success:
                         for inst in data.get("data", []):
                             if inst["lifecycle-state"] != "TERMINATED":
-                                inst_region = inst.get("region")
-                                if region and inst_region and inst_region != region:
-                                    continue
+                                # Region already scoped via OCI_REGION, so skip region mismatch filtering
                                 full_id = inst.get("id")
                                 display_id = full_id[-10:] if full_id else "N/A"
                                 all_instances.append(["OCI", region or inst.get("region", "N/A"), inst.get("display-name"), display_id, full_id, inst.get("lifecycle-state"), inst.get("time-created")])

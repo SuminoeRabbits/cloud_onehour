@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
+import os
 import json
 import sys
 import argparse
@@ -17,11 +18,19 @@ def run_command(cmd):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         if result.returncode == 0:
-            return True, json.loads(result.stdout), None
+            try:
+                return True, json.loads(result.stdout), None
+            except Exception as e:
+                # JSON parse failed; include raw output for debugging
+                return False, None, f"JSON parse error: {e}; stdout={result.stdout.strip()}"
         else:
-            # 標準エラー出力から主要なメッセージを抽出
-            err_msg = result.stderr.strip().split('\n')[0]
-            return False, None, f"CLI Error: {err_msg[:50]}..."
+            # Prefer stderr, fallback to stdout for CLI errors without stderr
+            err_msg = result.stderr.strip() if result.stderr else ""
+            if not err_msg:
+                err_msg = result.stdout.strip()
+            if not err_msg:
+                err_msg = "Unknown error (no stderr/stdout)"
+            return False, None, f"CLI Error (rc={result.returncode}): {err_msg}"
     except subprocess.TimeoutExpired:
         return False, None, "Timeout (Cloud or Network unreachable)"
     except FileNotFoundError:
@@ -37,18 +46,28 @@ def get_aws_regions():
     return AWS_REGIONS_FALLBACK
 
 def get_oci_regions(tenancy_id=None):
+    # If user forces a specific region, honor it
+    env_region = os.getenv("OCI_REGION")
+    if env_region:
+        return [env_region]
+
     if tenancy_id:
-        cmd = ["oci", "iam", "region-subscription", "list", "--tenancy-id", tenancy_id, "--query", "data[].region-name", "--output", "json"]
+        cmd = [
+            "oci", "iam", "region-subscription", "list",
+            "--tenancy-id", tenancy_id,
+            "--query", "data[].region-name",
+            "--output", "json"
+        ]
         success, data, _ = run_command(cmd)
         if success and isinstance(data, list) and data:
             return data
-    cmd = ["oci", "iam", "region", "list", "--query", "data[].name", "--output", "json"]
-    success, data, _ = run_command(cmd)
-    if success and isinstance(data, list):
-        return data
+    # Fallback: do not enumerate all regions (too noisy); return empty to signal unknown
     return []
 
 def get_oci_compartment_id():
+    env_cid = os.getenv("OCI_COMPARTMENT_ID")
+    if env_cid:
+        return env_cid, None
     cmd_id = ["oci", "iam", "compartment", "list", "--query", "data[0].\"compartment-id\"", "--raw-output"]
     try:
         cid_proc = subprocess.run(cmd_id, capture_output=True, text=True, timeout=10)
@@ -113,15 +132,29 @@ def get_oci_instances():
     if err:
         return [["OCI", "N/A", "ERROR", "N/A", err, "-"]]
 
-    regions = get_oci_regions(compartment_id)
+    tenancy_id = os.getenv("OCI_TENANCY_ID")
+    regions = get_oci_regions(tenancy_id)
     if not regions:
-        regions = [None]
+        return [["OCI", "N/A", "ERROR", "N/A", "No subscribed regions found", "-"]]
 
     rows = []
     for region in regions:
         cmd_prefix = ["env", f"OCI_REGION={region}"] if region else []
-        cmd = cmd_prefix + ["oci", "compute", "instance", "list", "--compartment-id", compartment_id, "--output", "json"]
+        cmd = cmd_prefix + [
+            "oci", "compute", "instance", "list",
+            "--compartment-id", compartment_id,
+            "--compartment-id-in-subtree", "true",
+            "--output", "json"
+        ]
         success, data, err = run_command(cmd)
+        if not success and err and "No such option" in err:
+            # Older OCI CLI: retry without subtree option
+            cmd = cmd_prefix + [
+                "oci", "compute", "instance", "list",
+                "--compartment-id", compartment_id,
+                "--output", "json"
+            ]
+            success, data, err = run_command(cmd)
         if not success:
             rows.append(["OCI", region or "N/A", "ERROR", "N/A", err, "-"])
             continue
@@ -129,17 +162,17 @@ def get_oci_instances():
         for inst in data.get("data", []):
             lifecycle_state = inst.get("lifecycle-state", "UNKNOWN")
             if lifecycle_state != "TERMINATED":
-                inst_region = inst.get("region")
-                if region and inst_region and inst_region != region:
-                    continue
+                # Region is already scoped via OCI_REGION, so avoid mismatches
                 start_jst = format_start_jst(inst.get("time-created"))
+                def clean(value):
+                    return value.strip() if isinstance(value, str) else value
                 rows.append([
                     "OCI",
-                    region or inst.get("region", "N/A"),
-                    inst.get("display-name", "N/A"),
-                    inst.get("id", "")[-10:],
-                    lifecycle_state,
-                    start_jst
+                    clean(region or inst.get("region", "N/A")),
+                    clean(inst.get("display-name", "N/A")),
+                    clean(inst.get("id", "")[-10:]),
+                    clean(lifecycle_state),
+                    clean(start_jst),
                 ])
 
     return rows if rows else [["OCI", "N/A", "(No Instances Found)", "-", "-", "-"]]

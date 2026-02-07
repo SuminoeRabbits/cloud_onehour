@@ -30,6 +30,18 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
+            "enable": false,
+            "testloads": false,
+            "type": "m7i.4xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m7i-4xlarge-amd64",
+            "vcpus": 16,
+            "name": "aws-m7i-4xlarge-amd64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.0,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
             "enable": true,
             "testloads": false,
             "type": "m8g.2xlarge",
@@ -42,6 +54,18 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
+            "enable": false,
+            "testloads": false,
+            "type": "m8g.4xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m8g-4xlarge-arm64",
+            "vcpus": 16,
+            "name": "aws-m8g-4xlarge-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.0,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
             "enable": true,
             "testloads": false,
             "type": "m7g.2xlarge",
@@ -49,7 +73,19 @@
             "hostname": "aws-m7g-2xlarge-arm64",
             "vcpus": 8,
             "name": "aws-m7g-2xlarge-arm64-vcpu-8",
-            "cpu_cost_hour[730h-mo]":  0.4216,
+            "cpu_cost_hour[730h-mo]": 0.4216,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": false,
+            "testloads": false,
+            "type": "m7g.4xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m7g-4xlarge-arm64",
+            "vcpus": 16,
+            "name": "aws-m7g-4xlarge-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.0,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0197
           }
@@ -71,6 +107,18 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
+            "enable": false,
+            "testloads": false,
+            "type": "m8a.4xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m8a-4xlarge-amd64",
+            "vcpus": 16,
+            "name": "aws-m8a-4xlarge-amd64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.0,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
             "enable": true,
             "testloads": false,
             "type": "m8i.2xlarge",
@@ -83,7 +131,19 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
-            "enable": true,
+            "enable": false,
+            "testloads": false,
+            "type": "m8i.4xlarge",
+            "arch": "amd64",
+            "hostname": "aws-m8i-4xlarge-amd64",
+            "vcpus": 16,
+            "name": "aws-m8i-4xlarge-amd64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.0,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": false,
             "testloads": false,
             "type": "i7ie.2xlarge",
             "arch": "amd64",
@@ -91,6 +151,18 @@
             "vcpus": 8,
             "name": "aws-i7ie-2xlarge-amd64-vcpu-8",
             "cpu_cost_hour[730h-mo]": 1.2236,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": false,
+            "testloads": false,
+            "type": "i7ie.4xlarge",
+            "arch": "amd64",
+            "hostname": "aws-i7ie-4xlarge-amd64",
+            "vcpus": 16,
+            "name": "aws-i7ie-4xlarge-amd64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.0,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0197
           }
@@ -214,7 +286,7 @@
             "extra_150g_storage_cost_hour": 0.0087
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "VM.Standard.A1.Flex",
             "arch": "arm64",
@@ -237,7 +309,7 @@
             "vcpus": 8,
             "memory_gb": 32,
             "name": "oci-a2-flex-arm64-vcpu-8",
-            "cpu_cost_hour[730h-mo]": 0.120,
+            "cpu_cost_hour[730h-mo]": 0.12,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0087
           },
