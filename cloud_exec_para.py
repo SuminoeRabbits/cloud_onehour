@@ -779,7 +779,7 @@ class Dashboard:
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)
-        self._render_once()
+        # Avoid rendering on shutdown to prevent stdout lock issues
 
     def _render_loop(self):
         self._render_once()
