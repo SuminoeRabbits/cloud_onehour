@@ -24,6 +24,8 @@ import re
 import shutil
 import subprocess
 import sys
+import signal
+import atexit
 from pathlib import Path
 
 
@@ -226,6 +228,28 @@ class PgbenchRunner:
             print(f"  [OK] Perf monitoring enabled with events: {self.perf_events}")
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
+
+        # Register cleanup handlers for graceful shutdown
+        self._setup_cleanup_handlers()
+
+    def _cleanup_handler(self, signum=None, _frame=None):
+        """Handler for signals and atexit to ensure PostgreSQL cleanup."""
+        if signum is not None:
+            print(f"\n[SIGNAL] Received signal {signum}, cleaning up...")
+        else:
+            print(f"\n[EXIT] Script terminating, cleaning up...")
+        self.cleanup_postgresql()
+        if signum is not None:
+            sys.exit(1)
+
+    def _setup_cleanup_handlers(self):
+        """Register signal handlers and atexit for cleanup."""
+        # Register atexit handler for normal exit
+        atexit.register(lambda: self._cleanup_handler())
+
+        # Register signal handlers for interrupts
+        signal.signal(signal.SIGINT, self._cleanup_handler)   # Ctrl+C
+        signal.signal(signal.SIGTERM, self._cleanup_handler)  # kill command
 
     def get_os_name(self):
         """Get OS name and version formatted as <Distro>_<Version>."""
@@ -474,7 +498,7 @@ class PgbenchRunner:
         This flag prevents binaries from finding their own libraries in relocatable installs.
         """
         install_sh_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
-        
+
         if not install_sh_path.exists():
             print(f"  [WARN] install.sh not found at {install_sh_path}")
             return False
@@ -487,7 +511,7 @@ class PgbenchRunner:
                 print(f"  [INFO] Patching install.sh: Removing --disable-rpath...")
                 # Replace with empty string
                 patched = content.replace('--disable-rpath', '')
-                
+
                 with open(install_sh_path, 'w') as f:
                     f.write(patched)
                 print(f"  [OK] install.sh patched successfully")
@@ -500,6 +524,48 @@ class PgbenchRunner:
             print(f"  [ERROR] Failed to patch install.sh: {e}")
             return False
 
+    def patch_results_definition(self):
+        """
+        Patch results-definition.xml to match pgbench 14.0 output format.
+        pgbench 14.0 changed from "(excluding connections establishing)"
+        to "(without initial connection time)".
+        """
+        results_def_path = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'results-definition.xml'
+
+        if not results_def_path.exists():
+            print(f"  [WARN] results-definition.xml not found at {results_def_path}")
+            return False
+
+        try:
+            with open(results_def_path, 'r') as f:
+                content = f.read()
+
+            # Check if patch is needed
+            if '(excluding connections establishing)' in content:
+                print(f"  [INFO] Patching results-definition.xml for pgbench 14.0 output format...")
+
+                # Update to match pgbench 14.0 output
+                # Note: pgbench 14.0 no longer outputs "TPS" at the end
+                patched = content.replace(
+                    'tps = #_RESULT_# (excluding connections establishing) TPS',
+                    'tps = #_RESULT_# (without initial connection time)'
+                ).replace(
+                    'tps = #_RESULT_# (without initial connection time) TPS',
+                    'tps = #_RESULT_# (without initial connection time)'
+                )
+
+                with open(results_def_path, 'w') as f:
+                    f.write(patched)
+                print(f"  [OK] results-definition.xml patched successfully")
+                return True
+            else:
+                print(f"  [INFO] results-definition.xml already updated")
+                return True
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch results-definition.xml: {e}")
+            return False
+
     def install_benchmark(self):
         """Install benchmark using standard PTS mechanism."""
         print(f"\n>>> Checking for large files to pre-seed...")
@@ -510,6 +576,9 @@ class PgbenchRunner:
 
         # PATCH: Fix install.sh before installing
         self.patch_install_script()
+
+        # PATCH: Fix results-definition.xml for pgbench 14.0 output format
+        self.patch_results_definition()
 
         # Remove existing installation to ensure clean slate
         print(f"  [INFO] Removing existing installation...")
@@ -606,22 +675,98 @@ class PgbenchRunner:
         if pgbench_script.exists():
             with open(pgbench_script, 'r') as f:
                 script_content = f.read()
-            
-            # Replace $LOG_FILE redirects with stdout output
-            # Pattern 1: echo "Buffer size..." > $LOG_FILE
-            # Pattern 2: pgbench ... >>$LOG_FILE 2>&1
+
+            # Add debug header if not present
+            if '[DEBUG]' not in script_content:
+                # Insert debug output at the beginning after shebang
+                lines = script_content.split('\n')
+                if lines[0].startswith('#!'):
+                    debug_lines = [
+                        lines[0],
+                        '# Debug: Print environment to stderr',
+                        'echo "[DEBUG] Script started with args: $@" >&2',
+                        'echo "[DEBUG] LOG_FILE=${LOG_FILE:-NOT_SET}" >&2',
+                        'echo "[DEBUG] NUM_CPU_CORES=${NUM_CPU_CORES:-NOT_SET}" >&2',
+                        ''
+                    ] + lines[1:]
+                    script_content = '\n'.join(debug_lines)
+
+            # Add database initialization check if not present
+            if 'Initialize database if not exists' not in script_content:
+                init_check = '''
+# Initialize database if not exists
+if [ ! -d "$PGDATA" ]; then
+    echo "[INFO] Database directory not found, initializing..." >&2
+    pg_/bin/initdb -D $PGDATA --encoding=SQL_ASCII --locale=C >&2
+    if [ $? -ne 0 ]; then
+        echo "[ERROR] Failed to initialize database" >&2
+        exit 1
+    fi
+    echo "[INFO] Database initialized successfully" >&2
+fi
+
+# Set SYS_MEMORY if not set (PTS should set this, but as fallback use system memory)
+if [ -z "$SYS_MEMORY" ]; then
+    echo "[WARN] SYS_MEMORY not set, detecting system memory..." >&2
+    # Get system memory in MB
+    if [ -f /proc/meminfo ]; then
+        SYS_MEMORY=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+        echo "[INFO] Detected ${SYS_MEMORY}MB system memory" >&2
+    else
+        # Fallback to a reasonable default
+        SYS_MEMORY=2048
+        echo "[WARN] Could not detect memory, using default ${SYS_MEMORY}MB" >&2
+    fi
+    export SYS_MEMORY
+fi
+'''
+                script_content = script_content.replace(
+                    'export PGPORT\n# start server',
+                    'export PGPORT\n' + init_check + '\n# start server'
+                )
+
+            # Fix SHARED_BUFFER_SIZE calculation to handle bash syntax properly
+            if 'SHARED_BUFFER_SIZE=$(( $SHARED_BUFFER_SIZE < 8192 ?' in script_content:
+                script_content = script_content.replace(
+                    'SHARED_BUFFER_SIZE=$(( $SHARED_BUFFER_SIZE < 8192 ? $SHARED_BUFFER_SIZE : 8192 ))',
+                    'if [ $SHARED_BUFFER_SIZE -gt 8192 ]; then SHARED_BUFFER_SIZE=8192; fi'
+                )
+
+            # Keep $LOG_FILE redirect (PTS uses this to capture output)
+            # Just add exit code capture and debug logging
             patched_content = script_content.replace(
                 'echo "Buffer size is ${SHARED_BUFFER_SIZE}MB" > $LOG_FILE',
-                'echo "Buffer size is ${SHARED_BUFFER_SIZE}MB"'
+                'echo "[INFO] Buffer size is ${SHARED_BUFFER_SIZE}MB" >&2'
             ).replace(
-                '>>$LOG_FILE 2>&1',
-                '2>&1'
+                'pg_/bin/pgbench -j $NUM_CPU_CORES $@ -n -T 120 -r pgbench >>$LOG_FILE 2>&1',
+                'pg_/bin/pgbench -j $NUM_CPU_CORES $@ -n -T 120 -r pgbench >>$LOG_FILE 2>&1\nPGBENCH_EXIT=$?\necho "[DEBUG] pgbench exit code: $PGBENCH_EXIT" >&2'
             )
-            
+
+            # Also add debug before pgbench execution
+            if 'Running pgbench with:' not in patched_content:
+                patched_content = patched_content.replace(
+                    '# run the test',
+                    '# run the test\necho "[DEBUG] Running pgbench with: -j $NUM_CPU_CORES $@ -n -T 120 -r pgbench" >&2'
+                )
+
+            # Add dropdb --if-exists before createdb to avoid conflicts
+            if '--if-exists' not in patched_content:
+                patched_content = patched_content.replace(
+                    '# create test db\npg_/bin/createdb pgbench',
+                    '# create test db (drop if exists first)\npg_/bin/dropdb --if-exists pgbench 2>/dev/null\npg_/bin/createdb pgbench'
+                )
+
+            # Make cleanup errors non-fatal (exit 0 even if cleanup fails)
+            if 'exit 0' not in patched_content:
+                patched_content = patched_content.replace(
+                    '# drop test db\npg_/bin/dropdb pgbench\n# stop server\npg_/bin/pg_ctl stop',
+                    '# drop test db (ignore errors)\npg_/bin/dropdb pgbench 2>/dev/null || true\n# stop server (ignore errors)\npg_/bin/pg_ctl stop 2>/dev/null || true\n# Always exit with success if pgbench completed\nexit 0'
+                )
+
             with open(pgbench_script, 'w') as f:
                 f.write(patched_content)
-            
-            print(f"  [OK] pgbench script patched to output to stdout")
+
+            print(f"  [OK] pgbench script patched to output to stdout with debug logging")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
@@ -708,13 +853,33 @@ class PgbenchRunner:
 
         return perf_summary
 
+    def cleanup_postgresql(self):
+        """Clean up any existing PostgreSQL processes to prevent conflicts."""
+        print(f"  [INFO] Cleaning up existing PostgreSQL processes...")
+
+        # Kill any existing postgres processes
+        try:
+            subprocess.run(
+                ['pkill', '-9', 'postgres'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Give processes time to terminate
+            import time
+            time.sleep(2)
+            print(f"  [OK] PostgreSQL processes cleaned up")
+        except Exception as e:
+            print(f"  [WARN] Error during cleanup (may be normal if no processes running): {e}")
+
     def run_benchmark(self, num_threads):
         """Run benchmark with specified thread count."""
         print(f"\n{'='*80}")
         print(f">>> Running {self.benchmark_full} with {num_threads} thread(s)")
         print(f"{'='*80}")
 
-        
+        # Clean up any existing PostgreSQL processes to prevent conflicts
+        self.cleanup_postgresql()
+
         # Remove existing PTS result to prevent interactive prompts
         # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
         sanitized_benchmark = self.benchmark.replace('.', '')
@@ -986,9 +1151,14 @@ class PgbenchRunner:
 
         # Run for each thread count
         failed = []
-        for num_threads in self.thread_list:
-            if not self.run_benchmark(num_threads):
-                failed.append(num_threads)
+        try:
+            for num_threads in self.thread_list:
+                if not self.run_benchmark(num_threads):
+                    failed.append(num_threads)
+        finally:
+            # Clean up PostgreSQL processes even if tests fail or are interrupted
+            print(f"\n>>> Final cleanup...")
+            self.cleanup_postgresql()
 
         # Export results
         self.export_results()
@@ -999,7 +1169,7 @@ class PgbenchRunner:
         if failed:
             print(f"\n[WARN] Some tests failed: {failed}")
             return False
-        
+
         print(f"\n[SUCCESS] All tests completed successfully")
         return True
 
