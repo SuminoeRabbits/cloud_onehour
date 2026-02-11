@@ -47,19 +47,18 @@
             {
                 <test_name>:
                 {
-                    <os>:
-                    {
                         "thread": "<N>": 
                         {                        
                             <machinename>:{
-                                "time_score":"<time_score>",
-                                "benchmark_score":"<benchmark_score>",
-                                "unit":"<unit>"
+                                <os>:{
+                                    "time_score":"<time_score>",
+                                    "benchmark_score":"<benchmark_score>",
+                                    "unit":"<unit>"
+                                }
+                                ....
                             }
                             ....
                         }
-                        ....
-                    }
                     .....
                 }
                 .....

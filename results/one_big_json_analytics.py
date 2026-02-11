@@ -3,8 +3,8 @@
 """
 one_big_json_analytics.py
 
-Version: v1.1.0
-Generated: 2026-01-22
+Version: v1.2.0
+Generated: 2026-02-05
 
 This script analyzes one_big_json.json and generates four types of comparisons:
 1. Performance comparison - Absolute performance across different machines
@@ -24,7 +24,15 @@ from typing import Dict, Any, List, Optional, Tuple
 import subprocess
 
 # Script version
-VERSION = "v1.1.0"
+VERSION = "v1.2.0"
+
+
+class ThreadScalingError(RuntimeError):
+    """Raised when thread scaling baselines cannot be established."""
+
+
+class CSPComparisonError(RuntimeError):
+    """Raised when CSP comparison cannot establish reference baselines."""
 
 
 def get_version_info() -> str:
@@ -47,6 +55,23 @@ def get_generation_log() -> Dict[str, Any]:
             "date": datetime.now().strftime("%Y%m%d-%H%M%S")
         }
     }
+
+
+def parse_time_value(test_data: Dict[str, Any]) -> Optional[float]:
+    """Extract execution time as a non-negative float if available."""
+    time_val = test_data.get("time")
+    if time_val in (None, "N/A"):
+        return None
+
+    try:
+        time_float = float(time_val) if not isinstance(time_val, (int, float)) else float(time_val)
+    except (ValueError, TypeError):
+        return None
+
+    if time_float < 0:
+        return None
+
+    return time_float
 
 
 def validate_json_syntax(file_path: Path) -> bool:
@@ -130,46 +155,43 @@ def get_benchmark_score(test_data: Dict[str, Any]) -> Tuple[Any, Any, bool, str]
     """
     Get benchmark score, time, and unit from test data.
     Returns (benchmark_score, time_score, has_values, unit)
-    - If "values" exists and is not "N/A", use it as benchmark_score (higher is better)
-    - Otherwise use "time" as benchmark_score (lower is better)
+    - Prefer "values" only when raw samples exist
+    - Otherwise use valid execution time
     - unit is extracted from test_data["unit"] field
     """
     values = test_data.get("values")
-    time_val = test_data.get("time")
     unit = test_data.get("unit", "N/A")
-    if unit is None or unit == "":
+    if unit in (None, ""):
         unit = "N/A"
 
-    # Check if values exists and is valid
-    if values is not None and values != "N/A":
+    time_value = parse_time_value(test_data)
+    time_score: Any = time_value if time_value is not None else "unknown"
+
+    if values not in (None, "N/A"):
         try:
             benchmark_score = float(values) if not isinstance(values, (int, float)) else values
-            time_score = time_val if time_val is not None and time_val != "N/A" else "unknown"
-            if isinstance(time_score, (int, float)) and time_score == 0:
-                time_score = "unknown"
             return (benchmark_score, time_score, True, unit)
         except (ValueError, TypeError):
             pass
 
-    # Fall back to time
-    if time_val is not None and time_val != "N/A":
-        try:
-            time_score = float(time_val) if not isinstance(time_val, (int, float)) else time_val
-            if time_score == 0:
-                return ("unknown", "unknown", False, unit)
-            return (time_score, time_score, False, unit)
-        except (ValueError, TypeError):
-            pass
+    if time_value is not None:
+        return (time_value, time_value, False, unit)
 
     return ("unknown", "unknown", False, unit)
 
 
-def get_hourly_rate(machine_data: Dict[str, Any]) -> Any:
-    """Return hourly rate from input data (preferred: hourly_rate)."""
+def get_hourly_rate(machine_data: Dict[str, Any]) -> Optional[float]:
+    """Return positive hourly_rate defined in input data."""
     hourly_rate = machine_data.get("hourly_rate")
-    if hourly_rate is not None:
-        return hourly_rate
-    return machine_data.get("cost_hour[730h-mo]", 0)
+    if hourly_rate in (None, "N/A"):
+        return None
+
+    try:
+        rate = float(hourly_rate) if not isinstance(hourly_rate, (int, float)) else float(hourly_rate)
+    except (ValueError, TypeError):
+        return None
+
+    return rate if rate > 0 else None
 
 
 def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -184,10 +206,10 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             <testcategory>: {
                 <benchmark>: {
                     <test_name>: {
-                        <os>: {
-                            "thread": {
-                                "<N>": {
-                                    <machinename>: {
+                        "thread": {
+                            "<N>": {
+                                <machinename>: {
+                                    <os>: {
                                         "time_score": <time_score>,
                                         "benchmark_score": <benchmark_score>,
                                         "unit": <unit>
@@ -225,16 +247,18 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             result["workload"][testcategory] = {}
         if benchmark not in result["workload"][testcategory]:
             result["workload"][testcategory][benchmark] = {}
-        if test_name not in result["workload"][testcategory][benchmark]:
-            result["workload"][testcategory][benchmark][test_name] = {}
-        if os_name not in result["workload"][testcategory][benchmark][test_name]:
-            result["workload"][testcategory][benchmark][test_name][os_name] = {
-                "thread": {}
-            }
-        if thread not in result["workload"][testcategory][benchmark][test_name][os_name]["thread"]:
-            result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread] = {}
+        workload_entry = result["workload"][testcategory][benchmark]
+        if test_name not in workload_entry:
+            workload_entry[test_name] = {"thread": {}}
 
-        result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread][machinename] = {
+        thread_map = workload_entry[test_name]["thread"]
+        if thread not in thread_map:
+            thread_map[thread] = {}
+
+        if machinename not in thread_map[thread]:
+            thread_map[thread][machinename] = {}
+
+        thread_map[thread][machinename][os_name] = {
             "time_score": time_score,
             "benchmark_score": benchmark_score,
             "unit": unit
@@ -296,7 +320,7 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         time_val = test_data.get("time")
 
         cost_score: Any = "unknown"
-        if hourly_rate is not None and hourly_rate > 0:
+        if hourly_rate is not None:
             if time_val is not None and time_val != "N/A" and time_val != 0:
                 try:
                     time_float = float(time_val) if not isinstance(time_val, (int, float)) else time_val
@@ -329,52 +353,37 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def thread_scaling_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Generate Thread scaling comparison metrics.
-    For each machine, shows how benchmark score scales with thread count.
-    Only includes workloads with more than one thread count.
-    Reference: max thread count = 100
-
-    Output structure (list of):
-    {
-        description: "Thread scaling comparison",
-        header: {
-            "machinename": <machinename>,
-            "os": <os>
-        },
-        workload: {
-            <testcategory>: {
-                <benchmark>: {
-                    <test_name>: {
-                        "unit": <unit>,
-                        "<N>": <benchmark_score>
-                    }
-                }
-            }
-        }
-    }
+    Generate Thread scaling comparison metrics based on execution time.
+    The execution time at the maximum thread count becomes the reference (score 100).
+    Raises ThreadScalingError when the reference execution time cannot be resolved.
     """
-    results = []
-
     workloads = extract_workloads(data)
 
-    # Group by machinename -> os -> testcategory -> benchmark -> test_name -> threads
-    # Also store unit for each test_name
-    machine_workloads: Dict[Tuple, Dict[str, Any]] = {}
-    machine_workloads_unit: Dict[Tuple, str] = {}
+    time_by_workload: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
+    thread_number_map: Dict[Tuple[str, str, str, str, str], Dict[str, int]] = {}
+    unit_by_workload: Dict[Tuple[str, str, str, str, str], str] = {}
+
     for w in workloads:
         key = (w["machinename"], w["os"], w["testcategory"], w["benchmark"], w["test_name"])
-        if key not in machine_workloads:
-            machine_workloads[key] = {}
+        thread_label = str(w["thread"])
+        try:
+            thread_number = int(thread_label)
+        except (TypeError, ValueError):
+            print(
+                f"Warning: Skip non-integer thread '{thread_label}' for "
+                f"{w['machinename']}/{w['os']}/{w['testcategory']}/{w['benchmark']}/{w['test_name']}",
+                file=sys.stderr
+            )
+            continue
 
-        thread = w["thread"]
-        benchmark_score, _, _, unit = get_benchmark_score(w["test_data"])
-        machine_workloads[key][thread] = benchmark_score
-        machine_workloads_unit[key] = unit
+        time_value = parse_time_value(w["test_data"])
+        time_by_workload.setdefault(key, {})[thread_label] = time_value if time_value is not None else "unknown"
+        thread_number_map.setdefault(key, {})[thread_label] = thread_number
+        unit = w["test_data"].get("unit")
+        unit_by_workload[key] = unit if unit not in (None, "") else "N/A"
 
-    # Generate results for each machine/os combination
-    machine_os_pairs = set()
-    for w in workloads:
-        machine_os_pairs.add((w["machinename"], w["os"]))
+    machine_os_pairs = {(w["machinename"], w["os"]) for w in workloads}
+    results: List[Dict[str, Any]] = []
 
     for machinename, os_name in sorted(machine_os_pairs):
         result = {
@@ -388,50 +397,35 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         has_scaling_data = False
 
-        for key, thread_scores in machine_workloads.items():
+        for key, thread_times in time_by_workload.items():
             if key[0] != machinename or key[1] != os_name:
                 continue
 
-            # Skip if only one thread count
-            if len(thread_scores) <= 1:
+            thread_numbers = thread_number_map.get(key, {})
+            if len(thread_numbers) <= 1:
                 continue
 
-            testcategory, benchmark, test_name = key[2], key[3], key[4]
-            unit = machine_workloads_unit.get(key, "N/A")
+            max_thread_label = max(thread_numbers, key=lambda t: thread_numbers[t])
+            ref_time = thread_times.get(max_thread_label)
 
-            # Find max thread count for reference
-            valid_threads = []
-            for t, score in thread_scores.items():
-                if score != "unknown":
-                    try:
-                        valid_threads.append((int(t), score))
-                    except ValueError:
-                        continue
+            if ref_time == "unknown" or ref_time == 0:
+                raise ThreadScalingError(
+                    "Cannot determine reference execution time for "
+                    f"{machinename}/{os_name}/{key[2]}/{key[3]}/{key[4]} (thread={max_thread_label})"
+                )
 
-            if not valid_threads:
-                continue
-
-            max_thread = max(valid_threads, key=lambda x: x[0])
-            ref_score = max_thread[1]
-
-            if ref_score == 0:
-                print(f"Warning: Reference score is 0 for {machinename}/{os_name}/{testcategory}/{benchmark}/{test_name}",
-                      file=sys.stderr)
-                continue
-
-            # Calculate relative scores (reference = 100)
-            scaling_data: Dict[str, Any] = {"unit": unit}
-            for thread, score in thread_scores.items():
-                if score == "unknown":
-                    scaling_data[thread] = "unknown"
+            scaling_data: Dict[str, Any] = {"unit": unit_by_workload.get(key, "N/A")}
+            for thread_label, value in sorted(thread_times.items(), key=lambda item: thread_numbers[item[0]]):
+                if value == "unknown" or value == 0:
+                    scaling_data[thread_label] = "unknown"
                 else:
                     try:
-                        relative_score = round((float(score) / float(ref_score)) * 100, 2)
-                        scaling_data[thread] = relative_score
-                    except (ValueError, TypeError, ZeroDivisionError):
-                        scaling_data[thread] = "unknown"
+                        relative_score = round((ref_time / value) * 100, 2)
+                    except ZeroDivisionError:
+                        relative_score = "unknown"
+                    scaling_data[thread_label] = relative_score
 
-            # Build nested structure
+            testcategory, benchmark, test_name = key[2], key[3], key[4]
             if testcategory not in result["workload"]:
                 result["workload"][testcategory] = {}
             if benchmark not in result["workload"][testcategory]:
@@ -530,8 +524,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
         ref_machines = [(m, o) for m, o in machine_os_set if is_arm64_reference(m, csp)]
 
         if not ref_machines:
-            print(f"Warning: No arm64 reference instance found for CSP {csp}", file=sys.stderr)
-            continue
+            raise CSPComparisonError(f"No arm64 reference instance found for CSP {csp}")
 
         # Group workloads by test
         test_workloads: Dict[Tuple, Dict[str, Any]] = {}
@@ -552,7 +545,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             time_val = test_data.get("time")
 
             cost_score = None
-            if hourly_rate is not None and hourly_rate > 0:
+            if hourly_rate is not None:
                 if time_val is not None and time_val != "N/A" and time_val != 0:
                     try:
                         time_float = float(time_val) if not isinstance(time_val, (int, float)) else time_val
@@ -670,13 +663,21 @@ def main():
 
     if args.th or args.all:
         print("Generating thread scaling comparison...", file=sys.stderr)
-        thread_results = thread_scaling_comparison(data)
+        try:
+            thread_results = thread_scaling_comparison(data)
+        except ThreadScalingError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
         if thread_results:
             output["thread_scaling_comparison"] = thread_results
 
     if args.csp or args.all:
         print("Generating CSP instance comparison...", file=sys.stderr)
-        csp_results = csp_instance_comparison(data)
+        try:
+            csp_results = csp_instance_comparison(data)
+        except CSPComparisonError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
         if csp_results:
             output["csp_instance_comparison"] = csp_results
 

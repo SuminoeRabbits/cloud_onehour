@@ -435,25 +435,28 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 
 `<machinename>`に含まれる文字列で決定される数字である。対応表は下記の通り。
 ここに記載がない場合は、`<machinename>`はそのまま利用するが他の`<machinename>`向け情報は`N/A`とする。
+なお、このTableは`cloud_onehour/cloud_instances.json`を参照してAIエージェントが随時自動生成する。値を変更したい場合は`cloud_instances.json`を更新し、表を直接書き換えないこと。
 
-|<machinename>が含む文字列|	csp  |vcpu  |cpu_name|cpu_isa| cost_hour[730h-mo] |
+|<machinename>が含む文字列|	csp  |	vcpu  |	cpu_name|	cpu_isa| cost_hour[730h-mo] |
 | :---                   | :---:| :---:| :---:  |:---:  | :---:      |
 |"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A| 0.0 |
 |"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)| 0.0183 |
-|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC 9R45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.3164 |
-|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon 6 (6th Granite Rapids)|	x86-64 (AMX + AVX-512)| 0.2594 |
-|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon 5 Metal(5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 1.2433 |
+|"m7g" and "2xlarge"|	AWS|8|	Neoverse-V1 (Graviton3)|	Armv9.0-A (SVE2-256)| 0.4413 |
 |"m7i" and "2xlarge"|	AWS|8|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)| 0.5405 |
-|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A (SVE2-128)| 0.2274 |
+|"m8a" and "2xlarge"|	AWS|8|	AMD EPYC 9R45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.64858 |
+|"m8i" and "2xlarge"|	AWS|8|	Intel Xeon 6 (6th Granite Rapids)|	x86-64 (AMX + AVX-512)| 0.56654 |
+|"m8g" and "2xlarge"|	AWS|8|	Neoverse-V2 (Graviton4)|	Armv9.0-A (SVE2-128)| 0.48346 |
+|"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon 5 Metal(5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 1.2433 |
 |"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64| 0.0683 |
 |"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.4057 |
 |"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.4231 |
 |"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.3869 |
-|"E5" and "Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1925 |
-|"E6" and "Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1925 |
-|"A1" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.0599 |
-|"A2" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1845 |
-|"A4" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.2053 |
+|"t2a-standard-8"|	GCP|	8|	Ampere Altra|	Armv8.2-A (NEON-128)| 0.40654 |
+|"E5" and "Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1727 |
+|"E6" and "Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1927 |
+|"A1" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1367 |
+|"A2" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1287 |
+|"A4" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1503 |
 
 
 ### Cost at Look-Up-Table
