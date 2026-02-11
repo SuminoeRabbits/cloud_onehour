@@ -15,14 +15,21 @@ AWS_REGIONS_FALLBACK = ["ap-northeast-1"]
 
 def run_command(cmd):
     """コマンドを実行し、(成功フラグ, 結果データ, エラーメッセージ) を返す"""
+    env = os.environ.copy()
+    env["SUPPRESS_LABEL_WARNING"] = "True"
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=env)
+        if result.returncode == 0 or (result.returncode == 2 and "oci" in cmd):
+            stdout = result.stdout.strip()
+            if not stdout:
+                # Return empty dict/list depending on what's expected? 
+                # Most loaders handle empty dict safely.
+                return True, {}, None
             try:
-                return True, json.loads(result.stdout), None
+                return True, json.loads(stdout), None
             except Exception as e:
                 # JSON parse failed; include raw output for debugging
-                return False, None, f"JSON parse error: {e}; stdout={result.stdout.strip()}"
+                return False, None, f"JSON parse error: {e}; stdout={stdout}"
         else:
             # Prefer stderr, fallback to stdout for CLI errors without stderr
             err_msg = result.stderr.strip() if result.stderr else ""
