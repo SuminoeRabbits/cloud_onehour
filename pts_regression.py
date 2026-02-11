@@ -293,10 +293,11 @@ def _add_log_redirection(cmd: str) -> str:
     """
     import re
 
-    match = re.search(r'\./pts_runner/pts_runner_([^\\s]+?)\\.py', cmd)
+    match = re.search(r'\./pts_runner/pts_runner_(\S+?)\.py', cmd)
     if match:
         testname = match.group(1)
-        log_path = f"/tmp/pts_runner_{testname}.log"
+        testname_no_version = re.sub(r'-\d+(?:\.\d+)+$', '', testname)
+        log_path = f"/tmp/pts_runner_{testname_no_version}.log"
     else:
         log_path = "/tmp/pts_runner.log"
 
