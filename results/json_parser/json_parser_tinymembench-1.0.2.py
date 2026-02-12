@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""tinymembench-1.0.2 専用 JSON パーサー。
+
+`cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
+データ構造（抜粋）で Memory_Access/tinymembench-1.0.2 のみを抽出する。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from statistics import median
+from typing import Any, Dict, List, Optional
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.append(str(ROOT_DIR))
+
+from make_one_big_json import get_machine_info  # type: ignore  # pylint: disable=import-error
+
+BENCHMARK_NAME = "tinymembench-1.0.2"
+
+
+def _extract_test_entries(thread_json: Path) -> List[Dict[str, Any]]:
+    data = json.loads(thread_json.read_text(encoding="utf-8"))
+    entries: List[Dict[str, Any]] = []
+
+    for test_block in data.get("results", {}).values():
+        title = test_block.get("title", "N/A")
+        description = test_block.get("description", "")
+        unit = test_block.get("scale", "")
+
+        for system_data in test_block.get("results", {}).values():
+            value = system_data.get("value")
+            raw_values = system_data.get("raw_values")
+            if not raw_values and value is not None:
+                raw_values = [value]
+            test_run_times = system_data.get("test_run_times", [])
+            time_value = median(test_run_times) if test_run_times else None
+
+            entries.append(
+                {
+                    "test_name": title,
+                    "description": description,
+                    "unit": unit,
+                    "value": value,
+                    "raw_values": raw_values,
+                    "test_run_times": test_run_times,
+                    "time": time_value,
+                }
+            )
+
+    return entries
+
+
+def _build_test_node(entry: Dict[str, Any], cost_hour: float) -> Dict[str, Any]:
+    value = entry.get("value")
+    raw_values = entry.get("raw_values")
+    test_run_times = entry.get("test_run_times") or []
+    time_value: Optional[float] = entry.get("time")
+    time_seconds = float(time_value) if time_value is not None else 0.0
+    cost = round(cost_hour * time_seconds / 3600, 6) if time_seconds else 0.0
+
+    return {
+        "description": entry.get("description", ""),
+        "values": value if value is not None else "N/A",
+        "raw_values": raw_values if raw_values else ("N/A" if value is None else [value]),
+        "unit": entry.get("unit", ""),
+        "time": time_seconds if time_seconds else 0.0,
+        "test_run_times": test_run_times if test_run_times else [],
+        "cost": cost,
+    }
+
+
+def _build_thread_node(entries: List[Dict[str, Any]], cost_hour: float) -> Dict[str, Any]:
+    test_name_map: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        base_name = entry.get("test_name", "unknown")
+        description = entry.get("description", "")
+        key = f"{base_name} - {description}" if description else base_name
+        test_name_map[key] = _build_test_node(entry, cost_hour)
+
+    return {
+        "perf_stat": {},
+        "test_name": test_name_map,
+    }
+
+
+def _parse_tinymembench(benchmark_dir: Path, cost_hour: float) -> Dict[str, Any]:
+    thread_nodes: Dict[str, Dict[str, Any]] = {}
+    for thread_json in sorted(benchmark_dir.glob("*-thread.json")):
+        thread_prefix = thread_json.stem.split("-", 1)[0]
+        if not thread_prefix.isdigit():
+            continue
+        entries = _extract_test_entries(thread_json)
+        if entries:
+            thread_nodes[thread_prefix] = _build_thread_node(entries, cost_hour)
+
+    return thread_nodes
+
+
+def _build_machine_payload(machine_dir: Path) -> Dict[str, Any]:
+    if not machine_dir.is_dir():
+        raise FileNotFoundError(f"Machine directory not found: {machine_dir}")
+
+    machinename = machine_dir.name
+    machine_info = get_machine_info(machinename)
+    cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
+
+    machine_node: Dict[str, Any] = {
+        "CSP": machine_info.get("CSP", "N/A"),
+        "total_vcpu": machine_info.get("total_vcpu", 0),
+        "cpu_name": machine_info.get("cpu_name", "N/A"),
+        "cpu_isa": machine_info.get("cpu_isa", "N/A"),
+        "cost_hour[730h-mo]": cost_hour,
+        "os": {},
+    }
+
+    for os_dir in sorted([p for p in machine_dir.iterdir() if p.is_dir()]):
+        os_node: Dict[str, Any] = {"testcategory": {}}
+        for testcategory_dir in sorted([p for p in os_dir.iterdir() if p.is_dir()]):
+            benchmark_dir = testcategory_dir / BENCHMARK_NAME
+            if not benchmark_dir.is_dir():
+                continue
+            thread_nodes = _parse_tinymembench(benchmark_dir, cost_hour)
+            if not thread_nodes:
+                continue
+            os_node["testcategory"].setdefault(testcategory_dir.name, {"benchmark": {}})
+            os_node["testcategory"][testcategory_dir.name]["benchmark"][BENCHMARK_NAME] = {
+                "thread": thread_nodes
+            }
+
+        if os_node["testcategory"]:
+            machine_node["os"][os_dir.name] = os_node
+
+    return {machinename: machine_node}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="cloud_onehour/results/<machinename> を入力に tinymembench-1.0.2 構造を JSON で出力する"
+    )
+    parser.add_argument(
+        "--dir",
+        "-d",
+        type=Path,
+        required=True,
+        dest="machine_dir",
+        help="cloud_onehour/results/<machinename> ディレクトリへのパス",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        help="出力先 JSON ファイル（省略時は stdout）",
+    )
+
+    args = parser.parse_args()
+    payload = _build_machine_payload(args.machine_dir)
+
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    if args.output:
+        args.output.write_text(text + "\n", encoding="utf-8")
+    else:
+        print(text)
+
+
+if __name__ == "__main__":
+    main()
