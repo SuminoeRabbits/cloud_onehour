@@ -228,6 +228,113 @@ class CloudProvider(ABC):
             Status string ('running', 'terminated', 'unknown', etc.)
         """
         pass
+    
+    # ========================================
+    # Common Quota Management Methods
+    # ========================================
+    
+    def calculate_total_vcpus(self, instances: List[Dict[str, Any]]) -> int:
+        """Calculate total vCPUs for given instances.
+        
+        Args:
+            instances: List of instance definitions
+            
+        Returns:
+            Total vCPUs required
+        """
+        return sum(inst.get('vcpus', 0) for inst in instances)
+    
+    def display_quota_info(self, instances: List[Dict[str, Any]], csp_name: str = '', max_workers: int = 1, concurrent_vcpus: int = 0) -> None:
+        """Display vCPU quota information.
+        
+        Args:
+            instances: List of instance definitions
+            csp_name: CSP name for display (e.g., 'AWS', 'GCP', 'OCI')
+            max_workers: Number of parallel workers
+            concurrent_vcpus: Maximum concurrent vCPUs
+        """
+        quota = self.shared_resources.get('quota_vcpus_all_regions', 32)
+        total_vcpus = self.calculate_total_vcpus(instances)
+        
+        if not csp_name:
+            csp_name = self.csp_config.get('name', 'CSP').upper()
+        
+        print(f"\n{'='*80}")
+        print(f"{csp_name} vCPU Quota Information")
+        print(f"{'='*80}")
+        print(f"Quota (CPUS_ALL_REGIONS): {quota} vCPUs")
+        print(f"Requested instances: {len(instances)}")
+        print(f"Total vCPUs (all instances): {total_vcpus} vCPUs")
+        print(f"Max concurrent vCPUs (max_workers={max_workers}): {concurrent_vcpus} vCPUs")
+        print(f"Quota utilization: {concurrent_vcpus}/{quota} ({100*concurrent_vcpus//quota if quota > 0 else 0}%)")
+        
+        if concurrent_vcpus > quota:
+            print(f"\n⚠️  WARNING: Concurrent vCPUs exceed quota by {concurrent_vcpus - quota} vCPUs!")
+            print(f"   max_workers will be adjusted to stay within quota.")
+        elif concurrent_vcpus == quota:
+            print(f"\n✓  Quota fully utilized (max_workers={max_workers})")
+        else:
+            print(f"\n✓  Within quota limit (max_workers={max_workers})")
+        
+        print(f"\nInstance breakdown (sorted by vCPUs):")
+        sorted_instances = sorted(instances, key=lambda x: x.get('vcpus', 0), reverse=True)
+        for i, inst in enumerate(sorted_instances):
+            vcpus = inst.get('vcpus', 0)
+            region = inst.get('region', 'unknown')
+            marker = f" [concurrent {i+1}]" if i < max_workers else ""
+            print(f"  - {inst['name']}: {vcpus} vCPUs @ {region}{marker}")
+        print(f"{'='*80}\n")
+    
+    def check_quota_and_adjust(self, instances: List[Dict[str, Any]], max_workers: int) -> int:
+        """Check quota and adjust max_workers to avoid quota errors.
+        
+        This method calculates the maximum concurrent vCPUs based on max_workers,
+        not the total vCPUs of all instances. For example:
+        - 4 instances with 16 vCPUs each = 64 vCPUs total
+        - max_workers=2: concurrent vCPUs = 16 + 16 = 32 vCPUs
+        - max_workers=3: concurrent vCPUs = 16 + 16 + 16 = 48 vCPUs
+        
+        Args:
+            instances: List of instance definitions
+            max_workers: Original max_workers value
+            
+        Returns:
+            Adjusted max_workers to stay within quota
+        """
+        quota = self.shared_resources.get('quota_vcpus_all_regions', 32)
+        csp_name = self.csp_config.get('name', 'CSP').upper()
+        
+        # Sort instances by vCPUs (descending) to calculate worst-case concurrent usage
+        sorted_instances = sorted(instances, key=lambda x: x.get('vcpus', 0), reverse=True)
+        
+        # Calculate maximum concurrent vCPUs for current max_workers
+        concurrent_vcpus = sum(inst.get('vcpus', 0) for inst in sorted_instances[:max_workers])
+        
+        # Display quota information with current settings
+        self.display_quota_info(instances, csp_name, max_workers, concurrent_vcpus)
+        
+        # If concurrent vCPUs are within quota, use original max_workers
+        if concurrent_vcpus <= quota:
+            print(f"[{csp_name} QUOTA] Parallel execution enabled (max_workers={max_workers})\n")
+            return max_workers
+        
+        # Find optimal max_workers that stays within quota
+        adjusted_max_workers = 1
+        for workers in range(1, max_workers + 1):
+            test_concurrent = sum(inst.get('vcpus', 0) for inst in sorted_instances[:workers])
+            if test_concurrent <= quota:
+                adjusted_max_workers = workers
+            else:
+                break
+        
+        print(f"[{csp_name} QUOTA] Adjusting max_workers: {max_workers} → {adjusted_max_workers}")
+        print(f"[{csp_name} QUOTA] Concurrent vCPUs will be: {sum(inst.get('vcpus', 0) for inst in sorted_instances[:adjusted_max_workers])} vCPUs")
+        print(f"[{csp_name} QUOTA] This stays within quota limit of {quota} vCPUs\n")
+        
+        return adjusted_max_workers
+        
+        # If within quota, allow parallel execution
+        return max_workers
 
 
 # =========================================================================================
@@ -2341,6 +2448,9 @@ class AWSProvider(CloudProvider):
         """Initialize AWS shared resources (Security Group, KeyPair)."""
         region = self.csp_config['region']
         sg_name = self.config['common']['security_group_name']
+        
+        # Get quota from config (default to 32 if not specified)
+        quota_vcpus = self.csp_config.get('quota_vcpus_all_regions', 32)
 
         # Per-region shared resources (for multi-region support)
         self._region_resources = {}
@@ -2369,7 +2479,8 @@ class AWSProvider(CloudProvider):
             'sg_id': sg_id,
             'key_name': key_name,
             'region': region,
-            'sg_name': sg_name
+            'sg_name': sg_name,
+            'quota_vcpus_all_regions': quota_vcpus
         }
 
         return self.shared_resources
@@ -2512,12 +2623,16 @@ class GCPProvider(CloudProvider):
         """Initialize GCP shared resources (Project, Region-as-Zone)."""
         project = get_gcp_project(logger)
         region = self.csp_config.get('region') or self.csp_config.get('zone') or 'us-central1-a'
+        
+        # Get quota from config (default to 32 if not specified)
+        quota_vcpus = self.csp_config.get('quota_vcpus_all_regions', 32)
 
         self.shared_resources = {
             'project': project,
             # Default region-as-zone (can be overridden per instance)
             'region': region,
-            'zone': region
+            'zone': region,
+            'quota_vcpus_all_regions': quota_vcpus
         }
 
         return self.shared_resources
@@ -2712,6 +2827,9 @@ class OCIProvider(CloudProvider):
         subnet_id = os.getenv('OCI_SUBNET_ID') or self.csp_config.get('subnet_id')
         availability_domain = os.getenv('OCI_AVAILABILITY_DOMAIN') or self.csp_config.get('availability_domain')
         region = self.csp_config.get('region') or os.getenv('OCI_REGION') or 'us-ashburn-1'
+        
+        # Get quota from config (default to 32 if not specified)
+        quota_vcpus = self.csp_config.get('quota_vcpus_all_regions', 32)
 
         # Validate required parameters
         if not compartment_id:
@@ -2733,7 +2851,8 @@ class OCIProvider(CloudProvider):
             'compartment_id': compartment_id,
             'subnet_id': subnet_id,
             'availability_domain': availability_domain,
-            'region': region
+            'region': region,
+            'quota_vcpus_all_regions': quota_vcpus
         }
 
         return self.shared_resources
@@ -3672,6 +3791,12 @@ Examples:
 
     # Dry-run mode
     if args.dry_run:
+        # Initialize and display quota info in dry-run for all CSPs
+        provider.initialize_shared_resources()
+        adjusted_max_workers = provider.check_quota_and_adjust(instances, max_workers)
+        if adjusted_max_workers != max_workers:
+            max_workers = adjusted_max_workers
+        
         print(f"\n{'='*80}")
         mode_str = "TESTLOADS MODE" if args.test else "PRODUCTION MODE"
         print(f"DRY RUN - {mode_str} - Execution Plan for {args.csp.upper()}")
@@ -3716,6 +3841,9 @@ Examples:
         print(f"[{args.csp.upper()}] Initializing shared resources...")
         provider.initialize_shared_resources()
         print(f"[{args.csp.upper()}] Shared resources initialized\n")
+
+        # Check quota and adjust max_workers for all CSPs
+        max_workers = provider.check_quota_and_adjust(instances, max_workers)
 
         # Get SSH key path
         key_path = config['common']['ssh_key_path']
