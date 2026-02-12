@@ -927,25 +927,33 @@ class RenaissanceRunner:
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
-        # Wrap PTS command with perf stat
+        # Wrap PTS command with perf stat (only if perf is available)
         # CRITICAL: Environment variables MUST come BEFORE perf stat (README)
         # Otherwise perf stat won't propagate them to the actual command
-        pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations -A -a -o {perf_stats_file} {pts_base_cmd}'
+        if self.perf_events:
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} perf stat -e {self.perf_events} -A -a -o {perf_stats_file} {pts_base_cmd}'
+            perf_status = "enabled"
+        else:
+            pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
+            perf_status = "disabled (perf not available)"
 
         print(f"[INFO] {cpu_info}")
+        print(f"[INFO] Perf monitoring: {perf_status}")
 
         # Print PTS command to stdout for debugging (as per README requirement)
         print(f"\n{'>'*80}")
         print(f"[PTS BENCHMARK COMMAND]")
         print(f"  {pts_cmd}")
         print(f"  {cpu_info}")
+        print(f"  Perf monitoring: {perf_status}")
         print(f"  Output:")
         print(f"    Thread log: {log_file}")
         print(f"    Stdout log: {stdout_log}")
-        print(f"    Perf stats: {perf_stats_file}")
+        if self.perf_events:
+            print(f"    Perf stats: {perf_stats_file}")
+            print(f"    Perf summary: {perf_summary_file}")
         print(f"    Freq start: {freq_start_file}")
         print(f"    Freq end: {freq_end_file}")
-        print(f"    Perf summary: {perf_summary_file}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
@@ -963,6 +971,7 @@ class RenaissanceRunner:
             stdout_f.write(f"[PTS BENCHMARK COMMAND - {num_threads} thread(s)]\n")
             stdout_f.write(f"{pts_cmd}\n")
             stdout_f.write(f"{cpu_info}\n")
+            stdout_f.write(f"Perf monitoring: {perf_status}\n")
             stdout_f.write(f"{'='*80}\n\n")
             stdout_f.flush()
 
@@ -999,23 +1008,26 @@ class RenaissanceRunner:
             print(f"     Thread log: {log_file}")
             print(f"     Stdout log: {stdout_log}")
 
-            # Parse perf stats and save summary
-            try:
-                perf_summary = self.parse_perf_stats_and_freq(
-                    perf_stats_file,
-                    freq_start_file,
-                    freq_end_file,
-                    cpu_list
-                )
+            # Parse perf stats and save summary (only if perf was used)
+            if self.perf_events:
+                try:
+                    perf_summary = self.parse_perf_stats_and_freq(
+                        perf_stats_file,
+                        freq_start_file,
+                        freq_end_file,
+                        cpu_list
+                    )
 
-                # Save perf summary to JSON
-                with open(perf_summary_file, 'w') as f:
-                    json.dump(perf_summary, f, indent=2)
-                print(f"     Perf summary: {perf_summary_file}")
+                    # Save perf summary to JSON
+                    with open(perf_summary_file, 'w') as f:
+                        json.dump(perf_summary, f, indent=2)
+                    print(f"     Perf summary: {perf_summary_file}")
 
-            except Exception as e:
-                print(f"  [ERROR] Failed to parse perf stats: {e}")
-                print(f"  [INFO] Benchmark results are still valid, continuing...")
+                except Exception as e:
+                    print(f"  [ERROR] Failed to parse perf stats: {e}")
+                    print(f"  [INFO] Benchmark results are still valid, continuing...")
+            else:
+                print(f"  [INFO] Perf monitoring was disabled, skipping perf stats parsing")
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
