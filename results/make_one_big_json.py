@@ -5,7 +5,7 @@ make_one_big_json.py
 Generates one_big_json.json from results directory structure.
 Based on README_results.md specification.
 
-Version info: v1.0.0 (Updated: 2026-01-18)
+Version info: v1.1.0 (Updated: 2026-02-12)
 
 Important: All log files are automatically processed to remove ANSI color codes
 before parsing. This ensures consistent regex matching across different environments.
@@ -32,10 +32,369 @@ import re
 from datetime import datetime
 import socket
 import glob
+from decimal import Decimal, ROUND_HALF_UP
 
 
 # Script version - Format: v<major>.<minor>.<patch>
-SCRIPT_VERSION = "v1.0.0"
+SCRIPT_VERSION = "v1.1.0"
+
+CLOUD_INSTANCES_FILE = Path(__file__).resolve().parent.parent / "cloud_instances.json"
+
+LOOKUP_TARGETS = [
+    {
+        "match": ["rpi5"],
+        "static_info": {
+            "CSP": "local",
+            "total_vcpu": 4,
+            "cpu_name": "Cortex-A76",
+            "cpu_isa": "Armv8.2-A",
+            "cost_hour[730h-mo]": 0.0,
+        },
+    },
+    {
+        "match": ["t3", "medium"],
+        "provider": "AWS",
+        "type": "t3.medium",
+        "csp": "AWS",
+        "cpu_name": "Intel Xeon Platinum (8000 series)",
+        "cpu_isa": "x86-64 (AVX-512)",
+        "default_total_vcpu": 2,
+        "default_cost": 0.0183,
+    },
+    {
+        "match": ["m7g", "2xlarge"],
+        "provider": "AWS",
+        "type": "m7g.2xlarge",
+        "csp": "AWS",
+        "cpu_name": "Neoverse-V1 (Graviton3)",
+        "cpu_isa": "Armv9.0-A (SVE2-256)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.4413,
+    },
+    {
+        "match": ["m7g", "4xlarge"],
+        "provider": "AWS",
+        "type": "m7g.4xlarge",
+        "csp": "AWS",
+        "cpu_name": "Neoverse-V1 (Graviton3)",
+        "cpu_isa": "Armv9.0-A (SVE2-256)",
+        "default_total_vcpu": 16,
+        "default_cost": 0.8629,
+    },
+    {
+        "match": ["m7i", "2xlarge"],
+        "provider": "AWS",
+        "type": "m7i.2xlarge",
+        "csp": "AWS",
+        "cpu_name": "Intel Xeon 4 (4th Sapphire Rapids)",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.5405,
+    },
+    {
+        "match": ["m7i", "4xlarge"],
+        "provider": "AWS",
+        "type": "m7i.4xlarge",
+        "csp": "AWS",
+        "cpu_name": "Intel Xeon 4 (4th Sapphire Rapids)",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 16,
+        "default_cost": 1.0613,
+    },
+    {
+        "match": ["m8a", "2xlarge"],
+        "provider": "AWS",
+        "type": "m8a.2xlarge",
+        "csp": "AWS",
+        "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.64858,
+    },
+    {
+        "match": ["m8a", "4xlarge"],
+        "provider": "AWS",
+        "type": "m8a.4xlarge",
+        "csp": "AWS",
+        "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 16,
+        "default_cost": 1.27746,
+    },
+    {
+        "match": ["m8i", "2xlarge"],
+        "provider": "AWS",
+        "type": "m8i.2xlarge",
+        "csp": "AWS",
+        "cpu_name": "Intel Xeon 6 (6th Granite Rapids)",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.56654,
+    },
+    {
+        "match": ["m8i", "4xlarge"],
+        "provider": "AWS",
+        "type": "m8i.4xlarge",
+        "csp": "AWS",
+        "cpu_name": "Intel Xeon 6 (6th Granite Rapids)",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 16,
+        "default_cost": 1.11338,
+    },
+    {
+        "match": ["m8g", "2xlarge"],
+        "provider": "AWS",
+        "type": "m8g.2xlarge",
+        "csp": "AWS",
+        "cpu_name": "Neoverse-V2 (Graviton4)",
+        "cpu_isa": "Armv9.0-A (SVE2-128)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.48346,
+    },
+    {
+        "match": ["m8g", "4xlarge"],
+        "provider": "AWS",
+        "type": "m8g.4xlarge",
+        "csp": "AWS",
+        "cpu_name": "Neoverse-V2 (Graviton4)",
+        "cpu_isa": "Armv9.0-A (SVE2-128)",
+        "default_total_vcpu": 16,
+        "default_cost": 0.94722,
+    },
+    {
+        "match": ["i7ie", "2xlarge"],
+        "provider": "AWS",
+        "type": "i7ie.2xlarge",
+        "csp": "AWS",
+        "cpu_name": "Intel Xeon 5 Metal(5th Emerald Rapids)",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 1.2433,
+    },
+    {
+        "match": ["e2-standard-2"],
+        "provider": "GCP",
+        "type": "e2-standard-2",
+        "csp": "GCP",
+        "cpu_name": "Intel Xeon / AMD EPYC(Variable)",
+        "cpu_isa": "x86-64",
+        "default_total_vcpu": 2,
+        "default_cost": 0.0683,
+    },
+    {
+        "match": ["c4d-standard-8"],
+        "provider": "GCP",
+        "type": "c4d-standard-8",
+        "csp": "GCP",
+        "cpu_name": "AMD EPYC 9B45 (Zen 5 \"Turin\")",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.4057,
+    },
+    {
+        "match": ["c4-standard-8"],
+        "provider": "GCP",
+        "type": "c4-standard-8",
+        "csp": "GCP",
+        "cpu_name": "Intel Xeon Platinum 8581C (5th Emerald Rapids)",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.4231,
+    },
+    {
+        "match": ["c4a-standard-8"],
+        "provider": "GCP",
+        "type": "c4a-standard-8",
+        "csp": "GCP",
+        "cpu_name": "Neoverse-V2 (Google Axion)",
+        "cpu_isa": "Armv9.0-A (SVE2-128)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.3869,
+    },
+    {
+        "match": ["t2a-standard-8"],
+        "provider": "GCP",
+        "type": "t2a-standard-8",
+        "csp": "GCP",
+        "cpu_name": "Ampere Altra",
+        "cpu_isa": "Armv8.2-A (NEON-128)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.40654,
+    },
+    {
+        "match": ["E5", "Flex"],
+        "provider": "OCI",
+        "type": "VM.Standard.E5.Flex",
+        "csp": "OCI",
+        "cpu_name": "AMD EPYC 9J14 (Zen 4 \"Genoa\")",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.1727,
+    },
+    {
+        "match": ["E6", "Flex"],
+        "provider": "OCI",
+        "type": "VM.Standard.E6.Flex",
+        "csp": "OCI",
+        "cpu_name": "AMD EPYC 9J45 (Zen 5 \"Turin\")",
+        "cpu_isa": "x86-64 (AMX + AVX-512)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.1927,
+    },
+    {
+        "match": ["A1", "Flex"],
+        "provider": "OCI",
+        "type": "VM.Standard.A1.Flex",
+        "name_contains": "vcpu-8",
+        "csp": "OCI",
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.1367,
+    },
+    {
+        "match": ["A1", "Flex", "vcpu-16"],
+        "provider": "OCI",
+        "type": "VM.Standard.A1.Flex",
+        "name_contains": "vcpu-16",
+        "csp": "OCI",
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "default_total_vcpu": 16,
+        "default_cost": 0.2647,
+    },
+    {
+        "match": ["A2", "Flex"],
+        "provider": "OCI",
+        "type": "VM.Standard.A2.Flex",
+        "name_contains": "vcpu-8",
+        "csp": "OCI",
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.1287,
+    },
+    {
+        "match": ["A2", "Flex", "vcpu-16"],
+        "provider": "OCI",
+        "type": "VM.Standard.A2.Flex",
+        "name_contains": "vcpu-16",
+        "csp": "OCI",
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "default_total_vcpu": 16,
+        "default_cost": 0.3607,
+    },
+    {
+        "match": ["A4", "Flex"],
+        "provider": "OCI",
+        "type": "VM.Standard.A4.Flex",
+        "csp": "OCI",
+        "cpu_name": "Ampere one (v8.6A)",
+        "cpu_isa": "Armv8.6 (NEON-128)",
+        "default_total_vcpu": 8,
+        "default_cost": 0.1503,
+    },
+]
+
+
+def _load_cloud_instance_entries() -> List[Dict[str, Any]]:
+    """Load and flatten cloud_instances.json contents."""
+
+    if not CLOUD_INSTANCES_FILE.exists():
+        print(f"Warning: {CLOUD_INSTANCES_FILE} not found. Falling back to default machine table.", file=sys.stderr)
+        return []
+
+    try:
+        with open(CLOUD_INSTANCES_FILE, 'r') as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError) as exc:
+        print(f"Warning: Failed to parse {CLOUD_INSTANCES_FILE}: {exc}. Falling back to default machine table.", file=sys.stderr)
+        return []
+
+    entries: List[Dict[str, Any]] = []
+
+    for provider_key, provider_payload in data.items():
+        regions = provider_payload.get("regions", {})
+        for region_info in regions.values():
+            for instance in region_info.get("instances", []):
+                entries.append({
+                    "provider": provider_key.upper(),
+                    "type": instance.get("type", ""),
+                    "name": instance.get("name", ""),
+                    "hostname": instance.get("hostname", ""),
+                    "vcpus": instance.get("vcpus", 0),
+                    "cpu_cost": instance.get("cpu_cost_hour[730h-mo]", 0.0),
+                    "extra_cost": instance.get("extra_150g_storage_cost_hour", 0.0) if instance.get("extra_150g_storage") else 0.0,
+                })
+
+    return entries
+
+
+def _find_instance_entry(instances: List[Dict[str, Any]], target: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Locate the first instance matching the target criteria."""
+
+    type_value = target.get("type", "").lower()
+    name_contains = target.get("name_contains")
+    provider = target.get("provider", "").upper()
+
+    for entry in instances:
+        if type_value and entry.get("type", "").lower() != type_value:
+            continue
+        if provider and entry.get("provider", "").upper() != provider:
+            continue
+        if name_contains and name_contains.lower() not in entry.get("name", "").lower():
+            continue
+        return entry
+
+    return None
+
+
+def _quantize_cost(value: float) -> float:
+    """Round cost to 5 decimal places using half-up rules."""
+
+    return float(Decimal(str(value)).quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP))
+
+
+def _build_machine_lookup() -> List[Dict[str, Any]]:
+    """Construct MACHINE_LOOKUP dynamically from cloud_instances definitions."""
+
+    instances = _load_cloud_instance_entries()
+    lookup: List[Dict[str, Any]] = []
+
+    for target in LOOKUP_TARGETS:
+        if "static_info" in target:
+            lookup.append({"match": target["match"], "info": target["static_info"]})
+            continue
+
+        entry = _find_instance_entry(instances, target) if instances else None
+
+        if entry is None:
+            print(
+                f"Warning: Instance definition for type '{target.get('type')}' not found in cloud_instances.json. "
+                f"Using default values for {target['match']}.",
+                file=sys.stderr,
+            )
+            cost = target.get("default_cost", 0.0)
+            total_vcpu = target.get("default_total_vcpu", 0)
+        else:
+            cost = _quantize_cost(entry.get("cpu_cost", 0.0) + entry.get("extra_cost", 0.0))
+            total_vcpu = entry.get("vcpus", target.get("default_total_vcpu", 0))
+
+        info = {
+            "CSP": target.get("csp", "unknown"),
+            "total_vcpu": total_vcpu,
+            "cpu_name": target.get("cpu_name", "unknown"),
+            "cpu_isa": target.get("cpu_isa", "unknown"),
+            "cost_hour[730h-mo]": cost,
+        }
+
+        lookup.append({"match": target["match"], "info": info})
+
+    return lookup
+
+
+MACHINE_LOOKUP = _build_machine_lookup()
 
 
 def get_version_info() -> str:
