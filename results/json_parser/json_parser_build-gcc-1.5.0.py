@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""apache-3.0.0 専用 JSON パーサー。
+"""build-gcc-1.5.0 専用 JSON パーサー。
 
 `cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
-データ構造（抜粋）で Network/apache-3.0.0 のみを抽出する。
+データ構造（抜粋）で Build_Process/build-gcc-1.5.0 のみを抽出する。
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import statistics
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -29,18 +28,16 @@ except ImportError:
 # Benchmark-specific placeholders
 # ---------------------------------------------------------------------------
 
-BENCHMARK_NAME = "apache-3.0.0"
-TESTCATEGORY_HINT = "Network"
+BENCHMARK_NAME = "build-gcc-1.5.0"
+TESTCATEGORY_HINT = "Build_Process"
 
-# Regex for apache PTS output
+# Regex for build-gcc PTS output
 # Example:
-#     Concurrent Requests: 100:
-#         5272.35
-#     Average: 5272.35 Requests Per Second
-TEST_SECTION_RE = re.compile(
-    r"Concurrent Requests:\s*(?P<concurrent>\d+):\s*\n\s*[\d.]+\s*\n\s*Average:\s*(?P<value>[\d.]+)\s*Requests Per Second",
-    re.MULTILINE | re.IGNORECASE
-)
+#     Time To Compile:
+#         1822.237
+#
+#     Average: 1822.237 Seconds
+AVERAGE_RE = re.compile(r"Average:\s*(?P<value>[\d.]+)\s*Seconds", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -93,26 +90,6 @@ def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
 # Benchmark-specific extraction hooks
 # ---------------------------------------------------------------------------
 
-def _load_thread_json(benchmark_dir: Path, thread_num: str) -> Dict[str, Any]:
-    """Load <N>-thread.json and build a lookup from description to test_run_times."""
-    json_file = benchmark_dir / f"{thread_num}-thread.json"
-    if not json_file.exists():
-        return {}
-
-    try:
-        data = json.loads(json_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-    lookup: Dict[str, list] = {}
-    for _hash, entry in data.get("results", {}).items():
-        desc = entry.get("description", "")
-        for _sys_id, sys_data in entry.get("results", {}).items():
-            if "test_run_times" in sys_data:
-                lookup[desc] = sys_data["test_run_times"]
-    return lookup
-
-
 def _collect_thread_payload(
     benchmark_dir: Path,
     thread_num: str,
@@ -124,41 +101,26 @@ def _collect_thread_payload(
         return None
 
     content = _strip_ansi(log_file.read_text(encoding="utf-8"))
-
-    test_payload: Dict[str, Any] = {}
-    matches = TEST_SECTION_RE.findall(content)
-
-    if not matches:
+    
+    match = AVERAGE_RE.search(content)
+    if not match:
         return None
+    
+    value = float(match.group("value"))
+    
+    cost = round(cost_hour * value / 3600, 6) if value else 0.0
 
-    # Load test_run_times from <N>-thread.json if available
-    run_times_lookup = _load_thread_json(benchmark_dir, thread_num)
-
-    for concurrent, value_str in matches:
-        value = float(value_str)
-        description = f"Concurrent Requests: {concurrent}"
-
-        # Look up test_run_times from JSON data
-        test_run_times = run_times_lookup.get(description, "N/A")
-        if isinstance(test_run_times, list) and len(test_run_times) > 0:
-            time_val = statistics.median(test_run_times)
-        else:
-            time_val = 0.0
-
-        # Calculate cost
-        cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
-
-        key = f"Apache HTTP Server 2.4.56 - {description}"
-
-        test_payload[key] = {
-            "description": description,
+    test_payload: Dict[str, Any] = {
+        "time_to_compile": {
+            "description": "Timed GCC Compilation",
             "values": value,
             "raw_values": [value],
-            "unit": "Requests Per Second",
-            "time": time_val,
-            "test_run_times": test_run_times,
+            "unit": "Seconds",
+            "time": value,
+            "test_run_times": [value],
             "cost": cost,
         }
+    }
 
     # Frequency files
     start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
@@ -246,7 +208,7 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "apache parser: cloud_onehour/results/<machinename> を入力に "
+            "build-gcc parser: cloud_onehour/results/<machinename> を入力に "
             f"{BENCHMARK_NAME} を README 構造で出力する"
         )
     )

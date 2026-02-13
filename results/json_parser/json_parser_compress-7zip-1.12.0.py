@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import statistics
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -92,6 +93,26 @@ def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
 # Benchmark-specific extraction hooks
 # ---------------------------------------------------------------------------
 
+def _load_thread_json(benchmark_dir: Path, thread_num: str) -> Dict[str, list]:
+    """Load <N>-thread.json and build a lookup from description to test_run_times."""
+    json_file = benchmark_dir / f"{thread_num}-thread.json"
+    if not json_file.exists():
+        return {}
+
+    try:
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    lookup: Dict[str, list] = {}
+    for _hash, entry in data.get("results", {}).items():
+        desc = entry.get("description", "")
+        for _sys_id, sys_data in entry.get("results", {}).items():
+            if "test_run_times" in sys_data:
+                lookup[desc] = sys_data["test_run_times"]
+    return lookup
+
+
 def _collect_thread_payload(
     benchmark_dir: Path,
     thread_num: str,
@@ -103,30 +124,44 @@ def _collect_thread_payload(
         return None
 
     content = _strip_ansi(log_file.read_text(encoding="utf-8"))
-    
+
     test_payload: Dict[str, Any] = {}
     matches = TEST_SECTION_RE.findall(content)
-    
+
     if not matches:
         return None
+
+    # Load test_run_times from <N>-thread.json if available
+    run_times_lookup = _load_thread_json(benchmark_dir, thread_num)
 
     for test_title, value_str in matches:
         test_title = test_title.strip()
         value = float(value_str)
-        
-        # Create a key based on test title
-        # "Compression Rating" -> "compression"
-        # "Decompression Rating" -> "decompression"
-        key = test_title.lower().replace(" rating", "").replace(" ", "_")
-        
+
+        # Description in JSON is "Test: Compression Rating" etc.
+        description = f"Test: {test_title}"
+
+        # Look up test_run_times from JSON data
+        test_run_times = run_times_lookup.get(description, "N/A")
+        if isinstance(test_run_times, list) and len(test_run_times) > 0:
+            time_val = statistics.median(test_run_times)
+        else:
+            time_val = 0.0
+
+        # Calculate cost
+        cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
+
+        # Key per README: "7-Zip Compression - Test: Compression Rating"
+        key = f"7-Zip Compression - {description}"
+
         test_payload[key] = {
-            "description": f"7-Zip {test_title}",
+            "description": description,
             "values": value,
             "raw_values": [value],
             "unit": "MIPS",
-            "time": 0.0,
-            "test_run_times": [],
-            "cost": 0.0,
+            "time": time_val,
+            "test_run_times": test_run_times,
+            "cost": cost,
         }
 
     # Frequency files
@@ -149,48 +184,63 @@ def _collect_thread_payload(
 # Machine-level aggregation (共通ロジック)
 # ---------------------------------------------------------------------------
 
-def _build_machine_payload(machine_dir: Path) -> Dict[str, Any]:
-    if not machine_dir.is_dir():
-        raise FileNotFoundError(f"Machine directory not found: {machine_dir}")
+def _build_full_payload(search_root: Path) -> Dict[str, Any]:
+    """Search for benchmarks recursively and build the full JSON payload.
 
-    machinename = machine_dir.name
-    machine_info = get_machine_info(machinename)
-    cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
+    想定構造: <search_root>/**/<machinename>/<os>/<testcategory>/<BENCHMARK_NAME>
+    """
+    if not search_root.exists():
+        raise FileNotFoundError(f"Directory not found: {search_root}")
 
-    machine_node: Dict[str, Any] = {
-        "CSP": machine_info.get("CSP", "N/A"),
-        "total_vcpu": machine_info.get("total_vcpu", 0),
-        "cpu_name": machine_info.get("cpu_name", "N/A"),
-        "cpu_isa": machine_info.get("cpu_isa", "N/A"),
-        "cost_hour[730h-mo]": cost_hour,
-        "os": {},
-    }
+    all_payload: Dict[str, Any] = {}
 
-    for os_dir in sorted([p for p in machine_dir.iterdir() if p.is_dir()]):
-        os_node: Dict[str, Any] = {"testcategory": {}}
-        for testcategory_dir in sorted([p for p in os_dir.iterdir() if p.is_dir()]):
-            benchmark_dir = testcategory_dir / BENCHMARK_NAME
-            if not benchmark_dir.is_dir():
-                continue
+    for benchmark_dir in sorted(search_root.glob(f"**/{BENCHMARK_NAME}")):
+        if not benchmark_dir.is_dir():
+            continue
 
-            thread_nodes: Dict[str, Any] = {}
-            for thread_num in _discover_threads(benchmark_dir):
-                thread_payload = _collect_thread_payload(benchmark_dir, thread_num, cost_hour)
-                if thread_payload:
-                    thread_nodes[thread_num] = thread_payload
+        category_dir = benchmark_dir.parent
+        os_dir = category_dir.parent
+        machine_dir = os_dir.parent
 
-            if not thread_nodes:
-                continue
+        machinename = machine_dir.name
+        os_name = os_dir.name
+        category_name = category_dir.name
 
-            os_node["testcategory"].setdefault(testcategory_dir.name, {"benchmark": {}})
-            os_node["testcategory"][testcategory_dir.name]["benchmark"][BENCHMARK_NAME] = {
-                "thread": thread_nodes
+        machine_info = get_machine_info(machinename)
+        cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
+
+        thread_nodes: Dict[str, Any] = {}
+        for thread_num in _discover_threads(benchmark_dir):
+            thread_payload = _collect_thread_payload(benchmark_dir, thread_num, cost_hour)
+            if thread_payload:
+                thread_nodes[thread_num] = thread_payload
+
+        if not thread_nodes:
+            continue
+
+        if machinename not in all_payload:
+            all_payload[machinename] = {
+                "CSP": machine_info.get("CSP", "N/A"),
+                "total_vcpu": machine_info.get("total_vcpu", 0),
+                "cpu_name": machine_info.get("cpu_name", "N/A"),
+                "cpu_isa": machine_info.get("cpu_isa", "N/A"),
+                "cost_hour[730h-mo]": cost_hour,
+                "os": {},
             }
 
-        if os_node["testcategory"]:
-            machine_node["os"][os_dir.name] = os_node
+        machine_node = all_payload[machinename]
+        if os_name not in machine_node["os"]:
+            machine_node["os"][os_name] = {"testcategory": {}}
 
-    return {machinename: machine_node}
+        os_node = machine_node["os"][os_name]
+        if category_name not in os_node["testcategory"]:
+            os_node["testcategory"][category_name] = {"benchmark": {}}
+
+        benchmark_group = os_node["testcategory"][category_name]["benchmark"]
+        benchmark_group[BENCHMARK_NAME] = {"thread": thread_nodes}
+
+    return all_payload
+
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +259,8 @@ def main() -> None:
         "-d",
         type=Path,
         required=True,
-        dest="machine_dir",
-        help="cloud_onehour/results/<machinename> ディレクトリへのパスを指定 (必須)",
+        dest="search_root",
+        help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
     )
     parser.add_argument(
         "--out",
@@ -220,7 +270,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    payload = _build_machine_payload(args.machine_dir)
+    payload = _build_full_payload(args.search_root)
 
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out:
