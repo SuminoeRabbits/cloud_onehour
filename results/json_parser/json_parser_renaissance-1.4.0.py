@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
-"""tensorflow-lite-1.1.0 専用 JSON パーサー。
+"""renaissance-1.4.0 専用 JSON パーサー。
 
 `cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
-データ構造（抜粋）で AI/tensorflow-lite-1.1.0 のみを抽出する。
-
-特記: このベンチマークは <N>-thread.log が空であり、すべてのデータを
-<N>-thread.json から取得する（パターンC の JSON-only 変種）。
+データ構造（抜粋）で Java_Applications/renaissance-1.4.0 のみを抽出する。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import py_compile
-import statistics
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -29,19 +25,38 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Benchmark-specific constants
+# Benchmark-specific placeholders
 # ---------------------------------------------------------------------------
 
-BENCHMARK_NAME = "tensorflow-lite-1.1.0"
-TESTCATEGORY_HINT = "AI"
+BENCHMARK_NAME = "renaissance-1.4.0"
+TESTCATEGORY_HINT = "Java_Applications"
+
+# Regex for renaissance PTS output
+# Example:
+#     Test: Scala Dotty:
+#         2621.20738
+#
+#     Average: 2621.2 ms
+TEST_SECTION_RE = re.compile(
+    r"Test:\s*(?P<test_name>[^:]+):\s*\n(?:\s*[\d.]+\s*\n)+\s*Average:\s*(?P<value>[\d.]+)\s*ms",
+    re.MULTILINE | re.IGNORECASE
+)
 
 
 # ---------------------------------------------------------------------------
-# Common helpers
+# Optional helpers reused across many parsers
 # ---------------------------------------------------------------------------
+
+ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from log text."""
+    return ANSI_ESCAPE_RE.sub("", text)
+
 
 def _read_freq_file(freq_file: Path) -> Dict[str, int]:
-    """Load <N>-thread_freq_{start,end}.txt into {freq_N: Hz} dict."""
+    """Load `<thread>-thread_freq_{start,end}.txt` into `{freq_N: Hz}` dict."""
     if not freq_file.exists():
         return {}
 
@@ -66,20 +81,16 @@ def _read_freq_file(freq_file: Path) -> Dict[str, int]:
 
 
 def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
-    """Return iterable of thread identifiers from <N>-thread.json files.
-
-    Note: <N>-thread.log files exist but are empty for this benchmark,
-    so we discover threads via JSON files instead.
-    """
-    json_threads = sorted(benchmark_dir.glob("*-thread.json"))
-    for file_path in json_threads:
+    """Return iterable of thread identifiers."""
+    log_threads = sorted(benchmark_dir.glob("*-thread.log"))
+    for file_path in log_threads:
         thread_prefix = file_path.stem.split("-", 1)[0]
         if thread_prefix:
             yield thread_prefix
 
 
 # ---------------------------------------------------------------------------
-# Benchmark-specific extraction
+# Benchmark-specific extraction hooks
 # ---------------------------------------------------------------------------
 
 def _collect_thread_payload(
@@ -87,61 +98,36 @@ def _collect_thread_payload(
     thread_num: str,
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
-    """Build the `<thread>` node from <N>-thread.json directly.
-
-    Since <N>-thread.log is empty for tensorflow-lite, all data
-    (value, description, test_run_times) comes from the JSON file.
-    """
-    json_file = benchmark_dir / f"{thread_num}-thread.json"
-    if not json_file.exists():
+    """Build the `<thread>` node for README_results.md structure."""
+    log_file = benchmark_dir / f"{thread_num}-thread.log"
+    if not log_file.exists():
         return None
 
-    try:
-        data = json.loads(json_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-
-    results = data.get("results", {})
-    if not results:
-        return None
-
+    content = _strip_ansi(log_file.read_text(encoding="utf-8"))
+    
     test_payload: Dict[str, Any] = {}
+    matches = TEST_SECTION_RE.finditer(content)
+    
+    found = False
+    for match in matches:
+        found = True
+        test_name = match.group("test_name").strip()
+        value = float(match.group("value"))
+        
+        # Create a key based on test name
+        key = test_name.lower().replace(" ", "_").replace(".", "_")
+        
+        test_payload[key] = {
+            "description": f"Renaissance Test: {test_name}",
+            "values": value,
+            "raw_values": [value],
+            "unit": "ms",
+            "time": 0.0,
+            "test_run_times": [],
+            "cost": 0.0,
+        }
 
-    for _hash, entry in results.items():
-        title = entry.get("title", "TensorFlow Lite")
-        app_version = entry.get("app_version", "")
-        description = entry.get("description", "")
-        scale = entry.get("scale", "Microseconds")
-
-        # Extract value and test_run_times from the system results
-        for _sys_id, sys_data in entry.get("results", {}).items():
-            value = sys_data.get("value", 0.0)
-            test_run_times = sys_data.get("test_run_times", "N/A")
-
-            if isinstance(test_run_times, list) and len(test_run_times) > 0:
-                time_val = statistics.median(test_run_times)
-            else:
-                time_val = 0.0
-
-            cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
-
-            # Key: "<title> <app_version> - <description>"
-            if description:
-                key = f"{title} {app_version} - {description}"
-            else:
-                key = f"{title} {app_version}"
-
-            test_payload[key] = {
-                "description": description,
-                "values": value,
-                "raw_values": [value],
-                "unit": scale,
-                "time": time_val,
-                "test_run_times": test_run_times,
-                "cost": cost,
-            }
-
-    if not test_payload:
+    if not found:
         return None
 
     # Frequency files
@@ -156,7 +142,7 @@ def _collect_thread_payload(
 
     return {
         "perf_stat": perf_stat,
-        "test_name": test_payload,
+        "test_name": test_payload
     }
 
 
@@ -222,30 +208,30 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
     return all_payload
 
 
+
 # ---------------------------------------------------------------------------
 # CLI entry point (共通ロジック)
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Self syntax check
-    try:
-        py_compile.compile(str(Path(__file__).resolve()), doraise=True)
-    except py_compile.PyCompileError as e:
-        print(f"Syntax error in {Path(__file__).name}: {e}", file=sys.stderr)
-        sys.exit(1)
-
     parser = argparse.ArgumentParser(
         description=(
-            "tensorflow-lite parser: cloud_onehour/results/<machinename> を入力に "
+            "renaissance parser: cloud_onehour/results/<machinename> を入力に "
             f"{BENCHMARK_NAME} を README 構造で出力する"
         )
     )
     parser.add_argument(
-        "--dir", "-d", type=Path, required=True, dest="search_root",
+        "--dir",
+        "-d",
+        type=Path,
+        required=True,
+        dest="search_root",
         help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
     )
     parser.add_argument(
-        "--out", "-o", type=Path,
+        "--out",
+        "-o",
+        type=Path,
         help="出力先 JSON ファイルへのパス。省略時は stdout に出力",
     )
 

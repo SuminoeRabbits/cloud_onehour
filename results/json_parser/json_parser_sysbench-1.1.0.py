@@ -148,48 +148,63 @@ def _collect_thread_payload(
 # Machine-level aggregation (共通ロジック)
 # ---------------------------------------------------------------------------
 
-def _build_machine_payload(machine_dir: Path) -> Dict[str, Any]:
-    if not machine_dir.is_dir():
-        raise FileNotFoundError(f"Machine directory not found: {machine_dir}")
+def _build_full_payload(search_root: Path) -> Dict[str, Any]:
+    """Search for benchmarks recursively and build the full JSON payload.
 
-    machinename = machine_dir.name
-    machine_info = get_machine_info(machinename)
-    cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
+    想定構造: <search_root>/**/<machinename>/<os>/<testcategory>/<BENCHMARK_NAME>
+    """
+    if not search_root.exists():
+        raise FileNotFoundError(f"Directory not found: {search_root}")
 
-    machine_node: Dict[str, Any] = {
-        "CSP": machine_info.get("CSP", "N/A"),
-        "total_vcpu": machine_info.get("total_vcpu", 0),
-        "cpu_name": machine_info.get("cpu_name", "N/A"),
-        "cpu_isa": machine_info.get("cpu_isa", "N/A"),
-        "cost_hour[730h-mo]": cost_hour,
-        "os": {},
-    }
+    all_payload: Dict[str, Any] = {}
 
-    for os_dir in sorted([p for p in machine_dir.iterdir() if p.is_dir()]):
-        os_node: Dict[str, Any] = {"testcategory": {}}
-        for testcategory_dir in sorted([p for p in os_dir.iterdir() if p.is_dir()]):
-            benchmark_dir = testcategory_dir / BENCHMARK_NAME
-            if not benchmark_dir.is_dir():
-                continue
+    for benchmark_dir in sorted(search_root.glob(f"**/{BENCHMARK_NAME}")):
+        if not benchmark_dir.is_dir():
+            continue
 
-            thread_nodes: Dict[str, Any] = {}
-            for thread_num in _discover_threads(benchmark_dir):
-                thread_payload = _collect_thread_payload(benchmark_dir, thread_num, cost_hour)
-                if thread_payload:
-                    thread_nodes[thread_num] = thread_payload
+        category_dir = benchmark_dir.parent
+        os_dir = category_dir.parent
+        machine_dir = os_dir.parent
 
-            if not thread_nodes:
-                continue
+        machinename = machine_dir.name
+        os_name = os_dir.name
+        category_name = category_dir.name
 
-            os_node["testcategory"].setdefault(testcategory_dir.name, {"benchmark": {}})
-            os_node["testcategory"][testcategory_dir.name]["benchmark"][BENCHMARK_NAME] = {
-                "thread": thread_nodes
+        machine_info = get_machine_info(machinename)
+        cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
+
+        thread_nodes: Dict[str, Any] = {}
+        for thread_num in _discover_threads(benchmark_dir):
+            thread_payload = _collect_thread_payload(benchmark_dir, thread_num, cost_hour)
+            if thread_payload:
+                thread_nodes[thread_num] = thread_payload
+
+        if not thread_nodes:
+            continue
+
+        if machinename not in all_payload:
+            all_payload[machinename] = {
+                "CSP": machine_info.get("CSP", "N/A"),
+                "total_vcpu": machine_info.get("total_vcpu", 0),
+                "cpu_name": machine_info.get("cpu_name", "N/A"),
+                "cpu_isa": machine_info.get("cpu_isa", "N/A"),
+                "cost_hour[730h-mo]": cost_hour,
+                "os": {},
             }
 
-        if os_node["testcategory"]:
-            machine_node["os"][os_dir.name] = os_node
+        machine_node = all_payload[machinename]
+        if os_name not in machine_node["os"]:
+            machine_node["os"][os_name] = {"testcategory": {}}
 
-    return {machinename: machine_node}
+        os_node = machine_node["os"][os_name]
+        if category_name not in os_node["testcategory"]:
+            os_node["testcategory"][category_name] = {"benchmark": {}}
+
+        benchmark_group = os_node["testcategory"][category_name]["benchmark"]
+        benchmark_group[BENCHMARK_NAME] = {"thread": thread_nodes}
+
+    return all_payload
+
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +223,8 @@ def main() -> None:
         "-d",
         type=Path,
         required=True,
-        dest="machine_dir",
-        help="cloud_onehour/results/<machinename> ディレクトリへのパスを指定 (必須)",
+        dest="search_root",
+        help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
     )
     parser.add_argument(
         "--out",
@@ -219,7 +234,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    payload = _build_machine_payload(args.machine_dir)
+    payload = _build_full_payload(args.search_root)
 
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out:

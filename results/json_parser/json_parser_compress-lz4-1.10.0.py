@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""tensorflow-lite-1.1.0 専用 JSON パーサー。
+"""compress-lz4-1.10.0 専用 JSON パーサー。
 
 `cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
-データ構造（抜粋）で AI/tensorflow-lite-1.1.0 のみを抽出する。
+データ構造（抜粋）で Compression/compress-lz4-1.10.0 のみを抽出する。
 
-特記: このベンチマークは <N>-thread.log が空であり、すべてのデータを
-<N>-thread.json から取得する（パターンC の JSON-only 変種）。
+特記: このベンチマークは環境によって <N>-thread.log が空の場合があるため、
+主データ（values / test_run_times）は <N>-thread.json から取得する。
 """
 
 from __future__ import annotations
@@ -28,17 +28,9 @@ except ImportError:
         return {}
 
 
-# ---------------------------------------------------------------------------
-# Benchmark-specific constants
-# ---------------------------------------------------------------------------
+BENCHMARK_NAME = "compress-lz4-1.10.0"
+TESTCATEGORY_HINT = "Compression"
 
-BENCHMARK_NAME = "tensorflow-lite-1.1.0"
-TESTCATEGORY_HINT = "AI"
-
-
-# ---------------------------------------------------------------------------
-# Common helpers
-# ---------------------------------------------------------------------------
 
 def _read_freq_file(freq_file: Path) -> Dict[str, int]:
     """Load <N>-thread_freq_{start,end}.txt into {freq_N: Hz} dict."""
@@ -66,32 +58,28 @@ def _read_freq_file(freq_file: Path) -> Dict[str, int]:
 
 
 def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
-    """Return iterable of thread identifiers from <N>-thread.json files.
+    """Return iterable of thread identifiers from log/json files."""
+    threads = set()
 
-    Note: <N>-thread.log files exist but are empty for this benchmark,
-    so we discover threads via JSON files instead.
-    """
-    json_threads = sorted(benchmark_dir.glob("*-thread.json"))
-    for file_path in json_threads:
+    for file_path in benchmark_dir.glob("*-thread.log"):
         thread_prefix = file_path.stem.split("-", 1)[0]
         if thread_prefix:
-            yield thread_prefix
+            threads.add(thread_prefix)
 
+    for file_path in benchmark_dir.glob("*-thread.json"):
+        thread_prefix = file_path.stem.split("-", 1)[0]
+        if thread_prefix:
+            threads.add(thread_prefix)
 
-# ---------------------------------------------------------------------------
-# Benchmark-specific extraction
-# ---------------------------------------------------------------------------
+    return sorted(threads)
+
 
 def _collect_thread_payload(
     benchmark_dir: Path,
     thread_num: str,
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
-    """Build the `<thread>` node from <N>-thread.json directly.
-
-    Since <N>-thread.log is empty for tensorflow-lite, all data
-    (value, description, test_run_times) comes from the JSON file.
-    """
+    """Build the `<thread>` node for README_results.md structure."""
     json_file = benchmark_dir / f"{thread_num}-thread.json"
     if not json_file.exists():
         return None
@@ -102,20 +90,18 @@ def _collect_thread_payload(
         return None
 
     results = data.get("results", {})
-    if not results:
+    if not isinstance(results, dict) or not results:
         return None
 
     test_payload: Dict[str, Any] = {}
 
     for _hash, entry in results.items():
-        title = entry.get("title", "TensorFlow Lite")
-        app_version = entry.get("app_version", "")
+        title = entry.get("title", "LZ4 Compression")
         description = entry.get("description", "")
-        scale = entry.get("scale", "Microseconds")
+        unit = entry.get("scale", "MB/s")
 
-        # Extract value and test_run_times from the system results
         for _sys_id, sys_data in entry.get("results", {}).items():
-            value = sys_data.get("value", 0.0)
+            value = float(sys_data.get("value", 0.0))
             test_run_times = sys_data.get("test_run_times", "N/A")
 
             if isinstance(test_run_times, list) and len(test_run_times) > 0:
@@ -125,17 +111,14 @@ def _collect_thread_payload(
 
             cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
 
-            # Key: "<title> <app_version> - <description>"
-            if description:
-                key = f"{title} {app_version} - {description}"
-            else:
-                key = f"{title} {app_version}"
+            # 例: "LZ4 Compression - Compression Level: 1 - Compression Speed"
+            key = f"{title} - {description}" if description else title
 
             test_payload[key] = {
                 "description": description,
                 "values": value,
                 "raw_values": [value],
-                "unit": scale,
+                "unit": unit,
                 "time": time_val,
                 "test_run_times": test_run_times,
                 "cost": cost,
@@ -144,7 +127,6 @@ def _collect_thread_payload(
     if not test_payload:
         return None
 
-    # Frequency files
     start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
     end_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_end.txt")
 
@@ -160,21 +142,18 @@ def _collect_thread_payload(
     }
 
 
-# ---------------------------------------------------------------------------
-# Machine-level aggregation (共通ロジック)
-# ---------------------------------------------------------------------------
-
 def _build_full_payload(search_root: Path) -> Dict[str, Any]:
-    """Search for benchmarks recursively and build the full JSON payload.
-
-    想定構造: <search_root>/**/<machinename>/<os>/<testcategory>/<BENCHMARK_NAME>
-    """
     if not search_root.exists():
         raise FileNotFoundError(f"Directory not found: {search_root}")
 
     all_payload: Dict[str, Any] = {}
 
-    for benchmark_dir in sorted(search_root.glob(f"**/{BENCHMARK_NAME}")):
+    benchmark_dirs = []
+    if search_root.is_dir() and search_root.name == BENCHMARK_NAME:
+        benchmark_dirs.append(search_root)
+    benchmark_dirs.extend(sorted(search_root.glob(f"**/{BENCHMARK_NAME}")))
+
+    for benchmark_dir in benchmark_dirs:
         if not benchmark_dir.is_dir():
             continue
 
@@ -222,10 +201,6 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
     return all_payload
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point (共通ロジック)
-# ---------------------------------------------------------------------------
-
 def main() -> None:
     # Self syntax check
     try:
@@ -236,16 +211,22 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         description=(
-            "tensorflow-lite parser: cloud_onehour/results/<machinename> を入力に "
+            "compress-lz4 parser: cloud_onehour/results/<machinename> を入力に "
             f"{BENCHMARK_NAME} を README 構造で出力する"
         )
     )
     parser.add_argument(
-        "--dir", "-d", type=Path, required=True, dest="search_root",
-        help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
+        "--dir",
+        "-d",
+        type=Path,
+        required=True,
+        dest="search_root",
+        help="探索を開始するルートディレクトリを指定",
     )
     parser.add_argument(
-        "--out", "-o", type=Path,
+        "--out",
+        "-o",
+        type=Path,
         help="出力先 JSON ファイルへのパス。省略時は stdout に出力",
     )
 

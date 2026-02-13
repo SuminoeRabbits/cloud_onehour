@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""tensorflow-lite-1.1.0 専用 JSON パーサー。
+"""compress-xz-1.1.0 専用 JSON パーサー。
 
 `cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
-データ構造（抜粋）で AI/tensorflow-lite-1.1.0 のみを抽出する。
+データ構造（抜粋）で Compression/compress-xz-1.1.0 のみを抽出する。
 
-特記: このベンチマークは <N>-thread.log が空であり、すべてのデータを
-<N>-thread.json から取得する（パターンC の JSON-only 変種）。
+特記: 本パーサーは `<N>-thread.log` を主データソースとして扱う。
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import py_compile
-import statistics
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -28,17 +27,18 @@ except ImportError:
         return {}
 
 
-# ---------------------------------------------------------------------------
-# Benchmark-specific constants
-# ---------------------------------------------------------------------------
+BENCHMARK_NAME = "compress-xz-1.1.0"
+TESTCATEGORY_HINT = "Compression"
 
-BENCHMARK_NAME = "tensorflow-lite-1.1.0"
-TESTCATEGORY_HINT = "AI"
+ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+AVERAGE_RE = re.compile(r"Average:\s*([\d.]+)\s+Seconds", re.IGNORECASE)
+DESCRIPTION_RE = re.compile(r"^\s*(Compressing .+?):\s*$", re.MULTILINE)
 
 
-# ---------------------------------------------------------------------------
-# Common helpers
-# ---------------------------------------------------------------------------
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from log text."""
+    return ANSI_ESCAPE_RE.sub("", text)
+
 
 def _read_freq_file(freq_file: Path) -> Dict[str, int]:
     """Load <N>-thread_freq_{start,end}.txt into {freq_N: Hz} dict."""
@@ -66,85 +66,63 @@ def _read_freq_file(freq_file: Path) -> Dict[str, int]:
 
 
 def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
-    """Return iterable of thread identifiers from <N>-thread.json files.
+    """Return iterable of thread identifiers from log/json files."""
+    threads = set()
 
-    Note: <N>-thread.log files exist but are empty for this benchmark,
-    so we discover threads via JSON files instead.
-    """
-    json_threads = sorted(benchmark_dir.glob("*-thread.json"))
-    for file_path in json_threads:
+    for file_path in benchmark_dir.glob("*-thread.log"):
         thread_prefix = file_path.stem.split("-", 1)[0]
         if thread_prefix:
-            yield thread_prefix
+            threads.add(thread_prefix)
 
+    for file_path in benchmark_dir.glob("*-thread.json"):
+        thread_prefix = file_path.stem.split("-", 1)[0]
+        if thread_prefix:
+            threads.add(thread_prefix)
 
-# ---------------------------------------------------------------------------
-# Benchmark-specific extraction
-# ---------------------------------------------------------------------------
+    return sorted(threads)
+
 
 def _collect_thread_payload(
     benchmark_dir: Path,
     thread_num: str,
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
-    """Build the `<thread>` node from <N>-thread.json directly.
-
-    Since <N>-thread.log is empty for tensorflow-lite, all data
-    (value, description, test_run_times) comes from the JSON file.
-    """
-    json_file = benchmark_dir / f"{thread_num}-thread.json"
-    if not json_file.exists():
+    """Build the `<thread>` node for README_results.md structure."""
+    log_file = benchmark_dir / f"{thread_num}-thread.log"
+    if not log_file.exists():
         return None
 
-    try:
-        data = json.loads(json_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    content = _strip_ansi(log_file.read_text(encoding="utf-8", errors="ignore"))
+
+    avg_match = AVERAGE_RE.search(content)
+    if not avg_match:
         return None
 
-    results = data.get("results", {})
-    if not results:
-        return None
+    value = float(avg_match.group(1))
 
-    test_payload: Dict[str, Any] = {}
+    desc_match = DESCRIPTION_RE.search(content)
+    description = (
+        desc_match.group(1).strip()
+        if desc_match
+        else "Compressing ubuntu-16.04.3-server-i386.img, Compression Level 9"
+    )
 
-    for _hash, entry in results.items():
-        title = entry.get("title", "TensorFlow Lite")
-        app_version = entry.get("app_version", "")
-        description = entry.get("description", "")
-        scale = entry.get("scale", "Microseconds")
+    time_val = value
+    cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
+    key = f"XZ Compression - {description}"
 
-        # Extract value and test_run_times from the system results
-        for _sys_id, sys_data in entry.get("results", {}).items():
-            value = sys_data.get("value", 0.0)
-            test_run_times = sys_data.get("test_run_times", "N/A")
+    test_payload: Dict[str, Any] = {
+        key: {
+            "description": description,
+            "values": value,
+            "raw_values": [value],
+            "unit": "Seconds",
+            "time": time_val,
+            "test_run_times": [value],
+            "cost": cost,
+        }
+    }
 
-            if isinstance(test_run_times, list) and len(test_run_times) > 0:
-                time_val = statistics.median(test_run_times)
-            else:
-                time_val = 0.0
-
-            cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
-
-            # Key: "<title> <app_version> - <description>"
-            if description:
-                key = f"{title} {app_version} - {description}"
-            else:
-                key = f"{title} {app_version}"
-
-            test_payload[key] = {
-                "description": description,
-                "values": value,
-                "raw_values": [value],
-                "unit": scale,
-                "time": time_val,
-                "test_run_times": test_run_times,
-                "cost": cost,
-            }
-
-    if not test_payload:
-        return None
-
-    # Frequency files
     start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
     end_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_end.txt")
 
@@ -160,21 +138,18 @@ def _collect_thread_payload(
     }
 
 
-# ---------------------------------------------------------------------------
-# Machine-level aggregation (共通ロジック)
-# ---------------------------------------------------------------------------
-
 def _build_full_payload(search_root: Path) -> Dict[str, Any]:
-    """Search for benchmarks recursively and build the full JSON payload.
-
-    想定構造: <search_root>/**/<machinename>/<os>/<testcategory>/<BENCHMARK_NAME>
-    """
     if not search_root.exists():
         raise FileNotFoundError(f"Directory not found: {search_root}")
 
     all_payload: Dict[str, Any] = {}
 
-    for benchmark_dir in sorted(search_root.glob(f"**/{BENCHMARK_NAME}")):
+    benchmark_dirs = []
+    if search_root.is_dir() and search_root.name == BENCHMARK_NAME:
+        benchmark_dirs.append(search_root)
+    benchmark_dirs.extend(sorted(search_root.glob(f"**/{BENCHMARK_NAME}")))
+
+    for benchmark_dir in benchmark_dirs:
         if not benchmark_dir.is_dir():
             continue
 
@@ -222,10 +197,6 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
     return all_payload
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point (共通ロジック)
-# ---------------------------------------------------------------------------
-
 def main() -> None:
     # Self syntax check
     try:
@@ -236,16 +207,22 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         description=(
-            "tensorflow-lite parser: cloud_onehour/results/<machinename> を入力に "
+            "compress-xz parser: cloud_onehour/results/<machinename> を入力に "
             f"{BENCHMARK_NAME} を README 構造で出力する"
         )
     )
     parser.add_argument(
-        "--dir", "-d", type=Path, required=True, dest="search_root",
-        help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
+        "--dir",
+        "-d",
+        type=Path,
+        required=True,
+        dest="search_root",
+        help="探索を開始するルートディレクトリを指定",
     )
     parser.add_argument(
-        "--out", "-o", type=Path,
+        "--out",
+        "-o",
+        type=Path,
         help="出力先 JSON ファイルへのパス。省略時は stdout に出力",
     )
 
