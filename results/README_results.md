@@ -138,7 +138,6 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `<benchmark>="sysbench-1.1.0"`
 - `<benchmark>="java-jmh-1.0.1"`
 - `<benchmark>="ffmpeg-7.0.1"`
-- `<benchmark>="apache-3.0.0"`
 
 **必須ファイル:**
 - `<N>-thread.log`（結果抽出に必須）
@@ -676,18 +675,20 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - "FFmpeg 7.0 - Encoder: libx265 - Scenario: Video On Demand"
 
 - `<benchmark>="apache-3.0.0"`:
-    このベンチマークは1つの`<N>-thread.log`内に**複数の独立したテスト**（異なるConcurrent Requests数）が含まれる。
+    このベンチマークはケース2に該当する（`<N>-thread.json`が存在する）。
+    1つの`<N>-thread.log`内に**複数の独立したテスト**（異なるConcurrent Requests数）が含まれる。
     それぞれを別の`<test_name>`として登録する。
-    
+
     各テストは`pts/apache-3.0.0 [Concurrent Requests: XXX]`の形式でヘッダーがあり、その後に`Average: XXXX.XX Requests Per Second`の形式で結果が出力される。
-    
+
     - **test_name**: `"Apache HTTP Server 2.4.56 - Concurrent Requests: XXX"`（複数存在）
     - **values**: `<N>-thread.log`から`Average: XXXX.XX Requests Per Second`の`XXXX.XX`を抽出
     - **raw_values**: `<N>-thread.log`から`Average: XXXX.XX Requests Per Second`の`XXXX.XX`を抽出（quickモードでは1回のみ実行のため単一要素配列）
     - **unit**: `"Requests Per Second"`
-    - **test_run_times**: `"N/A"`
+    - **test_run_times**: `<N>-thread.json`の`test_run_times`配列から取得
+    - **time**: `test_run_times`の中央値（median）
     - **description**: `"Concurrent Requests: XXX"`
-    
+
     例えば以下のテストが存在する：
     - "Apache HTTP Server 2.4.56 - Concurrent Requests: 4"
     - "Apache HTTP Server 2.4.56 - Concurrent Requests: 20"
@@ -695,7 +696,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
     - "Apache HTTP Server 2.4.56 - Concurrent Requests: 200"
     - "Apache HTTP Server 2.4.56 - Concurrent Requests: 500"
     - "Apache HTTP Server 2.4.56 - Concurrent Requests: 1000"
-    
+
     **出力例**:
     ```json
     "test_name": {
@@ -704,7 +705,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
             "values": 652.06,
             "raw_values": [652.06],
             "unit": "Requests Per Second",
-            "test_run_times": "N/A",
+            "time": 90.07,
+            "test_run_times": [90.07],
             "cost": 0.000XXX
         },
         "Apache HTTP Server 2.4.56 - Concurrent Requests: 200": {
@@ -712,7 +714,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
             "values": 1168.48,
             "raw_values": [1168.48],
             "unit": "Requests Per Second",
-            "test_run_times": "N/A",
+            "time": 90.11,
+            "test_run_times": [90.11],
             "cost": 0.000XXX
         }
     }
@@ -745,7 +748,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
    - `values`: `value`フィールドの値（ベンチマークスコアの代表値）
    - `raw_values`: `raw_values`配列全体（各実行のベンチマークスコア）
    - `test_run_times`: `test_run_times`配列全体（各実行の実行時間、秒単位）
-   - `time`: `test_run_times[0]`（最初の実行時間、コスト計算に使用）
+   - `time`: `test_run_times`の中央値（median）（コスト計算に使用）
 
 **例**:
 ```json
@@ -756,12 +759,12 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
   "test_run_times": [42.43, 40.53, 38.42, 40.07, 39.75, 40.13, 41.04, 38.91, 43.08, 43.85, 40.96, 40.9]
 }
 
-// one_big_json.jsonへの出力
+// one_big_json.jsonへの出力（timeはtest_run_timesの中央値）
 {
   "values": 3951,
   "raw_values": [4302, 3873, 3759, 3598, 5147, 3880, 3938, 4476, 3794, 3262, 3736, 3644],
   "test_run_times": [42.43, 40.53, 38.42, 40.07, 39.75, 40.13, 41.04, 38.91, 43.08, 43.85, 40.96, 40.9],
-  "time": 42.43  // test_run_times[0]
+  "time": 40.93  // median of test_run_times
 }
 ```
 
@@ -782,8 +785,8 @@ cost = cost_hour[730h-mo] × time / 3600
 
 **例**:
 - `cost_hour[730h-mo]` = 0.0683 ドル/時間
-- `time` = 42.43 秒
-- `cost` = 0.0683 × (42.43 / 3600) = 0.0683 × 0.01179 ≈ 0.000805 ドル
+- `time` = 40.93 秒（test_run_timesの中央値）
+- `cost` = 0.0683 × (40.93 / 3600) = 0.0683 × 0.01137 ≈ 0.000776 ドル
 
 # make_one_big_json.py specification
 ここでは、`one_big_json.json`を生成するPythonスクリプト`make_one_big_json.py`を実装する際の仕様について記す。
