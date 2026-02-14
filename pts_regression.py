@@ -64,11 +64,11 @@
 #               生成されるテストは --long/--short の指定によりフィルタされます。
 #               - --regression --long : exe_time_v8cpu >= 120 のみ生成
 #               - --regression --short: exe_time_v8cpu < 15.25 のみ生成
-#               - --regression        : 15.25 <= exe_time_v8cpu < 120 のみ生成
+#               - --regression        : exe_time_v8cpu < 120 のみ生成
 #               --long の場合は実行オプションとして 8/12/16 スレッド + --quick を生成します。
 #               もし　"exe_time_v8cpu"値が100以上の場合は、2通りの実行コマンドを生成します。
 # 　　　　　　　　　　　　１．"--quick"と"--max"を追加したもの。
-# 　　　　　　　　　　　　２． "--quick"と"4" を追加したもの。
+# 　　　　　　　　　　　　２． "--quick"と"8" を追加したもの。
 # 　　　　　　　　もし　"exe_time_v8cpu"値が15.25以上の場合は 必ず実行オプションに"--quick"を追加します。
 #                もし"exe_time_v8cpu"値が15.25未満の場合は オプションに何もつけません。   
 # 
@@ -208,9 +208,15 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                 else:
                     exe_bucket = "normal"
 
-                if regression_filter and exe_bucket != regression_filter:
+                if regression_filter == "long" and exe_bucket != "long":
                     skip_test = True
-                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out")
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out (--long)")
+                elif regression_filter == "short" and exe_bucket != "short":
+                    skip_test = True
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out (--short)")
+                elif regression_filter is None and exe_bucket == "long":
+                    skip_test = True
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out (>= 120)")
                 elif regression_filter == "long":
                     # Long mode: generate 8/12/16 threads with --quick
                     run_configs.append(("8", True))
@@ -227,7 +233,7 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                         # 1. Max (288) + Quick
                         run_configs.append(("288", True))
                         # 2. 4 + Quick
-                        run_configs.append(("4", True))
+                        run_configs.append(("8", True))
                 elif exe_time >= 15.25:
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 15.25 -> Enforcing --quick")
                     run_configs.append((number_arg, True))
@@ -401,7 +407,7 @@ Examples:
   %(prog)s --split-2nd --run       # Execute 2nd 1/4 of tests only
   %(prog)s --split-3rd --run       # Execute 3rd 1/4 of tests only
   %(prog)s --split-4th --run       # Execute last 1/4 of tests only
-  %(prog)s --regression            # Generate mid-range tests only (15.25 <= exe_time_v8cpu < 120)
+  %(prog)s --regression            # Generate tests with exe_time_v8cpu < 120
   %(prog)s --regression --short    # Generate short tests only (exe_time_v8cpu < 15.25)
   %(prog)s --regression --long     # Generate long tests only (exe_time_v8cpu >= 120)
         """
@@ -476,7 +482,7 @@ Examples:
     parser.add_argument(
         '--regression',
         action='store_true',
-        help='Regression mode: overrides --quick and filters by exe_time_v8cpu with --long/--short'
+        help='Regression mode: exe_time_v8cpu < 120 by default, use --long/--short to filter further'
     )
 
     parser.add_argument(
@@ -536,7 +542,7 @@ Examples:
         elif args.short:
             regression_filter = "short"
         else:
-            regression_filter = "normal"
+            regression_filter = None  # Include all exe_time_v8cpu < 120
 
     print(f"{'='*80}")
     print(f"PTS Regression Test Command Generator")
