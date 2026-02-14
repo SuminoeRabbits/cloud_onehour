@@ -453,11 +453,16 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 |"i7ie" and "2xlarge"|	AWS|8|	Intel Xeon 5 Metal(5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 1.2433 |
 |"e2-standard-2"|	GCP|	2|	Intel Xeon / AMD EPYC(Variable)|	x86-64| 0.0683 |
 |"c4d-standard-8"|	GCP|	8|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.4057 |
+|"c4d-standard-16"|	GCP|	16|	AMD EPYC 9B45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.758 |
 |"c4-standard-8"|	GCP|	8|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.4231 |
+|"c4-standard-16"|	GCP|	16|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.7928 |
 |"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.3869 |
+|"c4a-standard-16"|	GCP|	16|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.7712 |
 |"t2a-standard-8"|	GCP|	8|	Ampere Altra|	Armv8.2-A (NEON-128)| 0.40654 |
+|"t2a-standard-16"|	GCP|	16|	Ampere Altra|	Armv8.2-A (NEON-128)| 0.75968 |
 |"E5" and "Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1727 |
 |"E6" and "Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1927 |
+|"E6" and "Flex" and "vcpu-16"|	OCI|	16|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.368 |
 |"A1" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1367 |
 |"A1" and "Flex" and "vcpu-16"|	OCI|	16|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.2647 |
 |"A2" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1287 |
