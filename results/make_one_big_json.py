@@ -691,11 +691,16 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
         print(f"Warning: Skipping benchmark at {benchmark_dir} (no thread files found)", file=sys.stderr)
         return None
 
+    # Warn once if no dedicated parser exists
+    has_dedicated_parser = parser_module and hasattr(parser_module, '_collect_thread_payload')
+    if not has_dedicated_parser:
+        print(f"Warning: No dedicated parser for '{benchmark_name}'. Falling back to generic parser.", file=sys.stderr)
+
     # Process each thread
     benchmark_result = {}
     for thread_num in thread_nums:
         payload = None
-        if parser_module and hasattr(parser_module, '_collect_thread_payload'):
+        if has_dedicated_parser:
             try:
                 payload = parser_module._collect_thread_payload(
                     benchmark_dir, thread_num, cost_hour)
