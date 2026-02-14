@@ -9,50 +9,45 @@ from __future__ import annotations
 
 import argparse
 import json
+import py_compile
 import re
 import statistics
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
-import py_compile
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
 try:
-    from make_one_big_json import get_machine_info  # type: ignore  # pylint: disable=import-error
+    from make_one_big_json import get_machine_info
 except ImportError:
     def get_machine_info(machinename: str) -> Dict[str, Any]:
         return {}
 
 
 # ---------------------------------------------------------------------------
-# Benchmark-specific placeholders
+# [2] ベンチマーク定数
 # ---------------------------------------------------------------------------
 
 BENCHMARK_NAME = "apache-3.0.0"
 TESTCATEGORY_HINT = "Network"
 
-# No regex needed: all data is extracted from <N>-thread.json (ケースC)
-
 
 # ---------------------------------------------------------------------------
-# Optional helpers reused across many parsers
+# [3] 共通ヘルパー関数
 # ---------------------------------------------------------------------------
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-
 
 def _strip_ansi(text: str) -> str:
     """Remove ANSI escape sequences from log text."""
     return ANSI_ESCAPE_RE.sub("", text)
 
-
 def _read_freq_file(freq_file: Path) -> Dict[str, int]:
-    """Load `<thread>-thread_freq_{start,end}.txt` into `{freq_N: Hz}` dict."""
+    """Load <N>-thread_freq_{start,end}.txt into {freq_N: Hz} dict."""
     if not freq_file.exists():
         return {}
-
     freqs: Dict[str, int] = {}
     with freq_file.open(encoding="utf-8") as handle:
         for idx, line in enumerate(handle):
@@ -72,160 +67,146 @@ def _read_freq_file(freq_file: Path) -> Dict[str, int]:
             freqs[f"freq_{idx}"] = freq_hz
     return freqs
 
-
 def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
-    """Return iterable of thread identifiers."""
+    """Return iterable of thread identifiers from <N>-thread.log files."""
     log_threads = sorted(benchmark_dir.glob("*-thread.log"))
     for file_path in log_threads:
         thread_prefix = file_path.stem.split("-", 1)[0]
         if thread_prefix:
             yield thread_prefix
 
-
 def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
     """Find valid machinename by traversing up from benchmark_dir.
-    
+
     Returns: (machinename, os_name, category_name, machine_info)
     """
     category_dir = benchmark_dir.parent
     category_name = category_dir.name
-    
-    # Start from os_dir and traverse upward toward search_root
+
     current = category_dir.parent
-    
-    # Track hierarchy from benchmark up to find valid machine
+
     path_parts = []
     while current != search_root.parent and current != current.parent:
         path_parts.append((current.name, current))
-        
-        # Try this directory name as machinename via LUT lookup
+
         machine_info = get_machine_info(current.name)
-        
-        # Valid machine found if get_machine_info returns non-empty dict with valid CSP
+
         if machine_info and machine_info.get("CSP") and machine_info.get("CSP") != "unknown":
             machinename = current.name
-            
-            # Determine os_name: directory immediately above testcategory
+
             try:
                 rel_path = category_dir.parent.relative_to(current)
                 parts = rel_path.parts
-                
-                # Extract the final component (os_name directory)
+
                 if len(parts) >= 1:
                     os_name = parts[-1]
                 else:
-                    # Edge case: machinename/testcategory/benchmark (no os level)
                     os_name = category_dir.parent.name
             except (ValueError, IndexError):
-                # Fallback: use parent of category_dir directly
                 os_name = category_dir.parent.name
-            
+
             return machinename, os_name, category_name, machine_info
-        
+
         current = current.parent
-    
-    # No valid machinename found in hierarchy, use fallback
+
     os_dir = category_dir.parent
     machine_dir = os_dir.parent
     return machine_dir.name, os_dir.name, category_name, {}
 
 
 # ---------------------------------------------------------------------------
-# Benchmark-specific extraction hooks
+# [4] ベンチマーク固有抽出 - Pattern C (JSON-based)
 # ---------------------------------------------------------------------------
 
-def _load_thread_json(benchmark_dir: Path, thread_num: str) -> Dict[str, Any]:
-    """Load <N>-thread.json and build a lookup from description to test_run_times."""
+def _load_thread_json(benchmark_dir: Path, thread_num: str) -> list:
+    """Load <N>-thread.json and return list of test entries."""
     json_file = benchmark_dir / f"{thread_num}-thread.json"
     if not json_file.exists():
-        return {}
-
+        return []
     try:
         data = json.loads(json_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return {}
+        return []
 
-    lookup: Dict[str, list] = {}
+    entries = []
     for _hash, entry in data.get("results", {}).items():
-        desc = entry.get("description", "")
+        title = entry.get("title", "")
+        description = entry.get("description", "")
+        scale = entry.get("scale", "")
         for _sys_id, sys_data in entry.get("results", {}).items():
-            if "test_run_times" in sys_data:
-                lookup[desc] = sys_data["test_run_times"]
-    return lookup
-
+            value = sys_data.get("value")
+            if value is None:
+                continue
+            raw_values = sys_data.get("raw_values", [value])
+            test_run_times = sys_data.get("test_run_times", "N/A")
+            entries.append({
+                "title": title,
+                "description": description,
+                "scale": scale,
+                "value": value,
+                "raw_values": raw_values,
+                "test_run_times": test_run_times,
+            })
+    return entries
 
 def _collect_thread_payload(
     benchmark_dir: Path,
     thread_num: str,
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
-    """Build the `<thread>` node for README_results.md structure."""
-    log_file = benchmark_dir / f"{thread_num}-thread.log"
-    if not log_file.exists():
+    """Build the <thread> node for README_results.md structure."""
+    # Pattern C: すべてのデータを <N>-thread.json から取得
+    entries = _load_thread_json(benchmark_dir, thread_num)
+    if not entries:
         return None
 
-    content = _strip_ansi(log_file.read_text(encoding="utf-8"))
+    test_payload = {}
 
-    test_payload: Dict[str, Any] = {}
-    matches = TEST_SECTION_RE.findall(content)
+    for entry in entries:
+        title = entry["title"]
+        description = entry["description"]
+        value = entry["value"]
+        raw_values = entry["raw_values"]
+        test_run_times = entry["test_run_times"]
+        unit = entry["scale"]
 
-    if not matches:
-        return None
-
-    # Load test_run_times from <N>-thread.json if available
-    run_times_lookup = _load_thread_json(benchmark_dir, thread_num)
-
-    for concurrent, value_str in matches:
-        value = float(value_str)
-        description = f"Concurrent Requests: {concurrent}"
-
-        # Look up test_run_times from JSON data
-        test_run_times = run_times_lookup.get(description, "N/A")
         if isinstance(test_run_times, list) and len(test_run_times) > 0:
             time_val = statistics.median(test_run_times)
         else:
             time_val = 0.0
 
-        # Calculate cost
         cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
 
-        key = f"Apache HTTP Server 2.4.56 - {description}"
+        # キー: "<title> - <description>"
+        key = f"{title} - {description}" if description else title
 
         test_payload[key] = {
             "description": description,
             "values": value,
-            "raw_values": [value],
-            "unit": "Requests Per Second",
+            "raw_values": raw_values,
+            "unit": unit,
             "time": time_val,
             "test_run_times": test_run_times,
             "cost": cost,
         }
 
-    # Frequency files
+    # perf_stat 構築
     start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
     end_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_end.txt")
-
-    perf_stat: Dict[str, Any] = {}
+    perf_stat = {}
     if start_freq:
         perf_stat["start_freq"] = start_freq
     if end_freq:
         perf_stat["end_freq"] = end_freq
 
-    return {
-        "perf_stat": perf_stat,
-        "test_name": test_payload
-    }
+    return {"perf_stat": perf_stat, "test_name": test_payload}
 
 
 # ---------------------------------------------------------------------------
-# Machine-level aggregation (共通ロジック)
+# [5] 共通ディレクトリ走査
 # ---------------------------------------------------------------------------
 
 def _build_full_payload(search_root: Path) -> Dict[str, Any]:
-    """Search for benchmarks recursively and build the full JSON payload.
-
-    想定構造: <search_root>/**/<machinename>/<os>/<testcategory>/<BENCHMARK_NAME>
-    """
     if not search_root.exists():
         raise FileNotFoundError(f"Directory not found: {search_root}")
 
@@ -235,20 +216,20 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
         if not benchmark_dir.is_dir():
             continue
 
-        # Robust machinename detection supporting nested and various structures
         machinename, os_name, category_name, machine_info = _find_machine_info_in_hierarchy(
             benchmark_dir, search_root
         )
-        
-        # Fallback if machine_info is empty
+
         if not machine_info:
             machine_info = get_machine_info(machinename)
-        
+
         cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
 
         thread_nodes: Dict[str, Any] = {}
         for thread_num in _discover_threads(benchmark_dir):
-            thread_payload = _collect_thread_payload(benchmark_dir, thread_num, cost_hour)
+            thread_payload = _collect_thread_payload(
+                benchmark_dir, thread_num, cost_hour
+            )
             if thread_payload:
                 thread_nodes[thread_num] = thread_payload
 
@@ -279,9 +260,8 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
     return all_payload
 
 
-
 # ---------------------------------------------------------------------------
-# CLI entry point (共通ロジック)
+# [6] 共通CLIエントリポイント
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -294,22 +274,16 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         description=(
-            "apache parser: cloud_onehour/results/<machinename> を入力に "
+            f"{BENCHMARK_NAME} parser: cloud_onehour/results/<machinename> を入力に "
             f"{BENCHMARK_NAME} を README 構造で出力する"
         )
     )
     parser.add_argument(
-        "--dir",
-        "-d",
-        type=Path,
-        required=True,
-        dest="search_root",
+        "--dir", "-d", type=Path, required=True, dest="search_root",
         help="探索対象を含む親ディレクトリを指定",
     )
     parser.add_argument(
-        "--out",
-        "-o",
-        type=Path,
+        "--out", "-o", type=Path,
         help="出力先 JSON ファイルへのパス。省略時は stdout に出力",
     )
 
@@ -321,7 +295,6 @@ def main() -> None:
         args.out.write_text(text + "\n", encoding="utf-8")
     else:
         print(text)
-
 
 if __name__ == "__main__":
     main()
