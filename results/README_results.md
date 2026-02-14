@@ -440,8 +440,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 | :---                   | :---:| :---:| :---:  |:---:  | :---:      |
 |"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A| 0.0 |
 |"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)| 0.0183 |
-|"m7g" and "2xlarge"|	AWS|8|	Neoverse-V1 (Graviton3)|	Armv9.0-A (SVE2-256)| 0.4413 |
-|"m7g" and "4xlarge"|	AWS|	16|	Neoverse-V1 (Graviton3)|	Armv9.0-A (SVE2-256)| 0.8629 |
+|"m7g" and "2xlarge"|	AWS|8|	Neoverse-V1 (Graviton3)|	Armv8.4-A (SVE-256)| 0.4413 |
+|"m7g" and "4xlarge"|	AWS|	16|	Neoverse-V1 (Graviton3)|	Armv8.4-A (SVE-256)| 0.8629 |
 |"m7i" and "2xlarge"|	AWS|8|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)| 0.5405 |
 |"m7i" and "4xlarge"|	AWS|16|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)| 1.0613 |
 |"m8a" and "2xlarge"|	AWS|8|	AMD EPYC 9R45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.64858 |
