@@ -14,6 +14,7 @@ import statistics
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
+import py_compile
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
@@ -32,15 +33,7 @@ except ImportError:
 BENCHMARK_NAME = "compress-7zip-1.12.0"
 TESTCATEGORY_HINT = "Compression"
 
-# Regex for 7-Zip PTS output
-# Example:
-#     Test: Compression Rating:
-#         41682
-#     Average: 41682 MIPS
-TEST_SECTION_RE = re.compile(
-    r"Test:\s*([^:\n]+):\s*\n\s*[\d.]+\s*\n\s*Average:\s*([\d.]+)\s+MIPS",
-    re.MULTILINE | re.IGNORECASE
-)
+# No regex needed: all data is extracted from <N>-thread.json (ケース2)
 
 
 # ---------------------------------------------------------------------------
@@ -89,28 +82,92 @@ def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
             yield thread_prefix
 
 
+def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
+    """Find valid machinename by traversing up from benchmark_dir.
+    
+    Returns: (machinename, os_name, category_name, machine_info)
+    """
+    category_dir = benchmark_dir.parent
+    category_name = category_dir.name
+    
+    # Start from os_dir and traverse upward toward search_root
+    current = category_dir.parent
+    
+    # Track hierarchy from benchmark up to find valid machine
+    path_parts = []
+    while current != search_root.parent and current != current.parent:
+        path_parts.append((current.name, current))
+        
+        # Try this directory name as machinename via LUT lookup
+        machine_info = get_machine_info(current.name)
+        
+        # Valid machine found if get_machine_info returns non-empty dict with CSP
+        if machine_info and machine_info.get("CSP"):
+            machinename = current.name
+            
+            # Determine os_name: directory immediately above testcategory
+            try:
+                rel_path = category_dir.parent.relative_to(current)
+                parts = rel_path.parts
+                
+                # Extract the final component (os_name directory)
+                if len(parts) >= 1:
+                    os_name = parts[-1]
+                else:
+                    # Edge case: machinename/testcategory/benchmark (no os level)
+                    os_name = category_dir.parent.name
+            except (ValueError, IndexError):
+                # Fallback: use parent of category_dir directly
+                os_name = category_dir.parent.name
+            
+            return machinename, os_name, category_name, machine_info
+        
+        current = current.parent
+    
+    # No valid machinename found in hierarchy, use fallback
+    os_dir = category_dir.parent
+    machine_dir = os_dir.parent
+    return machine_dir.name, os_dir.name, category_name, {}
+
+
 # ---------------------------------------------------------------------------
 # Benchmark-specific extraction hooks
 # ---------------------------------------------------------------------------
 
-def _load_thread_json(benchmark_dir: Path, thread_num: str) -> Dict[str, list]:
-    """Load <N>-thread.json and build a lookup from description to test_run_times."""
+def _load_thread_json(benchmark_dir: Path, thread_num: str) -> list:
+    """Load <N>-thread.json and return list of test entries.
+
+    Each entry: {title, description, scale, value, raw_values, test_run_times}
+    """
     json_file = benchmark_dir / f"{thread_num}-thread.json"
     if not json_file.exists():
-        return {}
+        return []
 
     try:
         data = json.loads(json_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return {}
+        return []
 
-    lookup: Dict[str, list] = {}
+    entries: list = []
     for _hash, entry in data.get("results", {}).items():
-        desc = entry.get("description", "")
+        title = entry.get("title", "")
+        description = entry.get("description", "")
+        scale = entry.get("scale", "")
         for _sys_id, sys_data in entry.get("results", {}).items():
-            if "test_run_times" in sys_data:
-                lookup[desc] = sys_data["test_run_times"]
-    return lookup
+            value = sys_data.get("value")
+            if value is None:
+                continue
+            raw_values = sys_data.get("raw_values", [value])
+            test_run_times = sys_data.get("test_run_times", "N/A")
+            entries.append({
+                "title": title,
+                "description": description,
+                "scale": scale,
+                "value": value,
+                "raw_values": raw_values,
+                "test_run_times": test_run_times,
+            })
+    return entries
 
 
 def _collect_thread_payload(
@@ -119,46 +176,36 @@ def _collect_thread_payload(
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
     """Build the `<thread>` node for README_results.md structure."""
-    log_file = benchmark_dir / f"{thread_num}-thread.log"
-    if not log_file.exists():
+    # All data from <N>-thread.json (ケース2)
+    entries = _load_thread_json(benchmark_dir, thread_num)
+    if not entries:
         return None
-
-    content = _strip_ansi(log_file.read_text(encoding="utf-8"))
 
     test_payload: Dict[str, Any] = {}
-    matches = TEST_SECTION_RE.findall(content)
 
-    if not matches:
-        return None
+    for entry in entries:
+        title = entry["title"]
+        description = entry["description"]
+        value = entry["value"]
+        raw_values = entry["raw_values"]
+        test_run_times = entry["test_run_times"]
+        unit = entry["scale"]
 
-    # Load test_run_times from <N>-thread.json if available
-    run_times_lookup = _load_thread_json(benchmark_dir, thread_num)
-
-    for test_title, value_str in matches:
-        test_title = test_title.strip()
-        value = float(value_str)
-
-        # Description in JSON is "Test: Compression Rating" etc.
-        description = f"Test: {test_title}"
-
-        # Look up test_run_times from JSON data
-        test_run_times = run_times_lookup.get(description, "N/A")
         if isinstance(test_run_times, list) and len(test_run_times) > 0:
             time_val = statistics.median(test_run_times)
         else:
             time_val = 0.0
 
-        # Calculate cost
         cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
 
-        # Key per README: "7-Zip Compression - Test: Compression Rating"
-        key = f"7-Zip Compression - {description}"
+        # Key per README: "<title> - <description>"
+        key = f"{title} - {description}"
 
         test_payload[key] = {
             "description": description,
             "values": value,
-            "raw_values": [value],
-            "unit": "MIPS",
+            "raw_values": raw_values,
+            "unit": unit,
             "time": time_val,
             "test_run_times": test_run_times,
             "cost": cost,
@@ -198,15 +245,15 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
         if not benchmark_dir.is_dir():
             continue
 
-        category_dir = benchmark_dir.parent
-        os_dir = category_dir.parent
-        machine_dir = os_dir.parent
-
-        machinename = machine_dir.name
-        os_name = os_dir.name
-        category_name = category_dir.name
-
-        machine_info = get_machine_info(machinename)
+        # Robust machinename detection supporting nested and various structures
+        machinename, os_name, category_name, machine_info = _find_machine_info_in_hierarchy(
+            benchmark_dir, search_root
+        )
+        
+        # Fallback if machine_info is empty
+        if not machine_info:
+            machine_info = get_machine_info(machinename)
+        
         cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
 
         thread_nodes: Dict[str, Any] = {}
@@ -248,6 +295,13 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # Self syntax check
+    try:
+        py_compile.compile(str(Path(__file__).resolve()), doraise=True)
+    except py_compile.PyCompileError as e:
+        print(f"Syntax error in {Path(__file__).name}: {e}", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description=(
             "7-Zip parser: cloud_onehour/results/<machinename> を入力に "
@@ -260,7 +314,7 @@ def main() -> None:
         type=Path,
         required=True,
         dest="search_root",
-        help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
+        help="探索対象を含む親ディレクトリを指定",
     )
     parser.add_argument(
         "--out",

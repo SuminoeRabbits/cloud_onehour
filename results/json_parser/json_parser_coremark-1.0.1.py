@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
+import py_compile
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
@@ -84,6 +85,53 @@ def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
         if thread_prefix:
             yield thread_prefix
 
+def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
+    """Find valid machinename by traversing up from benchmark_dir.
+    
+    Returns: (machinename, os_name, category_name, machine_info)
+    """
+    category_dir = benchmark_dir.parent
+    category_name = category_dir.name
+    
+    # Start from os_dir and traverse upward toward search_root
+    current = category_dir.parent
+    
+    # Track hierarchy from benchmark up to find valid machine
+    path_parts = []
+    while current != search_root.parent and current != current.parent:
+        path_parts.append((current.name, current))
+        
+        # Try this directory name as machinename via LUT lookup
+        machine_info = get_machine_info(current.name)
+        
+        # Valid machine found if get_machine_info returns non-empty dict with CSP
+        if machine_info and machine_info.get("CSP"):
+            machinename = current.name
+            
+            # Determine os_name: directory immediately above testcategory
+            try:
+                rel_path = category_dir.parent.relative_to(current)
+                parts = rel_path.parts
+                
+                # Extract the final component (os_name directory)
+                if len(parts) >= 1:
+                    os_name = parts[-1]
+                else:
+                    # Edge case: machinename/testcategory/benchmark (no os level)
+                    os_name = category_dir.parent.name
+            except (ValueError, IndexError):
+                # Fallback: use parent of category_dir directly
+                os_name = category_dir.parent.name
+            
+            return machinename, os_name, category_name, machine_info
+        
+        current = current.parent
+    
+    # No valid machinename found in hierarchy, use fallback
+    os_dir = category_dir.parent
+    machine_dir = os_dir.parent
+    return machine_dir.name, os_dir.name, category_name, {}
+
 
 # ---------------------------------------------------------------------------
 # Benchmark-specific extraction hooks
@@ -126,8 +174,8 @@ def _collect_thread_payload(
             "values": value,
             "raw_values": [value],
             "unit": "Iterations/Sec",
-            "time": 0.0,  # PTS Coremark log doesn't easily show elapsed time per run in a machine-readable way here
-            "test_run_times": [],
+            "time": "N/A",
+            "test_run_times": "N/A",
             "cost": 0.0,
         }
     }
@@ -158,17 +206,15 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
         if not benchmark_dir.is_dir():
             continue
 
-        # 階層を遡って情報を取得
-        category_dir = benchmark_dir.parent
-        os_dir = category_dir.parent
-        machine_dir = os_dir.parent
-
-        machinename = machine_dir.name
-        os_name = os_dir.name
-        category_name = category_dir.name
-
-        # 2) スレッド結果の収集
-        machine_info = get_machine_info(machinename)
+        # Robust machinename detection supporting nested and various structures
+        machinename, os_name, category_name, machine_info = _find_machine_info_in_hierarchy(
+            benchmark_dir, search_root
+        )
+        
+        # Fallback if machine_info is empty
+        if not machine_info:
+            machine_info = get_machine_info(machinename)
+        
         cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
 
         thread_nodes: Dict[str, Any] = {}
@@ -210,6 +256,13 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # Self syntax check
+    try:
+        py_compile.compile(str(Path(__file__).resolve()), doraise=True)
+    except py_compile.PyCompileError as e:
+        print(f"Syntax error in {Path(__file__).name}: {e}", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description=(
             "coremark parser: 指定ディレクトリから再帰的にベンチマーク結果を探索し、"
@@ -222,7 +275,7 @@ def main() -> None:
         type=Path,
         required=True,
         dest="search_root",
-        help="探索を開始するルートディレクトリを指定（例: results フォルダや特定のマシンフォルダ）",
+        help="探索対象を含む親ディレクトリを指定",
     )
     parser.add_argument(
         "--out",
