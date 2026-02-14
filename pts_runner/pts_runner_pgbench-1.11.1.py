@@ -1356,8 +1356,8 @@ def main():
     parser.add_argument(
         '--clients',
         type=str,
-        default='1,50',
-        help='Comma-separated client counts to test (e.g., "1,50"). Default: "1,50". Use "all" for all (1,50,100,250,500)'
+        default='50',
+        help='Comma-separated client counts to test (e.g., "1,50"). Default: "50". Use "all" for all (1,50,100,250,500)'
     )
 
     parser.add_argument(
