@@ -290,6 +290,8 @@ def print_commands(commands):
     print(f"{'='*80}")
     for cmd in commands:
         print(cmd)
+    print(f"{'='*80}")
+    print(f"  Total benchmarks to execute: {len(commands)}")
     print(f"{'='*80}\n")
 
 
@@ -323,9 +325,11 @@ def print_commands_json_fragment(commands):
 
     payload = [_add_log_redirection(cmd) for cmd in commands]
     print(f"\n{'='*80}")
-    print("Generated workloads JSON fragment (copy & paste)")
+    print(f"Generated workloads JSON fragment ({len(commands)} commands)")
     print(f"{'='*80}")
     print(json.dumps(payload, indent=2))
+    print(f"{'='*80}")
+    print(f"  Total benchmarks to execute: {len(commands)}")
     print(f"{'='*80}\n")
 
 
