@@ -183,7 +183,13 @@ class PreSeedDownloader:
 
 
 class PgbenchRunner:
-    def __init__(self, threads_arg=None, quick_mode=False):
+    # Valid values for test option filtering (must match test-definition.xml)
+    VALID_SCALING_FACTORS = ['1', '100', '1000', '10000', '25000']
+    VALID_CLIENTS = ['1', '50', '100', '250', '500']
+    VALID_MODES = {'rw': ['Read Write'], 'ro': ['Read Only'], 'both': ['Read Write', 'Read Only']}
+
+    def __init__(self, threads_arg=None, quick_mode=False,
+                 scaling_factors=None, clients=None, modes=None):
         """
         Initialize PostgreSQL pgbench runner.
         """
@@ -211,6 +217,13 @@ class PgbenchRunner:
 
         # Quick mode for development
         self.quick_mode = quick_mode
+
+        # Test option filters (None = all)
+        self.filter_scaling_factors = self._validate_filter(
+            scaling_factors, self.VALID_SCALING_FACTORS, 'scaling-factors')
+        self.filter_clients = self._validate_filter(
+            clients, self.VALID_CLIENTS, 'clients')
+        self.filter_modes = self.VALID_MODES.get(modes) if modes else None
 
         # Check perf permissions (standard Linux check)
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -250,6 +263,16 @@ class PgbenchRunner:
         # Register signal handlers for interrupts
         signal.signal(signal.SIGINT, self._cleanup_handler)   # Ctrl+C
         signal.signal(signal.SIGTERM, self._cleanup_handler)  # kill command
+
+    def _validate_filter(self, values, valid_values, name):
+        """Validate filter values against allowed list. Returns None if no filter."""
+        if values is None:
+            return None
+        invalid = [v for v in values if v not in valid_values]
+        if invalid:
+            print(f"  [ERROR] Invalid {name}: {invalid}. Valid: {valid_values}")
+            sys.exit(1)
+        return values
 
     def get_os_name(self):
         """Get OS name and version formatted as <Distro>_<Version>."""
@@ -565,6 +588,116 @@ class PgbenchRunner:
         except Exception as e:
             print(f"  [ERROR] Failed to patch results-definition.xml: {e}")
             return False
+
+    def _has_test_option_filters(self):
+        """Check if any test option filters are active."""
+        return (self.filter_scaling_factors is not None
+                or self.filter_clients is not None
+                or self.filter_modes is not None)
+
+    def patch_test_options(self):
+        """
+        Temporarily patch test-definition.xml to limit test configurations.
+        Filters <Entry> elements based on --scaling-factors, --clients, --modes.
+        """
+        if not self._has_test_option_filters():
+            return
+
+        import xml.etree.ElementTree as ET
+
+        test_def_path = (Path.home() / '.phoronix-test-suite' / 'test-profiles'
+                         / 'pts' / self.benchmark / 'test-definition.xml')
+
+        if not test_def_path.exists():
+            print(f"  [WARN] test-definition.xml not found: {test_def_path}")
+            return
+
+        backup_path = test_def_path.with_suffix('.xml.bak')
+
+        print(f"\n>>> Patching test-definition.xml to filter test configurations...")
+
+        try:
+            # Backup original
+            shutil.copy2(test_def_path, backup_path)
+
+            tree = ET.parse(test_def_path)
+            root = tree.getroot()
+
+            # Filter map: identifier -> allowed values (Name text)
+            filter_map = {}
+            if self.filter_scaling_factors is not None:
+                filter_map['scaling-factor'] = self.filter_scaling_factors
+            if self.filter_clients is not None:
+                filter_map['clients'] = self.filter_clients
+            if self.filter_modes is not None:
+                filter_map['run-mode'] = self.filter_modes
+
+            test_settings = root.find('TestSettings')
+            if test_settings is None:
+                print(f"  [WARN] No TestSettings found in test-definition.xml")
+                return
+
+            config_counts = []
+            for option in test_settings.findall('Option'):
+                identifier_el = option.find('Identifier')
+                if identifier_el is None:
+                    continue
+                identifier = identifier_el.text.strip()
+
+                if identifier not in filter_map:
+                    # Count all entries for this option
+                    menu = option.find('Menu')
+                    if menu is not None:
+                        config_counts.append(len(menu.findall('Entry')))
+                    continue
+
+                allowed_values = filter_map[identifier]
+                menu = option.find('Menu')
+                if menu is None:
+                    continue
+
+                # Remove entries not in allowed values
+                to_remove = []
+                for entry in menu.findall('Entry'):
+                    name_el = entry.find('Name')
+                    if name_el is not None and name_el.text.strip() not in allowed_values:
+                        to_remove.append(entry)
+
+                for entry in to_remove:
+                    menu.remove(entry)
+
+                remaining = len(menu.findall('Entry'))
+                config_counts.append(remaining)
+                display_name = option.find('DisplayName')
+                dn = display_name.text if display_name is not None else identifier
+                print(f"  [OK] {dn}: filtered to {allowed_values} ({remaining} entries)")
+
+            total = 1
+            for c in config_counts:
+                total *= c
+
+            print(f"  [OK] Total test configurations: {total}")
+
+            # Write patched XML
+            tree.write(test_def_path, xml_declaration=True, encoding='unicode')
+            print(f"  [OK] test-definition.xml patched (backup: {backup_path})")
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch test-definition.xml: {e}")
+            # Restore backup on failure
+            if backup_path.exists():
+                shutil.copy2(backup_path, test_def_path)
+
+    def restore_test_options(self):
+        """Restore original test-definition.xml from backup."""
+        test_def_path = (Path.home() / '.phoronix-test-suite' / 'test-profiles'
+                         / 'pts' / self.benchmark / 'test-definition.xml')
+        backup_path = test_def_path.with_suffix('.xml.bak')
+
+        if backup_path.exists():
+            shutil.copy2(backup_path, test_def_path)
+            backup_path.unlink()
+            print(f"  [OK] test-definition.xml restored from backup")
 
     def install_benchmark(self):
         """Install benchmark using standard PTS mechanism."""
@@ -1137,6 +1270,15 @@ fi
         print(f"# Thread List: {self.thread_list}")
         if self.quick_mode:
             print(f"# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
+        if self._has_test_option_filters():
+            sf = self.filter_scaling_factors or self.VALID_SCALING_FACTORS
+            cl = self.filter_clients or self.VALID_CLIENTS
+            md = self.filter_modes or ['Read Write', 'Read Only']
+            total = len(sf) * len(cl) * len(md)
+            print(f"# Scaling Factors: {','.join(sf)} ({len(sf)} of {len(self.VALID_SCALING_FACTORS)})")
+            print(f"# Clients: {','.join(cl)} ({len(cl)} of {len(self.VALID_CLIENTS)})")
+            print(f"# Modes: {','.join(md)} ({len(md)} of 2)")
+            print(f"# Total Configurations: {total}")
         print(f"{'#'*80}")
 
         # Clean results directory
@@ -1149,6 +1291,9 @@ fi
         # Install
         self.install_benchmark()
 
+        # Patch test options to limit configurations (if filters specified)
+        self.patch_test_options()
+
         # Run for each thread count
         failed = []
         try:
@@ -1159,6 +1304,8 @@ fi
             # Clean up PostgreSQL processes even if tests fail or are interrupted
             print(f"\n>>> Final cleanup...")
             self.cleanup_postgresql()
+            # Restore original test-definition.xml
+            self.restore_test_options()
 
         # Export results
         self.export_results()
@@ -1199,16 +1346,55 @@ def main():
         help='Quick mode: Run each test only once (for development/testing)'
     )
 
+    parser.add_argument(
+        '--scaling-factors',
+        type=str,
+        default='100,1000',
+        help='Comma-separated scaling factors to test (e.g., "100,1000"). Default: "100,1000". Use "all" for all (1,100,1000,10000,25000)'
+    )
+
+    parser.add_argument(
+        '--clients',
+        type=str,
+        default='1,100',
+        help='Comma-separated client counts to test (e.g., "1,100"). Default: "1,100". Use "all" for all (1,50,100,250,500)'
+    )
+
+    parser.add_argument(
+        '--modes',
+        type=str,
+        default='both',
+        choices=['rw', 'ro', 'both', 'all'],
+        help='Test mode: rw=Read Write only, ro=Read Only only, both=both modes, all=same as both. Default: "both"'
+    )
+
     args = parser.parse_args()
 
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
         print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
+    # Parse test option filters ("all" disables filtering for that option)
+    scaling_factors = None
+    if args.scaling_factors and args.scaling_factors.lower() != 'all':
+        scaling_factors = [s.strip() for s in args.scaling_factors.split(',')]
+
+    clients = None
+    if args.clients and args.clients.lower() != 'all':
+        clients = [s.strip() for s in args.clients.split(',')]
+
+    modes = args.modes if args.modes != 'all' else None
+
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
 
-    runner = PgbenchRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = PgbenchRunner(
+        threads_arg=threads,
+        quick_mode=args.quick,
+        scaling_factors=scaling_factors,
+        clients=clients,
+        modes=modes,
+    )
     success = runner.run()
 
     sys.exit(0 if success else 1)
