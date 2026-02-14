@@ -17,7 +17,6 @@ Usage:
     ./cloud_exec_para.py --csp gcp --max-workers 3    # Run GCP with custom parallelism
     ./cloud_exec_para.py --csp oci --dry-run          # Show execution plan only
 
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 """
 
 import json
