@@ -1349,15 +1349,15 @@ def main():
     parser.add_argument(
         '--scaling-factors',
         type=str,
-        default='100,1000',
-        help='Comma-separated scaling factors to test (e.g., "100,1000"). Default: "100,1000". Use "all" for all (1,100,1000,10000,25000)'
+        default='1000',
+        help='Comma-separated scaling factors to test (e.g., "100,1000"). Default: "1000". Use "all" for all (1,100,1000,10000,25000)'
     )
 
     parser.add_argument(
         '--clients',
         type=str,
-        default='1',
-        help='Comma-separated client counts to test (e.g., "1,100"). Default: "1". Use "all" for all (1,50,100,250,500)'
+        default='1,50',
+        help='Comma-separated client counts to test (e.g., "1,50"). Default: "1,50". Use "all" for all (1,50,100,250,500)'
     )
 
     parser.add_argument(
