@@ -613,6 +613,66 @@ MACHINE_LOOKUP = [
         },
     },
     {
+        "match": ["m7g", "2xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 8,
+            "cpu_name": "Neoverse-V1 (Graviton3)",
+            "cpu_isa": "Armv9.0-A (SVE2-256)",
+            "cost_hour[730h-mo]": 0.4413,
+        },
+    },
+    {
+        "match": ["m7g", "4xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 16,
+            "cpu_name": "Neoverse-V1 (Graviton3)",
+            "cpu_isa": "Armv9.0-A (SVE2-256)",
+            "cost_hour[730h-mo]": 0.8629,
+        },
+    },
+    {
+        "match": ["m7i", "4xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 16,
+            "cpu_name": "Intel Xeon 4 (4th Sapphire Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 1.0613,
+        },
+    },
+    {
+        "match": ["m8a", "4xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 16,
+            "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 1.27746,
+        },
+    },
+    {
+        "match": ["m8i", "4xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 16,
+            "cpu_name": "Intel Xeon 6 (6th Granite Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 1.11338,
+        },
+    },
+    {
+        "match": ["m8g", "4xlarge"],
+        "info": {
+            "CSP": "AWS",
+            "total_vcpu": 16,
+            "cpu_name": "Neoverse-V2 (Graviton4)",
+            "cpu_isa": "Armv9.0-A (SVE2-128)",
+            "cost_hour[730h-mo]": 0.94722,
+        },
+    },
+    {
         "match": ["e2-standard-2"],
         "info": {
             "CSP": "GCP",
@@ -633,6 +693,16 @@ MACHINE_LOOKUP = [
         },
     },
     {
+        "match": ["c4d-standard-16"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 16,
+            "cpu_name": "AMD EPYC 9B45 (Zen 5 \"Turin\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.758,
+        },
+    },
+    {
         "match": ["c4-standard-8"],
         "info": {
             "CSP": "GCP",
@@ -640,6 +710,16 @@ MACHINE_LOOKUP = [
             "cpu_name": "Intel Xeon Platinum 8581C (5th Emerald Rapids)",
             "cpu_isa": "x86-64 (AMX + AVX-512)",
             "cost_hour[730h-mo]": 0.4231,
+        },
+    },
+    {
+        "match": ["c4-standard-16"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 16,
+            "cpu_name": "Intel Xeon Platinum 8581C (5th Emerald Rapids)",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.7928,
         },
     },
     {
@@ -653,6 +733,36 @@ MACHINE_LOOKUP = [
         },
     },
     {
+        "match": ["c4a-standard-16"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 16,
+            "cpu_name": "Neoverse-V2 (Google Axion)",
+            "cpu_isa": "Armv9.0-A (SVE2-128)",
+            "cost_hour[730h-mo]": 0.7712,
+        },
+    },
+    {
+        "match": ["t2a-standard-8"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 8,
+            "cpu_name": "Ampere Altra",
+            "cpu_isa": "Armv8.2-A (NEON-128)",
+            "cost_hour[730h-mo]": 0.40654,
+        },
+    },
+    {
+        "match": ["t2a-standard-16"],
+        "info": {
+            "CSP": "GCP",
+            "total_vcpu": 16,
+            "cpu_name": "Ampere Altra",
+            "cpu_isa": "Armv8.2-A (NEON-128)",
+            "cost_hour[730h-mo]": 0.75968,
+        },
+    },
+    {
         "match": ["e5", "flex"],
         "info": {
             "CSP": "OCI",
@@ -660,6 +770,16 @@ MACHINE_LOOKUP = [
             "cpu_name": "AMD EPYC 9J14 (Zen 4 \"Genoa\")",
             "cpu_isa": "x86-64 (AMX + AVX-512)",
             "cost_hour[730h-mo]": 0.1925,
+        },
+    },
+    {
+        "match": ["e6", "flex", "vcpu-16"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 16,
+            "cpu_name": "AMD EPYC 9J45 (Zen 5 \"Turin\")",
+            "cpu_isa": "x86-64 (AMX + AVX-512)",
+            "cost_hour[730h-mo]": 0.368,
         },
     },
     {
@@ -673,6 +793,16 @@ MACHINE_LOOKUP = [
         },
     },
     {
+        "match": ["a1", "flex", "vcpu-16"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 16,
+            "cpu_name": "Ampere one (v8.6A)",
+            "cpu_isa": "Armv8.6 (NEON-128)",
+            "cost_hour[730h-mo]": 0.2647,
+        },
+    },
+    {
         "match": ["a1", "flex"],
         "info": {
             "CSP": "OCI",
@@ -680,6 +810,16 @@ MACHINE_LOOKUP = [
             "cpu_name": "Ampere one (v8.6A)",
             "cpu_isa": "Armv8.6 (NEON-128)",
             "cost_hour[730h-mo]": 0.0599,
+        },
+    },
+    {
+        "match": ["a2", "flex", "vcpu-16"],
+        "info": {
+            "CSP": "OCI",
+            "total_vcpu": 16,
+            "cpu_name": "Ampere one (v8.6A)",
+            "cpu_isa": "Armv8.6 (NEON-128)",
+            "cost_hour[730h-mo]": 0.3607,
         },
     },
     {
