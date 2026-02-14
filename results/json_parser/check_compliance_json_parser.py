@@ -180,6 +180,12 @@ class JsonParserComplianceChecker:
         has_return_type = "-> tuple[str, str, str, Dict[str, Any]]" in self.content
         uses_in_build = "_find_machine_info_in_hierarchy(" in self.content and "_build_full_payload" in self.content
         
+        # Check for correct CSP validation (rejecting "unknown")
+        has_csp_check = re.search(
+            r'machine_info\.get\("CSP"\)\s+and\s+machine_info\.get\("CSP"\)\s*!=\s*"unknown"',
+            self.content
+        )
+        
         if has_function and has_correct_sig:
             self.passed.append("✅ _find_machine_info_in_hierarchy() with correct signature")
             if has_return_type:
@@ -192,6 +198,14 @@ class JsonParserComplianceChecker:
             else:
                 self.errors.append(
                     "❌ CRITICAL: _find_machine_info_in_hierarchy() exists but not used in _build_full_payload()"
+                )
+            
+            if has_csp_check:
+                self.passed.append("✅ CSP validation correctly rejects 'unknown' values")
+            else:
+                self.warnings.append(
+                    "⚠️  WARNING: CSP validation should reject 'unknown' to avoid false positives "
+                    "(check: machine_info.get('CSP') != 'unknown')"
                 )
         elif "run_main(" in self.content:
             self.warnings.append(

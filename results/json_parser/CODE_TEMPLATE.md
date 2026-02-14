@@ -172,6 +172,15 @@ def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
 def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
     """Find valid machinename by traversing up from benchmark_dir.
     
+    Searches upward from benchmark_dir toward search_root, checking each
+    directory name against the machine Look-Up-Table (LUT) until a valid
+    machinename is found.
+    
+    IMPORTANT: get_machine_info() behavior
+    - Returns valid machine info (with CSP != \"unknown\") if found in LUT
+    - Returns fallback dict with CSP=\"unknown\" if NOT found in LUT
+    - This function must reject CSP=\"unknown\" to avoid false positives
+    
     Returns: (machinename, os_name, category_name, machine_info)
     
     This function handles various directory structures:
@@ -209,8 +218,9 @@ def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> t
         # Try this directory name as machinename via LUT lookup
         machine_info = get_machine_info(current.name)
         
-        # Valid machine found if get_machine_info returns non-empty dict with CSP
-        if machine_info and machine_info.get("CSP"):
+        # Valid machine found if get_machine_info returns non-empty dict with valid CSP        # CRITICAL: Must check CSP != \"unknown\" to avoid false positives
+        # get_machine_info() returns {\"CSP\": \"unknown\", ...} for non-existent machines
+        # Without this check, OS names (e.g., Ubuntu_24_04_3) would be treated as valid machines        if machine_info and machine_info.get("CSP") and machine_info.get("CSP") != "unknown":
             machinename = current.name
             
             # Determine os_name: directory immediately above testcategory
