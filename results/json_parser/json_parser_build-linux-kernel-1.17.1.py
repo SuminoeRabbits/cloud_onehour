@@ -90,8 +90,8 @@ def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> t
         # Try this directory name as machinename via LUT lookup
         machine_info = get_machine_info(current.name)
         
-        # Valid machine found if get_machine_info returns non-empty dict with CSP
-        if machine_info and machine_info.get("CSP"):
+        # Valid machine found if get_machine_info returns non-empty dict with valid CSP
+        if machine_info and machine_info.get("CSP") and machine_info.get("CSP") != "unknown":
             machinename = current.name
             
             # Determine os_name: directory immediately above testcategory

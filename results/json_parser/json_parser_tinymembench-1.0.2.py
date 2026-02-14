@@ -9,88 +9,178 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import statistics
 import sys
 from pathlib import Path
-from statistics import median
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, Optional
 import py_compile
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
-from make_one_big_json import get_machine_info  # type: ignore  # pylint: disable=import-error
+try:
+    from make_one_big_json import get_machine_info  # type: ignore  # pylint: disable=import-error
+except ImportError:
+    def get_machine_info(machinename: str) -> Dict[str, Any]:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Benchmark-specific placeholders
+# ---------------------------------------------------------------------------
 
 BENCHMARK_NAME = "tinymembench-1.0.2"
 TESTCATEGORY_HINT = "Memory_Access"
 
+ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
 
-def _extract_test_entries(thread_json: Path) -> List[Dict[str, Any]]:
-    data = json.loads(thread_json.read_text(encoding="utf-8"))
-    entries: List[Dict[str, Any]] = []
 
-    for test_block in data.get("results", {}).values():
-        title = test_block.get("title", "N/A")
-        description = test_block.get("description", "")
-        unit = test_block.get("scale", "")
+# ---------------------------------------------------------------------------
+# [3] 共通ヘルパー関数
+# ---------------------------------------------------------------------------
 
-        for system_data in test_block.get("results", {}).values():
-            value = system_data.get("value")
-            raw_values = system_data.get("raw_values")
-            if not raw_values and value is not None:
-                raw_values = [value]
-            test_run_times = system_data.get("test_run_times", [])
-            time_value = median(test_run_times) if test_run_times else None
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from log text."""
+    return ANSI_ESCAPE_RE.sub("", text)
 
-            entries.append(
-                {
-                    "test_name": title,
-                    "description": description,
-                    "unit": unit,
-                    "value": value,
-                    "raw_values": raw_values,
-                    "test_run_times": test_run_times,
-                    "time": time_value,
-                }
-            )
 
+def _read_freq_file(freq_file: Path) -> Dict[str, int]:
+    """Load <N>-thread_freq_{start,end}.txt into {freq_N: Hz} dict."""
+    if not freq_file.exists():
+        return {}
+    freqs: Dict[str, int] = {}
+    with freq_file.open(encoding="utf-8") as handle:
+        for idx, line in enumerate(handle):
+            value = line.strip()
+            if not value:
+                continue
+            try:
+                freq_hz = int(value)
+            except ValueError:
+                if ":" not in value:
+                    continue
+                try:
+                    freq_mhz = float(value.split(":", 1)[1].strip())
+                except ValueError:
+                    continue
+                freq_hz = int(freq_mhz * 1000)
+            freqs[f"freq_{idx}"] = freq_hz
+    return freqs
+
+
+def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
+    """Return iterable of thread identifiers."""
+    log_threads = sorted(benchmark_dir.glob("*-thread.log"))
+    for file_path in log_threads:
+        thread_prefix = file_path.stem.split("-", 1)[0]
+        if thread_prefix:
+            yield thread_prefix
+
+
+# ---------------------------------------------------------------------------
+# Benchmark-specific extraction hooks
+# ---------------------------------------------------------------------------
+
+def _load_thread_json(benchmark_dir: Path, thread_num: str) -> list[tuple[str, dict]]:
+    """Load <N>-thread.json and return list of (test_key, test_data) tuples."""
+    json_file = benchmark_dir / f"{thread_num}-thread.json"
+    if not json_file.exists():
+        return []
+    
+    try:
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    entries = []
+    for _hash, entry in data.get("results", {}).items():
+        title = entry.get("title", "")
+        description = entry.get("description", "")
+        scale = entry.get("scale", "")
+        
+        for _sys_id, sys_data in entry.get("results", {}).items():
+            # For tinymembench, use title as test_key with description
+            test_key = f"{title} - {description}" if description else title
+            
+            test_info = {
+                "description": description or title,
+                "value": sys_data.get("value"),
+                "raw_values": sys_data.get("raw_values", []),
+                "test_run_times": sys_data.get("test_run_times", []),
+                "scale": scale,
+            }
+            entries.append((test_key, test_info))
+    
     return entries
 
 
-def _build_test_node(entry: Dict[str, Any], cost_hour: float) -> Dict[str, Any]:
-    value = entry.get("value")
-    raw_values = entry.get("raw_values")
-    test_run_times = entry.get("test_run_times") or []
-    time_value: Optional[float] = entry.get("time")
-    time_seconds = float(time_value) if time_value is not None else 0.0
-    cost = round(cost_hour * time_seconds / 3600, 6) if time_seconds else 0.0
+def _collect_thread_payload(
+    benchmark_dir: Path,
+    thread_num: str,
+    cost_hour: float,
+) -> Optional[Dict[str, Any]]:
+    """Extract benchmark results for a specific thread count."""
+    
+    entries = _load_thread_json(benchmark_dir, thread_num)
+    if not entries:
+        return None
+    
+    test_payload: Dict[str, Any] = {}
+    
+    for test_key, test_info in entries:
+        value = test_info.get("value")
+        raw_values = test_info.get("raw_values", [])
+        test_run_times = test_info.get("test_run_times", [])
+        scale = test_info.get("scale", "")
+        description = test_info.get("description", "")
+        
+        # Calculate time
+        if test_run_times and len(test_run_times) > 0:
+            time = statistics.median(test_run_times)
+        else:
+            time = 0.0
+        
+        # Calculate cost
+        cost = round(cost_hour * time / 3600, 6) if time > 0 else 0.0
+        
+        test_payload[test_key] = {
+            "description": description,
+            "values": value if value is not None else 0.0,
+            "raw_values": raw_values,
+            "unit": scale,
+            "time": time,
+            "test_run_times": test_run_times,
+            "cost": cost,
+        }
+    
+    # perf_stat 構築
+    start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
+    end_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_end.txt")
+    perf_stat: Dict[str, Any] = {}
+    if start_freq:
+        perf_stat["start_freq"] = start_freq
+    if end_freq:
+        perf_stat["end_freq"] = end_freq
+    
+    return {"perf_stat": perf_stat, "test_name": test_payload}
 
-    return {
-        "description": entry.get("description", ""),
-        "values": value if value is not None else "N/A",
-        "raw_values": raw_values if raw_values else ("N/A" if value is None else [value]),
-        "unit": entry.get("unit", ""),
-        "time": time_seconds if time_seconds else 0.0,
-        "test_run_times": test_run_times if test_run_times else [],
-        "cost": cost,
-    }
 
-
-def _build_thread_node(entries: List[Dict[str, Any]], cost_hour: float) -> Dict[str, Any]:
-    test_name_map: Dict[str, Dict[str, Any]] = {}
-    for entry in entries:
-        base_name = entry.get("test_name", "unknown")
-        description = entry.get("description", "")
-        key = f"{base_name} - {description}" if description else base_name
-        test_name_map[key] = _build_test_node(entry, cost_hour)
-
-    return {
-        "perf_stat": {},
-        "test_name": test_name_map,
-    }
-
+# ---------------------------------------------------------------------------
+# [5] 共通ディレクトリ走査
+# ---------------------------------------------------------------------------
 
 def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
     """Find valid machinename by traversing up from benchmark_dir.
+    
+    Searches upward from benchmark_dir toward search_root, checking each
+    directory name against the machine Look-Up-Table (LUT) until a valid
+    machinename is found.
+    
+    IMPORTANT: get_machine_info() behavior
+    - Returns valid machine info (with CSP != "unknown") if found in LUT
+    - Returns fallback dict with CSP="unknown" if NOT found in LUT
+    - This function must reject CSP="unknown" to avoid false positives
     
     Returns: (machinename, os_name, category_name, machine_info)
     """
@@ -108,8 +198,11 @@ def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> t
         # Try this directory name as machinename via LUT lookup
         machine_info = get_machine_info(current.name)
         
-        # Valid machine found if get_machine_info returns non-empty dict with CSP
-        if machine_info and machine_info.get("CSP"):
+        # Valid machine found if get_machine_info returns non-empty dict with valid CSP
+        # CRITICAL: Must check CSP != "unknown" to avoid false positives
+        # get_machine_info() returns {"CSP": "unknown", ...} for non-existent machines
+        # Without this check, OS names (e.g., Ubuntu_24_04_3) would be treated as valid machines
+        if machine_info and machine_info.get("CSP") and machine_info.get("CSP") != "unknown":
             machinename = current.name
             
             # Determine os_name: directory immediately above testcategory
@@ -137,24 +230,7 @@ def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> t
     return machine_dir.name, os_dir.name, category_name, {}
 
 
-def _parse_tinymembench(benchmark_dir: Path, cost_hour: float) -> Dict[str, Any]:
-    thread_nodes: Dict[str, Dict[str, Any]] = {}
-    for thread_json in sorted(benchmark_dir.glob("*-thread.json")):
-        thread_prefix = thread_json.stem.split("-", 1)[0]
-        if not thread_prefix.isdigit():
-            continue
-        entries = _extract_test_entries(thread_json)
-        if entries:
-            thread_nodes[thread_prefix] = _build_thread_node(entries, cost_hour)
-
-    return thread_nodes
-
-
 def _build_full_payload(search_root: Path) -> Dict[str, Any]:
-    """Search for benchmarks recursively and build the full JSON payload.
-
-    想定構造: <search_root>/**/<machinename>/<os>/<testcategory>/<BENCHMARK_NAME>
-    """
     if not search_root.exists():
         raise FileNotFoundError(f"Directory not found: {search_root}")
 
@@ -175,7 +251,13 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
         
         cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
 
-        thread_nodes: Dict[str, Any] = _parse_tinymembench(benchmark_dir, cost_hour)
+        thread_nodes: Dict[str, Any] = {}
+        for thread_num in _discover_threads(benchmark_dir):
+            thread_payload = _collect_thread_payload(
+                benchmark_dir, thread_num, cost_hour
+            )
+            if thread_payload:
+                thread_nodes[thread_num] = thread_payload
 
         if not thread_nodes:
             continue
@@ -204,6 +286,10 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
     return all_payload
 
 
+# ---------------------------------------------------------------------------
+# [6] 共通CLIエントリポイント
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     # Self syntax check
     try:
@@ -213,21 +299,18 @@ def main() -> None:
         sys.exit(1)
 
     parser = argparse.ArgumentParser(
-        description="cloud_onehour/results/<machinename> を入力に tinymembench-1.0.2 構造を JSON で出力する"
+        description=(
+            f"{BENCHMARK_NAME} parser: cloud_onehour/results/<machinename> を入力に "
+            f"{BENCHMARK_NAME} を README 構造で出力する"
+        )
     )
     parser.add_argument(
-        "--dir",
-        "-d",
-        type=Path,
-        required=True,
-        dest="search_root",
+        "--dir", "-d", type=Path, required=True, dest="search_root",
         help="探索対象を含む親ディレクトリを指定",
     )
     parser.add_argument(
-        "--out",
-        "-o",
-        type=Path,
-        help="出力先 JSON ファイル（省略時は stdout）",
+        "--out", "-o", type=Path,
+        help="出力先 JSON ファイルへのパス。省略時は stdout に出力",
     )
 
     args = parser.parse_args()
