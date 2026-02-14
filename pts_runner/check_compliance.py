@@ -118,6 +118,7 @@ class ComplianceChecker:
         self.check_batch_env_vars()
         self.check_pts_cache_clean()
         self.check_results_dir_structure()
+        self.check_results_dir_cleanup_safety()
         self.check_thread_capping()
 
         # Cloud/ARM64 compatibility checks (new 2026-01)
@@ -793,6 +794,57 @@ class ComplianceChecker:
                 "❌ CRITICAL: Invalid results directory structure\n"
                 "   Expected: self.results_dir = self.project_root / \"results\" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark\n"
                 "   This ensures consistent log organization across machines and OS versions."
+            )
+
+    def check_results_dir_cleanup_safety(self):
+        """
+        Check that run() does NOT use shutil.rmtree(self.results_dir) which destroys
+        other threads' results when the runner is invoked per-thread.
+
+        BUG: When cloud executor calls the runner separately for each thread count:
+          W5: pts_runner 8   -> creates 8-thread files
+          W6: pts_runner 12  -> rmtree deletes 8-thread files!
+          W7: pts_runner 16  -> rmtree deletes 12-thread files!
+
+        FIX: Only clean files for the current thread count:
+          for num_threads in self.thread_list:
+              prefix = f"{num_threads}-thread"
+              # remove prefix.* and prefix/ directory only
+        """
+        # Check for the dangerous pattern
+        dangerous_pattern = re.search(
+            r'shutil\.rmtree\(self\.results_dir\)',
+            self.content
+        )
+
+        if dangerous_pattern:
+            self.errors.append(
+                "❌ CRITICAL: shutil.rmtree(self.results_dir) destroys other threads' results\n"
+                "   When the runner is invoked per-thread (e.g., pts_runner 8, then pts_runner 12),\n"
+                "   rmtree deletes ALL previous thread results.\n"
+                "   FIX: Replace with thread-specific cleanup:\n"
+                "     self.results_dir.mkdir(parents=True, exist_ok=True)\n"
+                "     for num_threads in self.thread_list:\n"
+                "         prefix = f\"{num_threads}-thread\"\n"
+                "         thread_dir = self.results_dir / prefix\n"
+                "         if thread_dir.exists(): shutil.rmtree(thread_dir)\n"
+                "         for f in self.results_dir.glob(f\"{prefix}.*\"): f.unlink()"
+            )
+            return
+
+        # Check for the correct pattern
+        safe_pattern = re.search(
+            r'for\s+num_threads\s+in\s+self\.thread_list.*?prefix.*?thread',
+            self.content,
+            re.DOTALL
+        )
+
+        if safe_pattern:
+            self.passed.append("✅ thread-specific results cleanup (preserves other threads)")
+        else:
+            self.warnings.append(
+                "⚠️  WARNING: Could not verify thread-specific results cleanup pattern\n"
+                "   Expected: cleanup loop over self.thread_list with prefix-based file removal"
             )
 
     def check_thread_capping(self):

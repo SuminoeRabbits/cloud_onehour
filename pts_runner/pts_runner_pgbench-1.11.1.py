@@ -1281,12 +1281,17 @@ fi
             print(f"# Total Configurations: {total}")
         print(f"{'#'*80}")
 
-        # Clean results directory
-        if self.results_dir.exists():
-            print(f"\n>>> Cleaning existing results directory: {self.results_dir}")
-            shutil.rmtree(self.results_dir)
-
+        # Clean only thread-specific files (preserve other threads' results)
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        for num_threads in self.thread_list:
+            prefix = f"{num_threads}-thread"
+            thread_dir = self.results_dir / prefix
+            if thread_dir.exists():
+                shutil.rmtree(thread_dir)
+            for f in self.results_dir.glob(f"{prefix}.*"):
+                f.unlink()
+                print(f"  [INFO] Removed old result: {f.name}")
+            print(f"\n>>> Cleaned existing {prefix} results (other threads preserved)")
 
         # Install
         self.install_benchmark()

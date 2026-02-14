@@ -1122,14 +1122,17 @@ class Compress7zipRunner:
         print()
 
         # Clean existing results directory before starting
-        if self.results_dir.exists():
-            print(f">>> Cleaning existing results directory...")
-            print(f"  [INFO] Removing: {self.results_dir}")
-            shutil.rmtree(self.results_dir)
-            print(f"  [OK] Results directory cleaned")
-            print()
+        # Clean only thread-specific files (preserve other threads' results)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        for num_threads in self.thread_list:
+            prefix = f"{num_threads}-thread"
+            thread_dir = self.results_dir / prefix
+            if thread_dir.exists():
+                shutil.rmtree(thread_dir)
+            for f in self.results_dir.glob(f"{prefix}.*"):
+                f.unlink()
+            print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        # Clean cache once at the beginning
         self.clean_pts_cache()
 
         # Install benchmark once (not per thread count, since THFix_in_compile=false)
