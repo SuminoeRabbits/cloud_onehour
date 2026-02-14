@@ -68,7 +68,7 @@
 #               --long の場合は実行オプションとして 8/12/16 スレッド + --quick を生成します。
 #               もし　"exe_time_v8cpu"値が100以上の場合は、2通りの実行コマンドを生成します。
 # 　　　　　　　　　　　　１．"--quick"と"--max"を追加したもの。
-# 　　　　　　　　　　　　２． "--quick"と"8" を追加したもの。
+# 　　　　　　　　　　　　２． "--quick"と"12"(nproc>=12の場合)もしくは"4"(nproc<12の場合) を追加したもの。
 # 　　　　　　　　もし　"exe_time_v8cpu"値が15.25以上の場合は 必ず実行オプションに"--quick"を追加します。
 #                もし"exe_time_v8cpu"値が15.25未満の場合は オプションに何もつけません。   
 # 
@@ -229,11 +229,12 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                          print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick (single-threaded)")
                          run_configs.append(("1", True))
                     else:
-                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing dual runs: --max (288) and 4 threads")
+                        small_threads = "12" if nproc >= 12 else "4"
+                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing dual runs: --max (288) and {small_threads} threads")
                         # 1. Max (288) + Quick
                         run_configs.append(("288", True))
-                        # 2. 4 + Quick
-                        run_configs.append(("8", True))
+                        # 2. 12 (nproc>=12) or 4 (nproc<12) + Quick
+                        run_configs.append((small_threads, True))
                 elif exe_time >= 15.25:
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 15.25 -> Enforcing --quick")
                     run_configs.append((number_arg, True))
