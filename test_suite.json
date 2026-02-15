@@ -29,7 +29,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
-                    "exe_time_v8cpu": "10.0"
+                    "exe_time_v8cpu": "20.0"
                 }
             }
         },
