@@ -62,9 +62,11 @@
 # --regression: "exe_time_v8cpu"値により "--quick" を上書きします。
 #               --regression 指定時は workloads 向け JSON 断片形式で出力します。
 #               生成されるテストは --long/--short の指定によりフィルタされます。
-#               - --regression --long : exe_time_v8cpu >= 120 のみ生成
-#               - --regression --short: exe_time_v8cpu < 15.25 のみ生成
-#               - --regression        : exe_time_v8cpu < 120 のみ生成
+#               - --regression --long  : exe_time_v8cpu >= 120 のみ生成
+#               - --regression --middle: 15.25 <= exe_time_v8cpu < 120 のみ生成
+#               - --regression --short : exe_time_v8cpu < 15.25 のみ生成
+#               - --regression         : exe_time_v8cpu < 120 のみ生成 (short + middle)
+#               --short, --middle, --long は任意の組み合わせが可能です。
 #               --long の場合は実行オプションとして 8/12/16 スレッド + --quick を生成します。
 #               もし　"exe_time_v8cpu"値が100以上の場合は、2通りの実行コマンドを生成します。
 # 　　　　　　　　　　　　１．"--quick"と"--max"を追加したもの。
@@ -114,7 +116,7 @@ def get_cpu_count():
     return os.cpu_count() or 1
 
 
-def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False, regression_filter=None):
+def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False, allowed_buckets=None):
     """
     Generate test commands from test_suite.json.
 
@@ -123,7 +125,7 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
         max_threads: If specified, override thread count to this value (except for single_threaded tests)
         quick_mode: If True, append --quick to all commands
         regression_mode: If True, override quick_mode based on exe_time_v8cpu value
-        regression_filter: One of {"long", "short", "normal"} to filter by exe_time_v8cpu
+        allowed_buckets: Set of allowed buckets {"short", "middle", "long"} to filter by exe_time_v8cpu
     """
     commands = []
     nproc = get_cpu_count()
@@ -206,24 +208,19 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                 elif exe_time < 15.25:
                     exe_bucket = "short"
                 else:
-                    exe_bucket = "normal"
+                    exe_bucket = "middle"
 
-                if regression_filter == "long" and exe_bucket != "long":
+                # Filter by allowed buckets
+                if exe_bucket not in allowed_buckets:
                     skip_test = True
-                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out (--long)")
-                elif regression_filter == "short" and exe_bucket != "short":
-                    skip_test = True
-                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out (--short)")
-                elif regression_filter is None and exe_bucket == "long":
-                    skip_test = True
-                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out (>= 120)")
-                elif regression_filter == "long":
+                    print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} -> bucket={exe_bucket}, filtered out")
+                elif exe_bucket == "long":
                     # Long mode: generate 8/12/16 threads with --quick
                     run_configs.append(("8", True))
                     run_configs.append(("12", True))
                     run_configs.append(("16", True))
                 elif exe_time >= 100:
-                    # Enforce --max (288 threads) and --quick, AND 4 threads and --quick
+                    # Enforce --max (288 threads) and --quick, AND small threads and --quick
                     if number_arg == "1":
                         # Single threaded, just run as is with quick
                          print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick (single-threaded)")
@@ -412,9 +409,12 @@ Examples:
   %(prog)s --split-2nd --run       # Execute 2nd 1/4 of tests only
   %(prog)s --split-3rd --run       # Execute 3rd 1/4 of tests only
   %(prog)s --split-4th --run       # Execute last 1/4 of tests only
-  %(prog)s --regression            # Generate tests with exe_time_v8cpu < 120
-  %(prog)s --regression --short    # Generate short tests only (exe_time_v8cpu < 15.25)
-  %(prog)s --regression --long     # Generate long tests only (exe_time_v8cpu >= 120)
+  %(prog)s --regression              # Generate tests with exe_time_v8cpu < 120 (short + middle)
+  %(prog)s --regression --short      # Generate short tests only (exe_time_v8cpu < 15.25)
+  %(prog)s --regression --middle     # Generate middle tests only (15.25 <= exe_time_v8cpu < 120)
+  %(prog)s --regression --long       # Generate long tests only (exe_time_v8cpu >= 120)
+  %(prog)s --regression --long --short  # Generate long + short tests (exclude middle)
+  %(prog)s --regression --short --middle --long  # Generate all tests
         """
     )
 
@@ -493,13 +493,19 @@ Examples:
     parser.add_argument(
         '--long',
         action='store_true',
-        help='Regression long: exe_time_v8cpu >= 120 only (requires --regression)'
+        help='Regression: include long tests (exe_time_v8cpu >= 120)'
+    )
+
+    parser.add_argument(
+        '--middle',
+        action='store_true',
+        help='Regression: include middle tests (15.25 <= exe_time_v8cpu < 120)'
     )
 
     parser.add_argument(
         '--short',
         action='store_true',
-        help='Regression short: exe_time_v8cpu < 15.25 only (requires --regression)'
+        help='Regression: include short tests (exe_time_v8cpu < 15.25)'
     )
 
     # Exception handling: Ignore invalid options and continue execution
@@ -525,6 +531,7 @@ Examples:
                 split_5th=False,
                 regression=False,
                 long=False,
+                middle=False,
                 short=False
             )
         else:
@@ -537,17 +544,19 @@ Examples:
 
     # Determine max_threads
     max_threads = 288 if args.max else None
-    regression_filter = None
+    allowed_buckets = None
     if args.regression:
-        if args.long and args.short:
-            print("[ERROR] Cannot use --long and --short together")
-            sys.exit(1)
-        if args.long:
-            regression_filter = "long"
-        elif args.short:
-            regression_filter = "short"
+        # Build allowed_buckets from flags; default is short + middle
+        if args.long or args.middle or args.short:
+            allowed_buckets = set()
+            if args.short:
+                allowed_buckets.add("short")
+            if args.middle:
+                allowed_buckets.add("middle")
+            if args.long:
+                allowed_buckets.add("long")
         else:
-            regression_filter = None  # Include all exe_time_v8cpu < 120
+            allowed_buckets = {"short", "middle"}  # Default: exe_time_v8cpu < 120
 
     print(f"{'='*80}")
     print(f"PTS Regression Test Command Generator")
@@ -569,7 +578,7 @@ Examples:
         max_threads=max_threads, 
         quick_mode=args.quick,
         regression_mode=args.regression,
-        regression_filter=regression_filter
+        allowed_buckets=allowed_buckets
     )
 
     # Apply split filter if requested
