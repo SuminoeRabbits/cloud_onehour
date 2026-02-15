@@ -768,10 +768,32 @@ class TensorFlowLiteBenchmarkRunner:
                                    text=True,
                                    bufsize=1)
 
+        install_output = []
         for line in process.stdout:
             print(line, end='')
+            install_output.append(line)
 
         process.wait()
+        if log_f:
+            log_f.close()
+
+        # Check for installation failure (returncode + output string detection)
+        returncode = process.returncode
+        install_failed = False
+        full_output = ''.join(install_output)
+
+        if returncode != 0:
+            install_failed = True
+        elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
+            install_failed = True
+        elif 'ERROR' in full_output or 'FAILED' in full_output:
+            install_failed = True
+
+        if install_failed:
+            print(f"\n  [ERROR] Installation failed with return code {returncode}")
+            for line in install_output[-20:]:
+                print(f"    {line}", end='')
+            sys.exit(1)
 
         # Verify installation with dual check
         pts_home = Path.home() / '.phoronix-test-suite'
