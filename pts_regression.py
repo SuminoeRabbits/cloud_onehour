@@ -116,7 +116,7 @@ def get_cpu_count():
     return os.cpu_count() or 1
 
 
-def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False, allowed_buckets=None):
+def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regression_mode=False, allowed_buckets=None, bucket_order=None):
     """
     Generate test commands from test_suite.json.
 
@@ -126,8 +126,20 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
         quick_mode: If True, append --quick to all commands
         regression_mode: If True, override quick_mode based on exe_time_v8cpu value
         allowed_buckets: Set of allowed buckets {"short", "middle", "long"} to filter by exe_time_v8cpu
+        bucket_order: List specifying output order of buckets, matching CLI flag order.
+                      e.g. ["middle", "long", "short"] for --middle --long --short.
+                      Defaults to ["short", "middle", "long"] if not specified.
+
+    Returns:
+        List of command strings. In regression mode, commands are ordered by
+        the specified bucket_order (not by test_suite.json order).
     """
-    commands = []
+    # In regression mode, collect commands per bucket for ordered output
+    # Bucket order follows CLI flag appearance order
+    if bucket_order is None:
+        bucket_order = ["short", "middle", "long"]
+    bucket_commands = {b: [] for b in bucket_order}
+    commands = []  # Used in non-regression mode
     nproc = get_cpu_count()
 
     # Iterate through test categories
@@ -195,6 +207,7 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
             # Each config is a tuple: (thread_count_arg, use_quick_flag)
             run_configs = []
             skip_test = False
+            exe_bucket = None
 
             if regression_mode:
                 # Override quick_mode based on exe_time_v8cpu
@@ -265,8 +278,18 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                 if q_flag:
                     cmd = f"{cmd} --quick"
 
-                commands.append(cmd)
+                if regression_mode and exe_bucket:
+                    bucket_commands[exe_bucket].append(cmd)
+                else:
+                    commands.append(cmd)
                 print(f"  [OK] Generated command: {cmd}")
+
+    # In regression mode, merge bucket lists in CLI flag appearance order
+    if regression_mode:
+        for bucket in bucket_order:
+            if bucket_commands.get(bucket):
+                print(f"\n[INFO] === Bucket: {bucket} ({len(bucket_commands[bucket])} commands) ===")
+            commands.extend(bucket_commands.get(bucket, []))
 
     return commands
 
@@ -545,6 +568,7 @@ Examples:
     # Determine max_threads
     max_threads = 288 if args.max else None
     allowed_buckets = None
+    bucket_order = None
     if args.regression:
         # Build allowed_buckets from flags; default is short + middle
         if args.long or args.middle or args.short:
@@ -555,8 +579,15 @@ Examples:
                 allowed_buckets.add("middle")
             if args.long:
                 allowed_buckets.add("long")
+            # Detect bucket order from CLI flag appearance order in sys.argv
+            flag_to_bucket = {"--short": "short", "--middle": "middle", "--long": "long"}
+            bucket_order = []
+            for arg in sys.argv:
+                if arg in flag_to_bucket and flag_to_bucket[arg] not in bucket_order:
+                    bucket_order.append(flag_to_bucket[arg])
         else:
             allowed_buckets = {"short", "middle"}  # Default: exe_time_v8cpu < 120
+            bucket_order = ["short", "middle"]
 
     print(f"{'='*80}")
     print(f"PTS Regression Test Command Generator")
@@ -578,7 +609,8 @@ Examples:
         max_threads=max_threads, 
         quick_mode=args.quick,
         regression_mode=args.regression,
-        allowed_buckets=allowed_buckets
+        allowed_buckets=allowed_buckets,
+        bucket_order=bucket_order
     )
 
     # Apply split filter if requested
