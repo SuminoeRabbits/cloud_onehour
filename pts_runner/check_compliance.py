@@ -951,9 +951,9 @@ class ComplianceChecker:
         # For multi-threaded benchmarks, check for proper patterns
 
         # Check 1: Scaling mode pattern (threads_arg is None)
-        # Expected: self.thread_list = list(range(1, self.vcpu_count + 1))
+        # Expected: self.thread_list = list(range(2, self.vcpu_count + 1, 2))
         has_correct_scaling = re.search(
-            r'self\.thread_list\s*=\s*list\(\s*range\(\s*1\s*,\s*self\.vcpu_count\s*\+\s*1\s*\)\s*\)',
+            r'self\.thread_list\s*=\s*list\(\s*range\(\s*2\s*,\s*self\.vcpu_count\s*\+\s*1\s*,\s*2\s*\)\s*\)',
             self.content
         )
 
@@ -983,19 +983,19 @@ class ComplianceChecker:
         if not has_correct_scaling and not has_custom_scaling:
             issues.append(
                 "Scaling mode pattern not found\n"
-                "   Expected: self.thread_list = list(range(1, self.vcpu_count + 1))"
+                "   Expected: self.thread_list = list(range(2, self.vcpu_count + 1, 2))"
             )
         elif has_custom_scaling:
             self.errors.append(
                 "❌ CRITICAL: Custom scaling method detected\n"
                 "   Found: self.thread_list = self.get_scaling_thread_list()\n"
-                "   Expected: self.thread_list = list(range(1, self.vcpu_count + 1))\n"
-                "   Reference: CODE_TEMPLATE.md lines 232-237\n"
-                "   Issue: Should use standard continuous scaling pattern [1, 2, 3, ..., nproc]"
+                "   Expected: self.thread_list = list(range(2, self.vcpu_count + 1, 2))\n"
+                "   Reference: CODE_TEMPLATE.md lines 247-250\n"
+                "   Issue: Should use standard even-number scaling pattern [2, 4, 6, ..., nproc]"
             )
 
         if has_min_capping and has_correct_scaling:
-            self.passed.append("✅ Thread handling correct: scaling mode uses range(1, vcpu+1), fixed mode uses min(threads_arg, vcpu)")
+            self.passed.append("✅ Thread handling correct: scaling mode uses range(2, vcpu+1, 2), fixed mode uses min(threads_arg, vcpu)")
         elif has_min_capping and not has_custom_scaling:
             self.passed.append("✅ Thread count properly capped at vcpu_count: min(threads_arg, self.vcpu_count)")
         elif has_uncapped_assignment:
