@@ -96,16 +96,14 @@ rm -f "$ARCHIVE"
 
 # 3. Configure batch mode
 echo "=== Step 3: Configuring batch mode ==="
+# Force PTS to use user home directory instead of system-wide /var/lib/
+export PTS_USER_PATH="$HOME/.phoronix-test-suite"
 printf "Y\nN\nN\nN\nN\nN\nY\n" | "$LAUNCHER" batch-setup
 
 USER_CONFIG="$HOME/.phoronix-test-suite/user-config.xml"
 if [ -f "$USER_CONFIG" ]; then
     sed -i 's|<UploadResults>TRUE</UploadResults>|<UploadResults>FALSE</UploadResults>|g' "$USER_CONFIG"
 fi
-
-# 4. Initialize test profile repository
-echo "=== Step 4: Initializing test profile repository ==="
-"$LAUNCHER" make-openbenchmarking-cache pts 2>/dev/null || echo "[INFO] Cache initialization completed"
 
 echo "=== Setup completed successfully ==="
 "$LAUNCHER" version
