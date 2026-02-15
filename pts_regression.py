@@ -233,18 +233,20 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
                     run_configs.append(("12", True))
                     run_configs.append(("16", True))
                 elif exe_time >= 100:
-                    # Enforce --max (288 threads) and --quick, AND small threads and --quick
+                    # Enforce multiple thread counts with --quick
                     if number_arg == "1":
                         # Single threaded, just run as is with quick
                          print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing --quick (single-threaded)")
                          run_configs.append(("1", True))
                     else:
-                        small_threads = "12" if nproc >= 12 else "4"
-                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> Enforcing dual runs: --max (288) and {small_threads} threads")
-                        # 1. Max (288) + Quick
-                        run_configs.append(("288", True))
-                        # 2. 12 (nproc>=12) or 4 (nproc<12) + Quick
-                        run_configs.append((small_threads, True))
+                        if nproc >= 12:
+                            # [8, 12, 288] but deduplicate (e.g. nproc==12 won't cause issues)
+                            thread_counts = list(dict.fromkeys([8, 12, 288]))
+                        else:
+                            thread_counts = [1, 288]
+                        print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 100 -> threads {thread_counts}")
+                        for tc in thread_counts:
+                            run_configs.append((str(tc), True))
                 elif exe_time >= 15.25:
                     print(f"  [INFO] Regression mode: exe_time_v8cpu={exe_time} >= 15.25 -> Enforcing --quick")
                     run_configs.append((number_arg, True))
