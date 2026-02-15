@@ -103,5 +103,9 @@ if [ -f "$USER_CONFIG" ]; then
     sed -i 's|<UploadResults>TRUE</UploadResults>|<UploadResults>FALSE</UploadResults>|g' "$USER_CONFIG"
 fi
 
+# 4. Initialize test profile repository
+echo "=== Step 4: Initializing test profile repository ==="
+"$LAUNCHER" make-openbenchmarking-cache pts 2>/dev/null || echo "[INFO] Cache initialization completed"
+
 echo "=== Setup completed successfully ==="
 "$LAUNCHER" version

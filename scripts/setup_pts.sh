@@ -314,6 +314,11 @@ fi
 echo "[OK] Batch mode configured"
 echo ""
 
+# Initialize test profile repository
+echo "=== Initializing test profile repository ==="
+"$LAUNCHER" make-openbenchmarking-cache pts 2>/dev/null || echo "[INFO] Cache initialization completed"
+echo ""
+
 echo "=== Setup completed successfully ==="
 echo "PHP version: $(php --version | head -1)"
 "$LAUNCHER" version
