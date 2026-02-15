@@ -251,10 +251,12 @@ echo "Installing to $INSTALL_DIR..."
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp -R "$tmpdir/phoronix-test-suite/"* "$INSTALL_DIR"
 
-# Create launcher
+# Create launcher with forced user-local installation path
 echo "Creating launcher at $LAUNCHER..."
 sudo tee "$LAUNCHER" >/dev/null <<'EOF'
 #!/usr/bin/env bash
+# Force PTS to use user home directory instead of system-wide /var/lib/
+export PTS_USER_PATH="$HOME/.phoronix-test-suite"
 exec /opt/phoronix-test-suite/phoronix-test-suite "$@"
 EOF
 sudo chmod +x "$LAUNCHER"
