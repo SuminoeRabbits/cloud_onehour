@@ -112,6 +112,7 @@ class ComplianceChecker:
         self.check_perf_events_implementation()
 
         self.check_install_verification()
+        self.check_install_fail_handling()
         self.check_install_log_toggle()
         self.check_argparse_setup()
         self.check_upload_safety()
@@ -693,6 +694,79 @@ class ComplianceChecker:
 
                 "   Recommended: Check installed-tests directory and use 'phoronix-test-suite test-installed'"
 
+            )
+
+    def check_install_fail_handling(self):
+        """Check if install_benchmark() handles installation failures properly.
+
+        Required pattern (from CODE_TEMPLATE.md):
+        1. returncode check after process.wait()
+        2. Error string detection (Checksum Failed / ERROR / FAILED)
+        3. sys.exit(1) on failure
+
+        Without these checks, installation failures are silently ignored,
+        leading to phantom benchmark results (e.g., simdjson 31s on GCP).
+        """
+        has_install_method = re.search(r'def\s+install_benchmark\s*\(', self.content)
+        if not has_install_method:
+            return  # Already warned by check_install_verification
+
+        # Extract install_benchmark method body
+        install_match = re.search(
+            r'def\s+install_benchmark\s*\(self[^)]*\)\s*:(.+?)(?=\n    def |\nclass |\Z)',
+            self.content,
+            re.DOTALL
+        )
+        if not install_match:
+            return
+
+        install_body = install_match.group(1)
+
+        # Check 1: returncode check
+        has_returncode_check = bool(
+            re.search(r'returncode\s*!=\s*0|process\.returncode\s*!=\s*0', install_body)
+        )
+
+        # Check 2: Error string detection
+        has_error_string_check = bool(
+            re.search(r"Checksum Failed|Downloading of needed test files failed", install_body)
+            or re.search(r"'(ERROR|FAILED)'\s+in\s+", install_body)
+        )
+
+        # Check 3: sys.exit(1) on failure
+        has_sys_exit = bool(
+            re.search(r'sys\.exit\s*\(\s*1\s*\)', install_body)
+        )
+
+        fail_score = sum([has_returncode_check, has_error_string_check, has_sys_exit])
+
+        if fail_score == 3:
+            self.passed.append("✅ Install fail handling: returncode + error strings + sys.exit(1)")
+        elif fail_score >= 2:
+            missing = []
+            if not has_returncode_check:
+                missing.append("returncode check")
+            if not has_error_string_check:
+                missing.append("error string detection (Checksum Failed/ERROR/FAILED)")
+            if not has_sys_exit:
+                missing.append("sys.exit(1)")
+            self.warnings.append(
+                f"⚠️  WARNING: Install fail handling incomplete ({fail_score}/3)\n"
+                f"   Missing: {', '.join(missing)}"
+            )
+        else:
+            missing = []
+            if not has_returncode_check:
+                missing.append("returncode check")
+            if not has_error_string_check:
+                missing.append("error string detection")
+            if not has_sys_exit:
+                missing.append("sys.exit(1)")
+            self.errors.append(
+                f"❌ ERROR: Install fail handling missing ({fail_score}/3)\n"
+                f"   Missing: {', '.join(missing)}\n"
+                f"   Install failures will be silently ignored, causing phantom results.\n"
+                f"   Required: returncode check + 'Checksum Failed'/'ERROR'/'FAILED' detection + sys.exit(1)"
             )
 
     def check_install_log_toggle(self):

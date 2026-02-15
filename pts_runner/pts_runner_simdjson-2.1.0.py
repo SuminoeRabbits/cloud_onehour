@@ -322,7 +322,25 @@ class SimdJsonRunner:
         process.wait()
         if log_f:
             log_f.close()
-        
+
+        # Check for installation failure
+        returncode = process.returncode
+        install_failed = False
+        full_output = ''.join(out)
+
+        if returncode != 0:
+            install_failed = True
+        elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
+            install_failed = True
+        elif 'ERROR' in full_output or 'FAILED' in full_output:
+            install_failed = True
+
+        if install_failed:
+            print(f"\n  [ERROR] Installation failed with return code {returncode}")
+            for line in out[-20:]:
+                print(f"    {line}", end='')
+            sys.exit(1)
+
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         if subprocess.run(['bash', '-c', verify_cmd], capture_output=True).returncode == 0:
              print(f"  [OK] Installation verified")
