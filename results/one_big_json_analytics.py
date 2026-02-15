@@ -260,40 +260,39 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     
     grouped: Dict[tuple, List[Dict]] = {}
     for w in workloads:
-        hourly_rate = get_hourly_rate(w["machine_data"])
-        time_sec = parse_time_value(w["test_data"])
-        
-        if hourly_rate is None or time_sec is None:
+        efficiency = get_economic_efficiency(w)
+        if efficiency is None:
             continue
             
-        cost_per_run = (time_sec / 3600.0) * hourly_rate
-        w["cost_per_run"] = round(cost_per_run, 8)
+        w["efficiency"] = efficiency
         
         key = (w["testcategory"], w["benchmark"], w["test_name"], w["os"], w["thread"])
         grouped.setdefault(key, []).append(w)
 
     for (tc, bm, tn, os_name, thread), entries in grouped.items():
-        # Sort by cost (lower is better rank)
-        sorted_entries = sorted(entries, key=lambda x: x["cost_per_run"])
+        # Sort by efficiency (higher is better rank)
+        sorted_entries = sorted(entries, key=lambda x: x["efficiency"], reverse=True)
         if not sorted_entries:
             continue
             
-        best_cost = sorted_entries[0]["cost_per_run"]
+        best_efficiency = sorted_entries[0]["efficiency"]
         ranking = []
         for i, ent in enumerate(sorted_entries):
-            rel_efficiency = round(best_cost / ent["cost_per_run"], 2) if ent["cost_per_run"] > 0 else 0.0
+            # relative_cost_efficiency: current_eff / best_eff
+            # Result is 1.0 for the best, and < 1.0 for others
+            rel_efficiency = round(ent["efficiency"] / best_efficiency, 2) if best_efficiency > 0 else 0.0
             
             ranking.append({
                 "rank": i + 1,
                 "machinename": ent["machinename"],
                 "cpu_name": ent["cpu_name"],
                 "cpu_isa": ent["cpu_isa"],
-                "cost_per_run": ent["cost_per_run"],
+                "efficiency_score": round(ent["efficiency"], 6),
                 "relative_cost_efficiency": rel_efficiency
             })
 
         result["workload"].setdefault(tc, {}).setdefault(bm, {}).setdefault(tn, {}).setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
-            "unit": "USD/run",
+            "unit": "Efficiency (Throughput/USD)",
             "ranking": ranking
         }
 
@@ -395,6 +394,23 @@ def is_arm64_baseline(machinename: str) -> bool:
     return any(p in name for p in ["m8g", "c4a", "a1.flex"])
 
 
+def get_economic_efficiency(w: Dict[str, Any]) -> Optional[float]:
+    """
+    Calculate Economic Efficiency: Throughput per Hourly Rate.
+    Higher is always better.
+    """
+    score, hib = get_performance_score(w["test_data"])
+    rate = get_hourly_rate(w["machine_data"])
+    
+    if score is None or rate is None or score <= 0 or rate <= 0:
+        return None
+        
+    # Convert to "Throughput" (higher is better)
+    throughput = score if hib else (1.0 / score)
+    
+    return throughput / rate
+
+
 def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Section 4: CSP instance comparison (Trend analysis/Arch crossover)
@@ -407,17 +423,16 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     workloads = extract_workloads(data)
     
     # Group by Workload -> CSP
-    # Note: Machine Name prefix mapping to CSP for context
     csp_map = {}
     for w in workloads:
         mname = w["machinename"].lower()
         if mname.startswith("aws"): csp_map[w["machinename"]] = "AWS"
         elif mname.startswith("gcp"): csp_map[w["machinename"]] = "GCP"
         elif mname.startswith("oci"): csp_map[w["machinename"]] = "OCI"
-        elif "m8" in mname or "m7" in mname: csp_map[w["machinename"]] = "AWS" # Fallback if prefix missing
+        elif "m8" in mname or "m7" in mname: csp_map[w["machinename"]] = "AWS"
         else: csp_map[w["machinename"]] = "Local/Other"
 
-    # Workload -> CSP -> Machine -> Thread -> CostScore
+    # Workload -> CSP -> Machine -> Thread -> Efficiency
     comparison_data: Dict[tuple, Dict[str, Dict[str, Dict[str, float]]]] = {}
 
     for w in workloads:
@@ -425,15 +440,12 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         csp = csp_map.get(w["machinename"], "Unknown")
         if csp == "Unknown": continue
         
-        hourly_rate = get_hourly_rate(w["machine_data"])
-        time_sec = parse_time_value(w["test_data"])
-        if hourly_rate is None or time_sec is None or time_sec == 0:
+        efficiency = get_economic_efficiency(w)
+        if efficiency is None:
             continue
             
-        cost_score = (time_sec / 3600.0) * hourly_rate
         th_label = str(w["thread"])
-        
-        comparison_data.setdefault(key, {}).setdefault(csp, {}).setdefault(w["machinename"], {})[th_label] = cost_score
+        comparison_data.setdefault(key, {}).setdefault(csp, {}).setdefault(w["machinename"], {})[th_label] = efficiency
 
     for key, csp_machines in comparison_data.items():
         tc, bm, tn = key
@@ -449,10 +461,10 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             if not baseline_machine:
                 continue
                 
-            baseline_costs = machines[baseline_machine]
+            baseline_effs = machines[baseline_machine]
             trends = {}
             
-            for mname, costs in machines.items():
+            for mname, effs in machines.items():
                 if mname == baseline_machine:
                     continue
                 
@@ -461,10 +473,11 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 label = f"{mname} ({arch})"
                 
                 scores = {}
-                for th, cost in costs.items():
-                    if th in baseline_costs:
-                        # Efficiency score: ref_cost / current_cost * 100
-                        scores[th] = round((baseline_costs[th] / cost) * 100, 2)
+                for th, eff in effs.items():
+                    if th in baseline_effs:
+                        # Relative Efficiency: (current_eff / baseline_eff) * 100
+                        # Result: > 100 means more efficient than Arm
+                        scores[th] = round((eff / baseline_effs[th]) * 100, 2)
                 
                 if not scores:
                     continue
@@ -474,12 +487,19 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 max_adv_th = max(scores, key=lambda k: scores[k])
                 
                 # Find crossover_point (where it dips below 100)
+                # Note: if it starts below 100, crossover is N/A or thread 1 depending on perspective.
+                # Here we stick to "when it crosses 100 boundary"
                 crossover = "N/A"
-                for th in sorted_th:
-                    if scores[th] < 100:
-                        crossover = f"thread {th}"
-                        break
-                
+                if len(sorted_th) > 1:
+                    for i in range(len(sorted_th) - 1):
+                        curr_th = sorted_th[i]
+                        next_th = sorted_th[i+1]
+                        # Check if it crosses 100 in either direction
+                        if (scores[curr_th] >= 100 and scores[next_th] < 100) or \
+                           (scores[curr_th] < 100 and scores[next_th] >= 100):
+                            crossover = f"between {curr_th} and {next_th}"
+                            break
+
                 # Scaling efficiency trend
                 trend_desc = "consistent"
                 if len(scores) > 1:
@@ -500,7 +520,6 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 }
 
             if trends:
-                # Add to result
                 result["workload"].setdefault(tc, {}).setdefault(bm, {})[tn] = {
                     "baseline": {
                         "machinename": baseline_machine,

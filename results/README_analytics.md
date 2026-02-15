@@ -65,19 +65,15 @@
 ---
 
 # 2. Cost comparison (コスト効率比較)
-**目的**: 同一 OS 環境下で、ワークロードを 1 回実行するのに必要なコストを比較し、経済性ランキングを作成します。
+**目的**: 同一 OS 環境下で、コストパフォーマンス（1ドルあたりの性能）を比較し、経済性ランキングを作成します。
 
 ## 基準データの設定
-### `cost_score` の計算式
-```
-cost_score = (time / 3600) * hourly_rate
-```
-- **time**: ベンチマーク実行時間（秒）。
-- **hourly_rate**: 入力 JSON の `hourly_rate` フィールド（USD/hour）。
-
-### 指標
-- **cost_per_run**: 1 回実行あたりのコスト（USD）。
-- **relative_cost_efficiency**: 最も安価な構成を 1.0 とした時の相対的な経済性スコア。
+- **スループット (T)**: 
+  - `get_performance_score` により算出された性能値を使用。
+  - 時間単位の場合は逆数（`1 / score`）、それ以外はそのままの値をスループットとします。
+- **コスト効率 (Efficiency)**: `T / hourly_rate` (1ドルあたりの処理量)
+- **相対コスト効率**: 各 OS・スレッド数における最高効率機を基準（1.0）とした比率（`relative_cost_efficiency`）を算出します。
+- **ランキング**: 各条件でコスト効率が高い順（降順）にランク付けします。
 
 ## Output JSON 構造
 ```json
@@ -91,15 +87,23 @@ cost_score = (time / 3600) * hourly_rate
             "<os>": {
               "thread": {
                 "<N>": {
-                  "unit": "USD/run",
+                  "unit": "Efficiency (Throughput/USD)",
                   "ranking": [
                     {
                       "rank": 1,
-                      "machinename": "<machinename>",
-                      "cpu_name": "<cpu_name>",
-                      "cpu_isa": "<cpu_isa>",
-                      "cost_per_run": "<cost_per_run>",
-                      "relative_cost_efficiency": "<relative_cost_efficiency>"
+                      "machinename": "gcp-c4a-standard-8-arm64",
+                      "cpu_name": "Neoverse-V2 (Google Axion)",
+                      "cpu_isa": "Armv9.0-A (SVE2-128)",
+                      "efficiency_score": 12500.5,
+                      "relative_cost_efficiency": 1.0
+                    },
+                    {
+                      "rank": 2,
+                      "machinename": "aws-m8g-2xlarge-arm64",
+                      "cpu_name": "Neoverse-V2 (Graviton4)",
+                      "cpu_isa": "Armv9.0-A (SVE2-128)",
+                      "efficiency_score": 11000.2,
+                      "relative_cost_efficiency": 0.88
                     }
                   ]
                 }
@@ -172,12 +176,14 @@ cost_score = (time / 3600) * hourly_rate
 **目的**: 同一 CSP 内で、アーキテクチャ間（x86 vs Arm）のコスト効率とスケーリング特性の推移（トレンド）を比較します。
 
 ## 基準データの設定
-- **基準点 (100)**: 各 CSP の Arm64 インスタンス（下記）を基準値 **100** とします。マシンの特定は部分一致で行います。
+- **基準点 (100)**: 各 CSP の Arm64 インスタンス（下記）のコスト効率を **100** とします。
   - **AWS**: `"m8g"`
   - **GCP**: `"c4a"`
   - **OCI**: `"A1.Flex"`
-- **比較指標**: 各マシンのコスト効率を `ref_cost / current_cost * 100` で算出します（高いほどコスト効率が良い）。
-- **トレンド分析**: スレッド数 `<N>` ごとのスコアを並べることで、アーキテクチャによる有利・不利の逆転（クロスオーバー）を可視化します。
+- **比較指標**: 各マシンのコスト効率（Performance/USD）を `(current_eff / ref_eff) * 100` で算出します。
+  - **100超**: Arm64 よりコスト効率が良い（x86優位）
+  - **100未満**: Arm64 よりコスト効率が悪い（Arm優位）
+- **トレンド分析**: スレッド数 `<N>` ごとのスコアを並べることで、有利・不利の逆転（クロスオーバー）を可視化します。
 
 ## Output JSON 構造
 ```json
