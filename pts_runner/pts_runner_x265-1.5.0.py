@@ -223,8 +223,8 @@ class X265Runner:
 
         # Determine thread execution mode
         if threads_arg is None:
-            # Scaling mode: 1 to vCPU
-            self.thread_list = list(range(1, self.vcpu_count + 1))
+            # Even-number scaling: [2, 4, 6, ..., nproc]
+            self.thread_list = list(range(2, self.vcpu_count + 1, 2))
         else:
             # Fixed mode: single thread count
             n = min(threads_arg, self.vcpu_count)
@@ -259,38 +259,15 @@ class X265Runner:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
     def ensure_7z_available(self):
-        """Ensure 7z is available for extracting input Y4M files."""
+        """Ensure 7z is available for extracting input Y4M files.
+        
+        7z (p7zip) should be pre-installed by scripts/setup_init.sh.
+        This method only verifies its presence.
+        """
         if shutil.which("7z"):
             return True
 
-        print("  [WARN] 7z command not found; installing p7zip-full")
-        if shutil.which("sudo") is None:
-            print("  [ERROR] sudo not found; cannot install p7zip-full automatically")
-            return False
-
-        install_cmds = [
-            "sudo apt-get -y update",
-            "sudo apt-get -y install p7zip-full",
-        ]
-        for cmd in install_cmds:
-            result = subprocess.run(
-                ['bash', '-c', cmd],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                print(f"  [ERROR] Command failed: {cmd}")
-                if result.stdout:
-                    print(result.stdout)
-                if result.stderr:
-                    print(result.stderr)
-                return False
-
-        if shutil.which("7z"):
-            print("  [OK] 7z installed successfully")
-            return True
-
-        print("  [ERROR] 7z still not available after installation")
+        print("  [ERROR] 7z command not found. Please run scripts/setup_init.sh first.")
         return False
 
     def get_os_name(self):

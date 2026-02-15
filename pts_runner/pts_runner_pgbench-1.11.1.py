@@ -205,7 +205,7 @@ class PgbenchRunner:
 
         # Thread list setup
         if threads_arg is None:
-            self.thread_list = list(range(1, self.vcpu_count + 1))
+            self.thread_list = list(range(2, self.vcpu_count + 1, 2))
         else:
             n = min(threads_arg, self.vcpu_count)
             self.thread_list = [n]

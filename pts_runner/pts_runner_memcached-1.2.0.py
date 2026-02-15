@@ -50,8 +50,8 @@ class MemcachedRunner:
         self.quick_mode = quick_mode
 
         if threads_arg is None:
-            # Scaling mode: 1 to vCPU
-            self.thread_list = list(range(1, self.vcpu_count + 1))
+            # Even-number scaling: [2, 4, 6, ..., nproc]
+            self.thread_list = list(range(2, self.vcpu_count + 1, 2))
         else:
             # Fixed mode: cap at vcpu_count
             n = min(threads_arg, self.vcpu_count)

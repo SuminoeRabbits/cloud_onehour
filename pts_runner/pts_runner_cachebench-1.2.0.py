@@ -48,7 +48,7 @@ class CachebenchRunner:
         # Thread configuration
         self.quick_mode = quick_mode
         if threads_arg is None:
-            self.thread_list = list(range(1, self.vcpu_count + 1))
+            self.thread_list = list(range(2, self.vcpu_count + 1, 2))
         else:
             n = min(threads_arg, self.vcpu_count)
             if n != threads_arg:
