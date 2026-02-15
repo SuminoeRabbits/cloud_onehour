@@ -72,8 +72,9 @@ import subprocess
 import sys
 import tarfile
 import shutil
+import re
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,8 +139,9 @@ def find_tarballs(workdir: Path) -> List[Path]:
 
 def find_csp_dirs(workdir: Path) -> List[Path]:
     csp_dirs = []
+    reserved_names = {"global", "tmp", "logs"}
     for entry in workdir.iterdir():
-        if not entry.is_dir():
+        if not entry.is_dir() or entry.name in reserved_names:
             continue
         if (entry / "results").is_dir():
             csp_dirs.append(entry)
@@ -171,13 +173,33 @@ def generate_one_big_json_if_missing(
     print(f"Generated missing JSON -> {output_json}")
 
 
-def is_valid_one_big_json(json_path: Path, machinename: str) -> bool:
+def get_script_major_version(script_path: Path) -> Optional[str]:
+    try:
+        content = script_path.read_text(encoding="utf-8")
+        # Look for SCRIPT_VERSION = "vX.Y.Z"
+        match = re.search(r'SCRIPT_VERSION\s*=\s*["\'](v\d+)\.\d+\.\d+["\']', content)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return None
+
+
+def is_valid_one_big_json(json_path: Path, machinename: str, target_major: Optional[str] = None) -> bool:
     try:
         with open(json_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (json.JSONDecodeError, OSError) as exc:
         print(f"Invalid JSON file {json_path}: {exc}", file=sys.stderr)
         return False
+
+    # Version check
+    if target_major:
+        file_version = data.get("generation_log", {}).get("version_info", "unknown")
+        match = re.match(r'(v\d+)\.\d+\.\d+', file_version)
+        if not match or match.group(1) != target_major:
+            print(f"Version mismatch in {json_path}: expected {target_major}, found {file_version}", file=sys.stderr)
+            return False
 
     if machinename not in data:
         print(
@@ -301,6 +323,7 @@ def main() -> int:
     make_one_big_json = results_dir / "make_one_big_json.py"
     analytics_script = results_dir / "one_big_json_analytics.py"
     postmortem_script = results_dir / "pts_runner_postmortem.py"
+    target_major = get_script_major_version(make_one_big_json)
 
     step_flags = [args.extract, args.merge_machine, args.merge_global, args.analyze]
     run_all = not any(step_flags)
@@ -334,7 +357,11 @@ def main() -> int:
             results_path = csp_dir / "results"
             if results_path.is_dir():
                 try:
-                    generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
+                    # check and regenerate if invalid or old version
+                    output_json = results_path / f"one_big_json_{csp_dir.name}.json"
+                    if not output_json.exists() or not is_valid_one_big_json(output_json, csp_dir.name, target_major):
+                        generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
+                    
                     postmortem_output = results_path / f"postmortem_{csp_dir.name}.json"
                     run_postmortem(postmortem_script, results_path, postmortem_output, results_path)
                     print(f"Generated postmortem -> {postmortem_output}")
@@ -359,6 +386,14 @@ def main() -> int:
             output_json = results_path / f"all_results_{csp_dir.name}.json"
             input_jsons = sorted(results_path.glob("one_big_json_*.json"))
             try:
+                # Ensure each input JSON is valid and modern before copying/merging
+                for json_file in input_jsons:
+                    if not is_valid_one_big_json(json_file, csp_dir.name, target_major):
+                        generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
+                
+                # Refresh input list after potential regeneration
+                input_jsons = sorted(results_path.glob("one_big_json_*.json"))
+
                 if len(input_jsons) == 1:
                     shutil.copy2(input_jsons[0], output_json)
                     print(f"Copied single CSP result -> {output_json}")
@@ -374,9 +409,18 @@ def main() -> int:
     global_results = global_dir / "global_all_results.json"
     if run_all or args.merge_global:
         global_dir.mkdir(parents=True, exist_ok=True)
-        global_inputs = [
-            (csp_dir / "results" / f"all_results_{csp_dir.name}.json") for csp_dir in csp_dirs
-        ]
+        global_inputs = []
+        for csp_dir in csp_dirs:
+            p = csp_dir / "results" / f"all_results_{csp_dir.name}.json"
+            if p.exists():
+                global_inputs.append(p)
+            else:
+                print(f"Warning: Missing results for {csp_dir.name} -> {p}", file=sys.stderr)
+
+        if not global_inputs:
+            print("Error: No individual results found to merge into global.", file=sys.stderr)
+            return 1
+
         try:
             merge_jsons(make_one_big_json, global_inputs, global_results, global_dir)
             print(f"Merged global results -> {global_results}")
@@ -388,10 +432,18 @@ def main() -> int:
         try:
             perf_output = global_dir / "global_performance_analysis.json"
             cost_output = global_dir / "global_cost_analysis.json"
+            th_output = global_dir / "global_thread_scaling_analysis.json"
+            csp_output = global_dir / "global_csp_comparison_analysis.json"
+            
             run_analytics(analytics_script, global_results, perf_output, "--perf", global_dir)
             run_analytics(analytics_script, global_results, cost_output, "--cost", global_dir)
+            run_analytics(analytics_script, global_results, th_output, "--th", global_dir)
+            run_analytics(analytics_script, global_results, csp_output, "--csp", global_dir)
+            
             print(f"Generated analysis -> {perf_output}")
             print(f"Generated analysis -> {cost_output}")
+            print(f"Generated analysis -> {th_output}")
+            print(f"Generated analysis -> {csp_output}")
         except Exception as exc:
             print(f"Failed to run analytics: {exc}", file=sys.stderr)
             return 1

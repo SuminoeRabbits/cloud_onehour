@@ -153,11 +153,20 @@ def get_performance_score(test_data: Dict[str, Any]) -> Tuple[Any, bool]:
     """
     Get performance score. Preference: values > time.
     Returns (score, higher_is_better).
+    Per README_analytics.md, if unit is time-based (Seconds, Microseconds), lower is better.
     """
     values = test_data.get("values")
+    unit = str(test_data.get("unit", "")).lower()
+    
+    # If unit is Microseconds or Seconds, lower is better.
+    is_time_unit = "microsecond" in unit or "second" in unit
+    
     if values not in (None, "N/A"):
         try:
-            return float(values), True
+            score = float(values)
+            # Default for values is higher-is-better, UNLESS it's a time unit
+            hib = not is_time_unit
+            return score, hib
         except (ValueError, TypeError):
             pass
 
@@ -302,13 +311,14 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
     workloads = extract_workloads(data)
     
-    # Target structure: Workload -> Machine -> Thread -> Score
+    # Target structure: Workload -> Machine -> Thread -> Score/HIB
     curves_data: Dict[tuple, Dict[str, Dict[str, float]]] = {}
+    hib_map: Dict[tuple, bool] = {}
     unit_map: Dict[tuple, str] = {}
 
     for w in workloads:
         key = (w["testcategory"], w["benchmark"], w["test_name"])
-        score, _ = get_performance_score(w["test_data"])
+        score, hib = get_performance_score(w["test_data"])
         if score is None:
             continue
             
@@ -319,10 +329,12 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             
         machine_label = f"{w['machinename']} ({w['cpu_isa']})"
         curves_data.setdefault(key, {}).setdefault(machine_label, {})[str(th_num)] = score
+        hib_map[key] = hib
         unit_map[key] = w["test_data"].get("unit", "N/A")
 
     for key, machine_curves in curves_data.items():
         tc, bm, tn = key
+        hib = hib_map[key]
         final_curves = {}
         
         for m_label, th_scores in machine_curves.items():
@@ -339,7 +351,16 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             sorted_th = sorted(th_scores.keys(), key=lambda x: int(x))
             normalized = {}
             for t in sorted_th:
-                normalized[t] = round((th_scores[t] / max_val) * 100, 2)
+                val = th_scores[t]
+                if val == 0:
+                    normalized[t] = 0.0
+                    continue
+                # If higher is better: (current / max) * 100
+                # If lower is better (time): (max / current) * 100
+                if hib:
+                    normalized[t] = round((val / max_val) * 100, 2)
+                else:
+                    normalized[t] = round((max_val / val) * 100, 2)
             
             final_curves[m_label] = normalized
 
