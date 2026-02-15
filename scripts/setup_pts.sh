@@ -295,6 +295,8 @@ echo "=== Step 3: Configuring batch mode ==="
 echo "Setting up batch-mode configuration for automated testing..."
 
 # Run batch-setup with automated responses
+# Force PTS to use user home directory instead of system-wide /var/lib/ (for root user)
+export PTS_USER_PATH="$HOME/.phoronix-test-suite"
 # Y - Save test results when in batch mode
 # N - Open the web browser automatically
 # N - Auto upload to OpenBenchmarking.org
