@@ -407,6 +407,20 @@
             "cpu_cost_hour[730h-mo]": 0.352,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0087
+          },
+          {
+            "enable": false,
+            "testloads": false,
+            "type": "VM.Standard.A4.Flex",
+            "arch": "arm64",
+            "hostname": "oci-a4-flex-arm64-vcpu-16",
+            "ocpus": 8,
+            "vcpus": 16,
+            "memory_gb": 64,
+            "name": "oci-a4-flex-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.2832,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0087
           }
         ]
       }
