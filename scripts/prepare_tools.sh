@@ -1,6 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 
+# Fail-safe for RHEL-based systems (RedHat, Rocky, Oracle, Fedora, Alma)
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    # ID can be "rocky", "rhel", "fedora", "ol" (Oracle Linux), "almalinux", etc.
+    if [[ "$ID" =~ ^(fedora|rhel|rocky|ol|almalinux)$ ]]; then
+        echo "================================================================================"
+        echo "[Fail-safe] RHEL-based system detected: $NAME $VERSION_ID"
+        echo "Redirecting to scripts_rhel9/prepare_tools.sh..."
+        echo "================================================================================"
+        SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        RHEL9_SCRIPT="$(dirname "$SCRIPT_DIR_EARLY")/scripts_rhel9/prepare_tools.sh"
+        if [ -f "$RHEL9_SCRIPT" ]; then
+            exec "$RHEL9_SCRIPT" "$@"
+        else
+            echo "[ERROR] RHEL9-compatible script not found at $RHEL9_SCRIPT"
+            exit 1
+        fi
+    fi
+fi
+
 # Always log output for postmortem (collected in /tmp/reports.tar.gz)
 LOG_FILE="$HOME/cloud_onehour/results/prepare_tools.log"
 mkdir -p "$(dirname "$LOG_FILE")"
