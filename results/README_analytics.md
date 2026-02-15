@@ -1,212 +1,251 @@
-# about README_analytics
-`README_results.md`とそこから生成された`one_big_json.json`のデータ解析法。
+# README_analytics.md
+`README_results.md` から生成された `one_big_json.json` を用いたデータ解析の仕様、および解析スクリプト `one_big_json_analytics.py` の実装要件を定義します。
+
+---
 
 # TOC
-
-- [about README\_analytics](#about-readme_analytics)
+- [README\_analytics.md](#readme_analyticsmd)
 - [TOC](#toc)
-- [Performance comparison](#performance-comparison)
-  - [set reference point](#set-reference-point)
-  - [output metrics](#output-metrics)
-  - [exception handling](#exception-handling)
-- [Cost comparison](#cost-comparison)
-  - [set reference point](#set-reference-point-1)
-    - [cost\_scoreの計算式](#cost_scoreの計算式)
-  - [output metrics](#output-metrics-1)
-  - [exception handling](#exception-handling-1)
-- [Thread scaling comparison](#thread-scaling-comparison)
-  - [set reference point](#set-reference-point-2)
-  - [output metrics](#output-metrics-2)
-  - [exception handling](#exception-handling-2)
-- [CSP instance comparison](#csp-instance-comparison)
-  - [set reference point](#set-reference-point-3)
-  - [output metrics](#output-metrics-3)
-  - [exception handling](#exception-handling-3)
-- [one\_big\_json\_analytics.py specification](#one_big_json_analyticspy-specification)
-  - [input data format](#input-data-format)
-  - [requirement](#requirement)
-  - [script version info](#script-version-info)
-  - [argument parameters](#argument-parameters)
+- [1. Performance comparison (絶対性能比較)](#1-performance-comparison-絶対性能比較)
+- [2. Cost comparison (コスト効率比較)](#2-cost-comparison-コスト効率比較)
+- [3. Thread scaling comparison (スレッドスケーリング特性比較)](#3-thread-scaling-comparison-スレッドスケーリング特性比較)
+- [4. CSP instance comparison (CSPインスタンス比較)](#4-csp-instance-comparison-cspインスタンス比較)
+- [5. one\_big\_json\_analytics.py 仕様](#5-one_big_json_analyticspy-仕様)
 
+---
 
-# Performance comparison
-絶対性能比較の目的は、同一のWorkloadを異なる<machinename>で実施した際に、どれだけ短い時間で完了させることができるか、もしくは特定の性能仕様でどれだけ高い数値を出せるか、を比較することである。
-- "test_name"に"values"値が存在する場合はその数字を性能値とする。この場合は高いほど良い。
-- "test_name"に"values"値が存在しない場合は"time"を性能値とする。この場合は低いほど良い。
+# 1. Performance comparison (絶対性能比較)
+**目的**: 同一 OS 環境下で、プロセッサ世代（CPU 名/ISA）ごとの絶対的な処理能力を比較し、順位付け（リーダーボード）を行います。
 
-## set reference point
-各workload毎の`<values>`値を`<benchmark_score>`とする。経過時間[s]を`<time>`とする。`<time>`が不明もしくは空白時は"unknown"とする。
+## 基準データの設定
+- **性能値の選択**: 
+  - `test_name` に `values` が存在する場合：その数値を性能値（高スコアほど良好）とします。
+  - `values` が存在しない場合：`time`（秒）を性能値（低スコアほど良好）とします。
+- **相対性能**: 各 OS・スレッド数における最速機を基準（1.0）とした比率（`relative_performance`）を算出します。
 
-## output metrics
+## Output JSON 構造
+```json
 {
-    description:"Performance comparison by machine_name",
-    workload:{
-        <testcategory>:
-        {
-            <benchmark>:
-            {
-                <test_name>:
-                {
-                        "thread": "<N>": 
-                        {                        
-                            <machinename>:{
-                                <os>:{
-                                    "time_score":"<time_score>",
-                                    "benchmark_score":"<benchmark_score>",
-                                    "unit":"<unit>"
-                                }
-                                ....
-                            }
-                            ....
-                        }
-                    .....
-                }
-                .....
-            }
-            .....
-        }
-        .....
-    }
-}
-
-## exception handling
-例外がある場合はここに記す。
-
-# Cost comparison
-コスト比較の目的は同一のWorkloadを異なる`<machinename>`で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。
-
-## set reference point
-各workload毎の`<values>`値を`<benchmark_score>`とする。上記で定義される計算機利用料を`<cost_score>`とする。`<cost_score>`が不明な場合は"unknown"とする。
-
-### cost_scoreの計算式
-`<cost_score>` = `<time>` × `<hourly_rate>`
-- `<time>`: ベンチマーク実行時間（秒）を時間に換算（`<time>` / 3600）
-- `<hourly_rate>`: 入力JSONの各エントリに含まれる`hourly_rate`フィールドの値（USD/hour）
-- `hourly_rate`フィールドが存在しない、または0以下の場合は`<cost_score>`を"unknown"とする
-
-## output metrics
-{
-    description:"Cost comparison by machine_name",
-    workload:{
-        <testcategory>:
-        {
-            <benchmark>:
-            {
-                <test_name>:
-                {
-                    <os>:
+  "description": "Performance comparison leaderboard by OS",
+  "workload": {
+    "<testcategory>": {
+      "<benchmark>": {
+        "<test_name>": {
+          "os": {
+            "<os>": {
+              "thread": {
+                "<N>": {
+                  "unit": "<unit>",
+                  "leaderboard": [
                     {
-                        "thread": "<N>": 
-                        {                        
-                            <machinename>:{
-                                "time_score":"<time_score>",
-                                "cost_score":"<cost_score>",
-                                "unit":"<unit>"
-                            }
-                            ....
-                        }
-                        ....
+                      "rank": 1,
+                      "machinename": "<machinename>",
+                      "cpu_name": "<cpu_name>",
+                      "cpu_isa": "<cpu_isa>",
+                      "score": "<score>",
+                      "relative_performance": "<relative_performance>"
                     }
-                    .....
+                  ]
                 }
-                .....
+              }
             }
-            .....
+          }
         }
-        .....
+      }
     }
+  }
 }
+```
 
-## exception handling
-例外がある場合はここに記す。
+## 例外処理
+- 該当する OS / スレッド数 `<N>` のデータが存在しないエントリは出力に含めません。
 
-# Thread scaling comparison
-スレッドスケーリング比較の目的は、同一のWorkloadを同一の`<machinename>`で利用するスレッド数`<N>`を変化させながら実施した際に、その`<machinename>`におけるスレッドスケーリングの特徴を知る事である。
+---
 
-## set reference point
-各workload毎の`<values>`値を`<benchmark_score>`とする。スレッド数`<N>`が1通りしか存在しない場合は記載しない。
-性能値は同一`<machinename>`、同一`<test_name>`でスレッド数`<N>`が最大値時の実行時間を基準値`100`とする。
+# 2. Cost comparison (コスト効率比較)
+**目的**: 同一 OS 環境下で、ワークロードを 1 回実行するのに必要なコストを比較し、経済性ランキングを作成します。
 
-## output metrics
+## 基準データの設定
+### `cost_score` の計算式
+```
+cost_score = (time / 3600) * hourly_rate
+```
+- **time**: ベンチマーク実行時間（秒）。
+- **hourly_rate**: 入力 JSON の `hourly_rate` フィールド（USD/hour）。
+
+### 指標
+- **cost_per_run**: 1 回実行あたりのコスト（USD）。
+- **relative_cost_efficiency**: 最も安価な構成を 1.0 とした時の相対的な経済性スコア。
+
+## Output JSON 構造
+```json
 {
-    description:"Thread scaling comparison",
-    header:{
-        "machinename":<machinename>,
-        "os":<os>
-    },
-    workload:{
-        <testcategory>,
-        <benchmark>,
-        <test_name>:{
-            "unit":"<unit>"{
-                "<N>" : "<benchmark_score>"
-                "<N>" : "<benchmark_score>"
-                ....  : ....
+  "description": "Cost efficiency ranking by OS",
+  "workload": {
+    "<testcategory>": {
+      "<benchmark>": {
+        "<test_name>": {
+          "os": {
+            "<os>": {
+              "thread": {
+                "<N>": {
+                  "unit": "USD/run",
+                  "ranking": [
+                    {
+                      "rank": 1,
+                      "machinename": "<machinename>",
+                      "cpu_name": "<cpu_name>",
+                      "cpu_isa": "<cpu_isa>",
+                      "cost_per_run": "<cost_per_run>",
+                      "relative_cost_efficiency": "<relative_cost_efficiency>"
+                    }
+                  ]
+                }
+              }
             }
+          }
         }
-        .....
+      }
     }
+  }
 }
+```
 
-## exception handling
-まず最初に基準値を生成し、その後にworkloadの生成を行う。
-    - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
+## 例外処理
+- `hourly_rate` が `"unknown"` または 0 以下のマシンは、ランキングから除外します。
 
-# CSP instance comparison
-CSPインスタンス比較の目的は同一のCSPで同一のWorkloadを異なる`<machinename>`（インスタンス）で実施した際に、Workloadを完了させるのに必要な計算機利用料（ベンチマーク時間ｘ時間当たり利用料）を比較することである。各workload毎の値を`<benchmark_score>`とする。計算機利用料の算出は[Cost comparison](#cost-comparison)を参照する。
+---
 
-## set reference point
-性能値はそれぞれのCSPが保有しているarm64インスタンスを基準値`100`とする。arm64インスタンスとは`<machinename>`に次の文字列を**部分一致**で含んでいるものとする。
-- AWS : "m8g" （例: m8g.xlarge, m8g.2xlarge）
-- GCP : "c4a" （例: c4a-standard-8, c4a-highcpu-16）
-- OCI : "A1.Flex" （例: VM.Standard.A1.Flex）
+# 3. Thread scaling comparison (スレッドスケーリング特性比較)
+**目的**: 同一の Workload において、スレッド数増加に伴う性能向上率（スケーリング耐性）がアーキテクチャやマシンによってどのように異なるかを比較・可視化します。
 
-## output metrics
+## 基準データの設定
+- **正規化**: 各マシンの最大スレッド実行時（通常は `nproc`）の `values` 値を基準（**100**）とします。
+- **スケーリングスコア**: 基準値（100）に対する各スレッド数 `<N>` での相対値を算出します。
+  - **計算**: `(各スレッド数の values / 最大スレッド数の values) * 100`（※高いほど性能が良い指標の場合）
+  - 例：8スレッドで100の時、1スレッドのスコアが12.5なら理想的な線形スケール。25ならスケーリング効率が悪い（並列化の恩恵が少ない）ことを示します。
+- **制約**: スレッド数 `<N>` が 1 種類しか存在しない Workload は解析対象外とします。
+
+## Output JSON 構造
+```json
 {
-    description:"CSP instance comparison",
-    header:{
-        <machinename>,<os>,<csp>
-    },
-    workload:{
-        <testcategory>,<benchmark>,
-        <test_name>:"<benchmark_score>"
-        .....
+  "description": "Thread scaling comparison by workload",
+  "workload": {
+    "<testcategory>": {
+      "<benchmark>": {
+        "<test_name>": {
+          "unit": "<unit>",
+          "curves": {
+            "<machinename_1> (<arch>)": {
+              "1": 15.5,
+              "2": 31.0,
+              "4": 62.1,
+              "8": 100.0
+            },
+            "<machinename_2> (<arch>)": {
+              "1": 25.0,
+              "2": 48.2,
+              "4": 82.5,
+              "8": 100.0
+            }
+          },
+          "insight": {
+            "scaling_efficiency": "Higher on <machinename_1>",
+            "saturation_point": "Observed on <machinename_2> above 4 threads"
+          }
+        }
+      }
     }
+  }
 }
+```
 
-## exception handling
-まず最初に基準値を生成し、その後にworkloadの生成を行う。
-    - 基準値が生成できない場合は、その原因をErrorとして出力し生成を中断する。
-    - 基準値には存在するが他の<machinename>で存在しない項目が出てきた場合、そのworkloadには`"unknown"`と記載し、ErrorにはせずWarningを出力し次に進む。
-    - 他の<machinename>で存在し基準値に存在しない項目が出てきた場合、Warningを出力し次に進む。
-    - 基準値または比較対象の性能値が`0`の場合、除算エラーを避けるため`"unknown"`と記載しWarningを出力し次に進む。
-    - Warningの際は入力JSONファイルの比較部分の行数を明記する。
+## 例外処理
+- 基準となる最大スレッド数の性能値が取得できない場合、そのマシンの解析はスキップし Warning を出力します。
+- 全てのマシンでデータが不十分な Workload 自体は出力に含めません。
 
-# one_big_json_analytics.py specification
-ここでは、それぞれのOutput metricsをSTDOUTに生成するPythonスクリプト`one_big_json_analytics.py`を実装する際の仕様について記す。
+---
 
-## input data format
-入力データ`one_big_json.json`のフォーマットは[README_results.md](README_results.md)を参照。
+# 4. CSP instance comparison (CSPインスタンス比較)
+**目的**: 同一 CSP 内で、アーキテクチャ間（x86 vs Arm）のコスト効率とスケーリング特性の推移（トレンド）を比較します。
 
-## requirement
-Python3.10で動作すること。`one_big_json_analytics.py`自分自身と入力ファイルである`one_big_json.json`に対してSyntax Errorを検出する機能を有すること。すべてのオプションが検証されていること。
+## 基準データの設定
+- **基準点 (100)**: 各 CSP の Arm64 インスタンス（下記）を基準値 **100** とします。マシンの特定は部分一致で行います。
+  - **AWS**: `"m8g"`
+  - **GCP**: `"c4a"`
+  - **OCI**: `"A1.Flex"`
+- **比較指標**: 各マシンのコスト効率を `ref_cost / current_cost * 100` で算出します（高いほどコスト効率が良い）。
+- **トレンド分析**: スレッド数 `<N>` ごとのスコアを並べることで、アーキテクチャによる有利・不利の逆転（クロスオーバー）を可視化します。
 
-## script version info
-スクリプト前段コメント欄にこのスクリプトの生成時刻を明記し、それを`version info`とする。生成されるJSONファイルの先頭に対しても、下記の生成データログを入れる。`version info`のフォーマットとしては`v<major>.<minor>.<patch>-g<git-hash>`とする。
-
+## Output JSON 構造
+```json
 {
-    "generation log":{
-        "version info": "<version>"
-        "date": "<yyyymmdd-hhmmss>"
+  "description": "CSP instance comparison (Trend Analysis)",
+  "workload": {
+    "<testcategory>": {
+      "<benchmark>": {
+        "<test_name>": {
+          "baseline": {
+            "machinename": "<machinename_arm>",
+            "arch": "arm64",
+            "os": "<os>"
+          },
+          "trends": {
+            "<machinename_x86> (x86_64)": {
+              "scores": {
+                "1": 115.2,
+                "2": 105.4,
+                "4": 92.1,
+                "8": 85.3
+              },
+              "insight": {
+                "max_advantage": {"thread": "1", "score": 115.2},
+                "crossover_point": "thread 4",
+                "scaling_efficiency": "declining_relative_to_arm"
+              }
+            }
+          }
+        }
+      }
     }
+  }
 }
+```
 
-## argument parameters
-オプションは下記の通りとする。  
-- `--input`(省略可能) :　参照すべき`one_big_json.json`の位置もしくはファイル名を指定する。省略された場合は`${PWD}one_big_json.json`を参照する。
-- `--perf`（省略可能）：Performance comparisonのみを出力する。省略された場合は`--all`が自動選択される。
-- `--cost`（省略可能）：Cost comparisonのみを出力する。省略された場合は`--all`が自動選択される。
-- `--th`（省略可能）：Thread scaling comparisonのみを出力する。省略された場合は`--all`が自動選択される。
-- `--csp`（省略可能）：CSP instance comparisonのみを出力する。これ以外のオプションと組み合わせることが可能である。省略された場合は`--all`が自動選択される。
-- `--all`（省略可能）：省略された場合はすべてのOutput Metrics出力を選択する。
+## 例外処理
+- 基準値（Arm インスタンス）が生成できない場合は、解析を中断し Error を出力します。
+- 基準値には存在するが、比較対象に存在しない項目がある場合は `"unknown"` とし、Warning を出力します。
+- 基準値または比較対象の性能値が `0` の場合、除算エラーを避けるため `"unknown"` と記載し Warning を出力します。
+- 処理継続が可能な警告時は、入力 JSON の該当行数を明記します。
 
+---
+
+# 5. one_big_json_analytics.py 仕様
+
+## 実装要件
+- **言語**: Python 3.10 以上。
+- **堅牢性**: 入力された `one_big_json.json` の構文エラーを検出し、適切なエラーメッセージを表示すること。
+
+## バージョン管理
+JSON 出力の先頭に `generation log` を含めます。
+- **version info**: `v<major>.<minor>.<patch>-g<git-hash>` 形式。
+```json
+{
+  "generation log": {
+    "version info": "v1.2.0-gabc123",
+    "date": "20260216-123456"
+  }
+}
+```
+
+## 引数パラメータ
+| オプション | 必須/任意 | 説明 |
+| :--- | :--- | :--- |
+| `--input` | 任意 | 入力ファイルのパス。デフォルトは `${PWD}/one_big_json.json` |
+| `--perf` | 任意 | Performance comparison のみ出力（指定なき場合のデフォルト） |
+| `--cost` | 任意 | Cost comparison のみ出力 |
+| `--th` | 任意 | Thread scaling comparison のみ出力 |
+| `--csp` | 任意 | CSP instance comparison のみ出力 |
+| `--all` | 任意 | すべての結果を出力 |
+| `--output` | 任意 | 出力先ファイル名。デフォルトは `${PWD}/one_big_json_analytics_<type>.json` |
+| `--help` | 任意 | ヘルプメッセージを表示 |

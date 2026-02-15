@@ -3,14 +3,14 @@
 """
 one_big_json_analytics.py
 
-Version: v1.2.0
-Generated: 2026-02-05
+Version: v1.3.0
+Generated: 2026-02-16
 
-This script analyzes one_big_json.json and generates four types of comparisons:
-1. Performance comparison - Absolute performance across different machines
-2. Cost comparison - Cost efficiency across different machines
-3. Thread scaling comparison - Thread scaling characteristics within same machine
-4. CSP instance comparison - Cost efficiency within same CSP
+This script analyzes one_big_json.json and generates refined comparisons:
+1. Performance comparison - OS-separated leaderboard (Processor-gen aware)
+2. Cost comparison - OS-separated economic ranking (Processor-gen aware)
+3. Thread scaling comparison - Workload-centric scaling curves across machines
+4. CSP instance comparison - Trend analysis (Arch crossover/scaling efficiency)
 
 See README_analytics.md for detailed specification.
 """
@@ -20,19 +20,15 @@ import sys
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 import subprocess
 
 # Script version
-VERSION = "v1.2.0"
+VERSION = "v1.3.0"
 
 
-class ThreadScalingError(RuntimeError):
-    """Raised when thread scaling baselines cannot be established."""
-
-
-class CSPComparisonError(RuntimeError):
-    """Raised when CSP comparison cannot establish reference baselines."""
+class AnalyticsError(RuntimeError):
+    """Base class for analytics errors."""
 
 
 def get_version_info() -> str:
@@ -139,6 +135,8 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                         for test_name, test_data in test_name_data.items():
                             workloads.append({
                                 "machinename": machinename,
+                                "cpu_name": machine_data.get("cpu_name", "N/A"),
+                                "cpu_isa": machine_data.get("cpu_isa", "N/A"),
                                 "os": os_name,
                                 "testcategory": testcategory,
                                 "benchmark": benchmark,
@@ -151,117 +149,90 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return workloads
 
 
-def get_benchmark_score(test_data: Dict[str, Any]) -> Tuple[Any, Any, bool, str]:
+def get_performance_score(test_data: Dict[str, Any]) -> Tuple[Any, bool]:
     """
-    Get benchmark score, time, and unit from test data.
-    Returns (benchmark_score, time_score, has_values, unit)
-    - Prefer "values" only when raw samples exist
-    - Otherwise use valid execution time
-    - unit is extracted from test_data["unit"] field
+    Get performance score. Preference: values > time.
+    Returns (score, higher_is_better).
     """
     values = test_data.get("values")
-    unit = test_data.get("unit", "N/A")
-    if unit in (None, ""):
-        unit = "N/A"
-
-    time_value = parse_time_value(test_data)
-    time_score: Any = time_value if time_value is not None else "unknown"
-
     if values not in (None, "N/A"):
         try:
-            benchmark_score = float(values) if not isinstance(values, (int, float)) else values
-            return (benchmark_score, time_score, True, unit)
+            return float(values), True
         except (ValueError, TypeError):
             pass
 
-    if time_value is not None:
-        return (time_value, time_value, False, unit)
+    time_val = parse_time_value(test_data)
+    if time_val is not None:
+        return time_val, False
 
-    return ("unknown", "unknown", False, unit)
+    return None, False
 
 
 def get_hourly_rate(machine_data: Dict[str, Any]) -> Optional[float]:
     """Return positive hourly_rate defined in input data."""
-    hourly_rate = machine_data.get("hourly_rate")
+    # Look for diverse keys if necessary, but spec says "cost_hour[730h-mo]" or similar
+    # The current one_big_json.json mapping uses cost_hour[730h-mo]
+    hourly_rate = machine_data.get("cost_hour[730h-mo]")
     if hourly_rate in (None, "N/A"):
         return None
 
     try:
-        rate = float(hourly_rate) if not isinstance(hourly_rate, (int, float)) else float(hourly_rate)
+        rate = float(hourly_rate)
+        return rate if rate > 0 else None
     except (ValueError, TypeError):
         return None
-
-    return rate if rate > 0 else None
 
 
 def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generate Performance comparison metrics.
-    Compares benchmark scores across different machines for the same workload.
-
-    Output structure:
-    {
-        description: "Performance comparison by machine_name",
-        workload: {
-            <testcategory>: {
-                <benchmark>: {
-                    <test_name>: {
-                        "thread": {
-                            "<N>": {
-                                <machinename>: {
-                                    <os>: {
-                                        "time_score": <time_score>,
-                                        "benchmark_score": <benchmark_score>,
-                                        "unit": <unit>
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    Section 1: Performance comparison (OS-separated leaderboard)
     """
     result = {
-        "description": "Performance comparison by machine_name",
+        "description": "Performance comparison leaderboard by OS",
         "workload": {}
     }
 
     workloads = extract_workloads(data)
 
-    # Group by testcategory -> benchmark -> test_name -> os -> machinename -> thread
+    # Grouping
+    grouped: Dict[tuple, List[Dict]] = {}
     for w in workloads:
-        testcategory = w["testcategory"]
-        benchmark = w["benchmark"]
-        test_name = w["test_name"]
-        os_name = w["os"]
-        machinename = w["machinename"]
-        thread = w["thread"]
-        test_data = w["test_data"]
+        key = (w["testcategory"], w["benchmark"], w["test_name"], w["os"], w["thread"])
+        score, hib = get_performance_score(w["test_data"])
+        if score is None:
+            continue
+        
+        w["score_internal"] = score
+        w["higher_is_better"] = hib
+        grouped.setdefault(key, []).append(w)
 
-        benchmark_score, time_score, _, unit = get_benchmark_score(test_data)
+    for (tc, bm, tn, os_name, thread), entries in grouped.items():
+        hib = entries[0]["higher_is_better"]
+        # Sort by score
+        sorted_entries = sorted(entries, key=lambda x: x["score_internal"], reverse=hib)
+        
+        if not sorted_entries:
+            continue
 
-        # Build nested structure
-        if testcategory not in result["workload"]:
-            result["workload"][testcategory] = {}
-        if benchmark not in result["workload"][testcategory]:
-            result["workload"][testcategory][benchmark] = {}
-        workload_entry = result["workload"][testcategory][benchmark]
-        if test_name not in workload_entry:
-            workload_entry[test_name] = {"thread": {}}
+        best_score = sorted_entries[0]["score_internal"]
+        leaderboard = []
+        for i, ent in enumerate(sorted_entries):
+            score = ent["score_internal"]
+            rel_perf = round(best_score / score, 2) if not hib else round(score / best_score, 2)
+            
+            leaderboard.append({
+                "rank": i + 1,
+                "machinename": ent["machinename"],
+                "cpu_name": ent["cpu_name"],
+                "cpu_isa": ent["cpu_isa"],
+                "score": score,
+                "relative_performance": rel_perf
+            })
 
-        thread_map = workload_entry[test_name]["thread"]
-        if thread not in thread_map:
-            thread_map[thread] = {}
-
-        if machinename not in thread_map[thread]:
-            thread_map[thread][machinename] = {}
-
-        thread_map[thread][machinename][os_name] = {
-            "time_score": time_score,
-            "benchmark_score": benchmark_score,
-            "unit": unit
+        # Nesting
+        result["workload"].setdefault(tc, {}).setdefault(bm, {}).setdefault(tn, {}).setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
+            "unit": ent["test_data"].get("unit", "N/A"),
+            "leaderboard": leaderboard
         }
 
     return result
@@ -269,350 +240,256 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generate Cost comparison metrics.
-    cost_score = (time / 3600) * hourly_rate
-
-    Output structure:
-    {
-        description: "Cost comparison by machine_name",
-        workload: {
-            <testcategory>: {
-                <benchmark>: {
-                    <test_name>: {
-                        <os>: {
-                            "thread": {
-                                "<N>": {
-                                    <machinename>: {
-                                        "time_score": <time_score>,
-                                        "cost_score": <cost_score>,
-                                        "unit": <unit>
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    Section 2: Cost comparison (OS-separated economic ranking)
     """
     result = {
-        "description": "Cost comparison by machine_name",
+        "description": "Cost efficiency ranking by OS",
         "workload": {}
     }
 
     workloads = extract_workloads(data)
-
+    
+    grouped: Dict[tuple, List[Dict]] = {}
     for w in workloads:
-        testcategory = w["testcategory"]
-        benchmark = w["benchmark"]
-        test_name = w["test_name"]
-        os_name = w["os"]
-        machinename = w["machinename"]
-        thread = w["thread"]
-        test_data = w["test_data"]
-        machine_data = w["machine_data"]
+        hourly_rate = get_hourly_rate(w["machine_data"])
+        time_sec = parse_time_value(w["test_data"])
+        
+        if hourly_rate is None or time_sec is None:
+            continue
+            
+        cost_per_run = (time_sec / 3600.0) * hourly_rate
+        w["cost_per_run"] = round(cost_per_run, 8)
+        
+        key = (w["testcategory"], w["benchmark"], w["test_name"], w["os"], w["thread"])
+        grouped.setdefault(key, []).append(w)
 
-        benchmark_score, time_score, _, unit = get_benchmark_score(test_data)
+    for (tc, bm, tn, os_name, thread), entries in grouped.items():
+        # Sort by cost (lower is better rank)
+        sorted_entries = sorted(entries, key=lambda x: x["cost_per_run"])
+        if not sorted_entries:
+            continue
+            
+        best_cost = sorted_entries[0]["cost_per_run"]
+        ranking = []
+        for i, ent in enumerate(sorted_entries):
+            rel_efficiency = round(best_cost / ent["cost_per_run"], 2) if ent["cost_per_run"] > 0 else 0.0
+            
+            ranking.append({
+                "rank": i + 1,
+                "machinename": ent["machinename"],
+                "cpu_name": ent["cpu_name"],
+                "cpu_isa": ent["cpu_isa"],
+                "cost_per_run": ent["cost_per_run"],
+                "relative_cost_efficiency": rel_efficiency
+            })
 
-        # Calculate cost_score
-        hourly_rate = get_hourly_rate(machine_data)
-        time_val = test_data.get("time")
-
-        cost_score: Any = "unknown"
-        if hourly_rate is not None:
-            if time_val is not None and time_val != "N/A" and time_val != 0:
-                try:
-                    time_float = float(time_val) if not isinstance(time_val, (int, float)) else time_val
-                    cost_score = round((time_float / 3600) * hourly_rate, 6)
-                except (ValueError, TypeError):
-                    cost_score = "unknown"
-
-        # Build nested structure: thread -> machinename
-        if testcategory not in result["workload"]:
-            result["workload"][testcategory] = {}
-        if benchmark not in result["workload"][testcategory]:
-            result["workload"][testcategory][benchmark] = {}
-        if test_name not in result["workload"][testcategory][benchmark]:
-            result["workload"][testcategory][benchmark][test_name] = {}
-        if os_name not in result["workload"][testcategory][benchmark][test_name]:
-            result["workload"][testcategory][benchmark][test_name][os_name] = {
-                "thread": {}
-            }
-        if thread not in result["workload"][testcategory][benchmark][test_name][os_name]["thread"]:
-            result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread] = {}
-
-        result["workload"][testcategory][benchmark][test_name][os_name]["thread"][thread][machinename] = {
-            "time_score": time_score,
-            "cost_score": cost_score,
-            "unit": unit
+        result["workload"].setdefault(tc, {}).setdefault(bm, {}).setdefault(tn, {}).setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
+            "unit": "USD/run",
+            "ranking": ranking
         }
 
     return result
 
 
-def thread_scaling_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generate Thread scaling comparison metrics based on execution time.
-    The execution time at the maximum thread count becomes the reference (score 100).
-    Raises ThreadScalingError when the reference execution time cannot be resolved.
+    Section 3: Thread scaling comparison (Workload-centric curves across machines)
     """
-    workloads = extract_workloads(data)
-
-    time_by_workload: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
-    thread_number_map: Dict[Tuple[str, str, str, str, str], Dict[str, int]] = {}
-    unit_by_workload: Dict[Tuple[str, str, str, str, str], str] = {}
-
-    for w in workloads:
-        key = (w["machinename"], w["os"], w["testcategory"], w["benchmark"], w["test_name"])
-        thread_label = str(w["thread"])
-        try:
-            thread_number = int(thread_label)
-        except (TypeError, ValueError):
-            print(
-                f"Warning: Skip non-integer thread '{thread_label}' for "
-                f"{w['machinename']}/{w['os']}/{w['testcategory']}/{w['benchmark']}/{w['test_name']}",
-                file=sys.stderr
-            )
-            continue
-
-        time_value = parse_time_value(w["test_data"])
-        time_by_workload.setdefault(key, {})[thread_label] = time_value if time_value is not None else "unknown"
-        thread_number_map.setdefault(key, {})[thread_label] = thread_number
-        unit = w["test_data"].get("unit")
-        unit_by_workload[key] = unit if unit not in (None, "") else "N/A"
-
-    machine_os_pairs = {(w["machinename"], w["os"]) for w in workloads}
-    results: List[Dict[str, Any]] = []
-
-    for machinename, os_name in sorted(machine_os_pairs):
-        result = {
-            "description": "Thread scaling comparison",
-            "header": {
-                "machinename": machinename,
-                "os": os_name
-            },
-            "workload": {}
-        }
-
-        has_scaling_data = False
-
-        for key, thread_times in time_by_workload.items():
-            if key[0] != machinename or key[1] != os_name:
-                continue
-
-            thread_numbers = thread_number_map.get(key, {})
-            if len(thread_numbers) <= 1:
-                continue
-
-            max_thread_label = max(thread_numbers, key=lambda t: thread_numbers[t])
-            ref_time = thread_times.get(max_thread_label)
-
-            if ref_time == "unknown" or ref_time == 0:
-                raise ThreadScalingError(
-                    "Cannot determine reference execution time for "
-                    f"{machinename}/{os_name}/{key[2]}/{key[3]}/{key[4]} (thread={max_thread_label})"
-                )
-
-            scaling_data: Dict[str, Any] = {"unit": unit_by_workload.get(key, "N/A")}
-            for thread_label, value in sorted(thread_times.items(), key=lambda item: thread_numbers[item[0]]):
-                if value == "unknown" or value == 0:
-                    scaling_data[thread_label] = "unknown"
-                else:
-                    try:
-                        relative_score = round((ref_time / value) * 100, 2)
-                    except ZeroDivisionError:
-                        relative_score = "unknown"
-                    scaling_data[thread_label] = relative_score
-
-            testcategory, benchmark, test_name = key[2], key[3], key[4]
-            if testcategory not in result["workload"]:
-                result["workload"][testcategory] = {}
-            if benchmark not in result["workload"][testcategory]:
-                result["workload"][testcategory][benchmark] = {}
-
-            result["workload"][testcategory][benchmark][test_name] = scaling_data
-            has_scaling_data = True
-
-        if has_scaling_data:
-            results.append(result)
-
-    return results
-
-
-def get_csp_from_machinename(machinename: str, machine_data: Dict[str, Any]) -> str:
-    """Get CSP from machine data or infer from machinename."""
-    csp = machine_data.get("CSP", "unknown")
-    if csp != "unknown":
-        return csp
-
-    # Infer from machinename patterns
-    machinename_lower = machinename.lower()
-    if any(x in machinename_lower for x in ["m8g", "m8a", "m8i", "m7i", "i7ie", "t3"]):
-        return "AWS"
-    if any(x in machinename_lower for x in ["c4a", "c4d", "c4-", "e2-"]):
-        return "GCP"
-    if "vm.standard" in machinename_lower or "flex" in machinename_lower:
-        return "OCI"
-
-    return "unknown"
-
-
-def is_arm64_reference(machinename: str, csp: str) -> bool:
-    """
-    Check if machinename is an arm64 reference instance for the given CSP.
-    Reference instances (partial match):
-    - AWS: "m8g"
-    - GCP: "c4a"
-    - OCI: "A1.Flex"
-    """
-    machinename_lower = machinename.lower()
-
-    if csp == "AWS":
-        return "m8g" in machinename_lower
-    elif csp == "GCP":
-        return "c4a" in machinename_lower
-    elif csp == "OCI":
-        return "a1.flex" in machinename_lower
-
-    return False
-
-
-def csp_instance_comparison(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Generate CSP instance comparison metrics.
-    Compares cost efficiency across instances within the same CSP.
-    Reference: arm64 instance cost = 100
-
-    Output structure (list of):
-    {
-        description: "CSP instance comparison",
-        header: {
-            "machinename": <machinename>,
-            "os": <os>,
-            "csp": <csp>
-        },
-        workload: {
-            <testcategory>: {
-                <benchmark>: {
-                    <test_name>: <benchmark_score>
-                }
-            }
-        }
+    result = {
+        "description": "Thread scaling comparison by workload",
+        "workload": {}
     }
-    """
-    results = []
+
     workloads = extract_workloads(data)
+    
+    # Target structure: Workload -> Machine -> Thread -> Score
+    curves_data: Dict[tuple, Dict[str, Dict[str, float]]] = {}
+    unit_map: Dict[tuple, str] = {}
 
-    # Group by CSP
-    csp_machines: Dict[str, set] = {}
     for w in workloads:
-        machinename = w["machinename"]
-        machine_data = w["machine_data"]
-        csp = get_csp_from_machinename(machinename, machine_data)
-
-        if csp == "unknown":
+        key = (w["testcategory"], w["benchmark"], w["test_name"])
+        score, _ = get_performance_score(w["test_data"])
+        if score is None:
             continue
+            
+        try:
+            th_num = int(w["thread"])
+        except (ValueError, TypeError):
+            continue
+            
+        machine_label = f"{w['machinename']} ({w['cpu_isa']})"
+        curves_data.setdefault(key, {}).setdefault(machine_label, {})[str(th_num)] = score
+        unit_map[key] = w["test_data"].get("unit", "N/A")
 
-        if csp not in csp_machines:
-            csp_machines[csp] = set()
-        csp_machines[csp].add((machinename, w["os"]))
-
-    # For each CSP, generate comparison
-    for csp, machine_os_set in csp_machines.items():
-        # Find arm64 reference machine
-        ref_machines = [(m, o) for m, o in machine_os_set if is_arm64_reference(m, csp)]
-
-        if not ref_machines:
-            raise CSPComparisonError(f"No arm64 reference instance found for CSP {csp}")
-
-        # Group workloads by test
-        test_workloads: Dict[Tuple, Dict[str, Any]] = {}
-        for w in workloads:
-            if get_csp_from_machinename(w["machinename"], w["machine_data"]) != csp:
+    for key, machine_curves in curves_data.items():
+        tc, bm, tn = key
+        final_curves = {}
+        
+        for m_label, th_scores in machine_curves.items():
+            if len(th_scores) < 2:
                 continue
+            
+            # Find max thread baseline
+            max_th = str(max(int(t) for t in th_scores.keys()))
+            max_val = th_scores[max_th]
+            
+            if max_val == 0:
+                continue
+                
+            sorted_th = sorted(th_scores.keys(), key=lambda x: int(x))
+            normalized = {}
+            for t in sorted_th:
+                normalized[t] = round((th_scores[t] / max_val) * 100, 2)
+            
+            final_curves[m_label] = normalized
 
-            key = (w["testcategory"], w["benchmark"], w["test_name"], w["os"])
-            if key not in test_workloads:
-                test_workloads[key] = {}
-
-            machinename = w["machinename"]
-            test_data = w["test_data"]
-            machine_data = w["machine_data"]
-
-            # Calculate cost_score
-            hourly_rate = get_hourly_rate(machine_data)
-            time_val = test_data.get("time")
-
-            cost_score = None
-            if hourly_rate is not None:
-                if time_val is not None and time_val != "N/A" and time_val != 0:
-                    try:
-                        time_float = float(time_val) if not isinstance(time_val, (int, float)) else time_val
-                        cost_score = (time_float / 3600) * hourly_rate
-                    except (ValueError, TypeError):
-                        pass
-
-            test_workloads[key][machinename] = cost_score
-
-        # Generate results for each machine in this CSP
-        for machinename, os_name in sorted(machine_os_set):
-            result = {
-                "description": "CSP instance comparison",
-                "header": {
-                    "machinename": machinename,
-                    "os": os_name,
-                    "csp": csp
-                },
-                "workload": {}
+        if final_curves:
+            result["workload"].setdefault(tc, {}).setdefault(bm, {})[tn] = {
+                "unit": unit_map[key],
+                "curves": final_curves
             }
 
-            has_data = False
+    return result
 
-            for key, machine_costs in test_workloads.items():
-                testcategory, benchmark, test_name, test_os = key
 
-                if test_os != os_name:
+def get_arch_from_machinename(machinename: str, machine_data: Dict[str, Any]) -> str:
+    """Infer architecture from machine data or name."""
+    isa = str(machine_data.get("cpu_isa", "")).lower()
+    if "arm" in isa or "aarch64" in isa:
+        return "arm64"
+    if "x86" in isa or "amd64" in isa:
+        return "x86_64"
+    
+    # Fallback to name patterns
+    name = machinename.lower()
+    if any(p in name for p in ["m8g", "m7g", "c4a", "t2a", "a1.flex", "a2.flex"]):
+        return "arm64"
+    return "x86_64"
+
+
+def is_arm64_baseline(machinename: str) -> bool:
+    """Check if machinename is an arm64 reference instance."""
+    name = machinename.lower()
+    # AWS: m8g, GCP: c4a, OCI: a1.flex (partial matches)
+    return any(p in name for p in ["m8g", "c4a", "a1.flex"])
+
+
+def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Section 4: CSP instance comparison (Trend analysis/Arch crossover)
+    """
+    result = {
+        "description": "CSP instance comparison (Trend Analysis)",
+        "workload": {}
+    }
+
+    workloads = extract_workloads(data)
+    
+    # Group by Workload -> CSP
+    # Note: Machine Name prefix mapping to CSP for context
+    csp_map = {}
+    for w in workloads:
+        mname = w["machinename"].lower()
+        if mname.startswith("aws"): csp_map[w["machinename"]] = "AWS"
+        elif mname.startswith("gcp"): csp_map[w["machinename"]] = "GCP"
+        elif mname.startswith("oci"): csp_map[w["machinename"]] = "OCI"
+        elif "m8" in mname or "m7" in mname: csp_map[w["machinename"]] = "AWS" # Fallback if prefix missing
+        else: csp_map[w["machinename"]] = "Local/Other"
+
+    # Workload -> CSP -> Machine -> Thread -> CostScore
+    comparison_data: Dict[tuple, Dict[str, Dict[str, Dict[str, float]]]] = {}
+
+    for w in workloads:
+        key = (w["testcategory"], w["benchmark"], w["test_name"])
+        csp = csp_map.get(w["machinename"], "Unknown")
+        if csp == "Unknown": continue
+        
+        hourly_rate = get_hourly_rate(w["machine_data"])
+        time_sec = parse_time_value(w["test_data"])
+        if hourly_rate is None or time_sec is None or time_sec == 0:
+            continue
+            
+        cost_score = (time_sec / 3600.0) * hourly_rate
+        th_label = str(w["thread"])
+        
+        comparison_data.setdefault(key, {}).setdefault(csp, {}).setdefault(w["machinename"], {})[th_label] = cost_score
+
+    for key, csp_machines in comparison_data.items():
+        tc, bm, tn = key
+        
+        for csp, machines in csp_machines.items():
+            # Find baseline (arm64)
+            baseline_machine = None
+            for mname in machines:
+                if is_arm64_baseline(mname):
+                    baseline_machine = mname
+                    break
+            
+            if not baseline_machine:
+                continue
+                
+            baseline_costs = machines[baseline_machine]
+            trends = {}
+            
+            for mname, costs in machines.items():
+                if mname == baseline_machine:
                     continue
-
-                if machinename not in machine_costs:
+                
+                # Check arch
+                arch = "x86_64" if "arm" not in mname.lower() else "arm64"
+                label = f"{mname} ({arch})"
+                
+                scores = {}
+                for th, cost in costs.items():
+                    if th in baseline_costs:
+                        # Efficiency score: ref_cost / current_cost * 100
+                        scores[th] = round((baseline_costs[th] / cost) * 100, 2)
+                
+                if not scores:
                     continue
-
-                # Find reference cost (arm64 instance)
-                ref_cost = None
-                for ref_m, ref_o in ref_machines:
-                    if ref_o == os_name and ref_m in machine_costs:
-                        ref_cost = machine_costs[ref_m]
+                
+                # Insight calculation
+                sorted_th = sorted(scores.keys(), key=lambda x: int(x))
+                max_adv_th = max(scores, key=lambda k: scores[k])
+                
+                # Find crossover_point (where it dips below 100)
+                crossover = "N/A"
+                for th in sorted_th:
+                    if scores[th] < 100:
+                        crossover = f"thread {th}"
                         break
+                
+                # Scaling efficiency trend
+                trend_desc = "consistent"
+                if len(scores) > 1:
+                    first_score = scores[sorted_th[0]]
+                    last_score = scores[sorted_th[-1]]
+                    if last_score < first_score * 0.95:
+                        trend_desc = "declining_relative_to_arm"
+                    elif last_score > first_score * 1.05:
+                        trend_desc = "improving_relative_to_arm"
 
-                if ref_cost is None or ref_cost == 0:
-                    print(f"Warning: Cannot calculate reference cost for {csp}/{testcategory}/{benchmark}/{test_name}",
-                          file=sys.stderr)
-                    score: Any = "unknown"
-                elif machine_costs[machinename] is None:
-                    score = "unknown"
-                elif machine_costs[machinename] == 0:
-                    print(f"Warning: Cost is 0 for {machinename}/{testcategory}/{benchmark}/{test_name}",
-                          file=sys.stderr)
-                    score = "unknown"
-                else:
-                    # Calculate relative score (reference = 100)
-                    # Lower cost is better, so: ref_cost / current_cost * 100
-                    score = round((ref_cost / machine_costs[machinename]) * 100, 2)
+                trends[label] = {
+                    "scores": scores,
+                    "insight": {
+                        "max_advantage": {"thread": max_adv_th, "score": scores[max_adv_th]},
+                        "crossover_point": crossover,
+                        "scaling_efficiency": trend_desc
+                    }
+                }
 
-                # Build nested structure
-                if testcategory not in result["workload"]:
-                    result["workload"][testcategory] = {}
-                if benchmark not in result["workload"][testcategory]:
-                    result["workload"][testcategory][benchmark] = {}
+            if trends:
+                # Add to result
+                result["workload"].setdefault(tc, {}).setdefault(bm, {})[tn] = {
+                    "baseline": {
+                        "machinename": baseline_machine,
+                        "arch": "arm64",
+                        "csp": csp
+                    },
+                    "trends": trends
+                }
 
-                result["workload"][testcategory][benchmark][test_name] = score
-                has_data = True
-
-            if has_data:
-                results.append(result)
-
-    return results
+    return result
 
 
 def main():
@@ -654,32 +531,16 @@ def main():
     output = get_generation_log()
 
     if args.perf or args.all:
-        print("Generating performance comparison...", file=sys.stderr)
         output["performance_comparison"] = performance_comparison(data)
 
     if args.cost or args.all:
-        print("Generating cost comparison...", file=sys.stderr)
         output["cost_comparison"] = cost_comparison(data)
 
     if args.th or args.all:
-        print("Generating thread scaling comparison...", file=sys.stderr)
-        try:
-            thread_results = thread_scaling_comparison(data)
-        except ThreadScalingError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            sys.exit(1)
-        if thread_results:
-            output["thread_scaling_comparison"] = thread_results
+        output["thread_scaling_comparison"] = thread_scaling_comparison(data)
 
     if args.csp or args.all:
-        print("Generating CSP instance comparison...", file=sys.stderr)
-        try:
-            csp_results = csp_instance_comparison(data)
-        except CSPComparisonError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            sys.exit(1)
-        if csp_results:
-            output["csp_instance_comparison"] = csp_results
+        output["csp_instance_comparison"] = csp_instance_comparison(data)
 
     # Output to stdout
     print(json.dumps(output, indent=2, ensure_ascii=False))
