@@ -97,6 +97,9 @@ docker run -it --rm --privileged --platform linux/arm64 \
 ```
 
 `prepare_tools.sh` 完了後、コンテナ内で試験実行（opc）：
+
+※ `prepare_tools.sh` を root で実行した場合でも、PTS の `batch-setup` は `opc` ユーザー向けに作成されます。
+
 ```bash
 # opcへ切り替え（rootパスワードは不要）
 su - opc

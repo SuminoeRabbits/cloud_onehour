@@ -109,11 +109,33 @@ rm -f "$ARCHIVE"
 
 # 3. Configure batch mode
 echo "=== Step 3: Configuring batch mode ==="
-# Force PTS to use user home directory instead of system-wide /var/lib/
-export PTS_USER_PATH="$HOME/.phoronix-test-suite"
-printf "Y\nN\nN\nN\nN\nN\nY\n" | "$LAUNCHER" batch-setup
+# Configure batch mode for the user who will run benchmarks.
+# If setup is executed as root in OCI-like environments, prefer 'opc'.
+TARGET_USER="$(id -un)"
+if [ "$(id -u)" -eq 0 ]; then
+    if id -u opc >/dev/null 2>&1; then
+        TARGET_USER="opc"
+    elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+        TARGET_USER="${SUDO_USER}"
+    else
+        TARGET_USER="root"
+    fi
+fi
 
-USER_CONFIG="$HOME/.phoronix-test-suite/user-config.xml"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [ -z "$TARGET_HOME" ]; then
+    TARGET_HOME="$HOME"
+fi
+
+echo "Configuring PTS batch mode for user: ${TARGET_USER}"
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
+    su - "$TARGET_USER" -c "export PTS_USER_PATH=\"$TARGET_HOME/.phoronix-test-suite\"; printf 'Y\\nN\\nN\\nN\\nN\\nN\\nY\\n' | '$LAUNCHER' batch-setup"
+else
+    export PTS_USER_PATH="$TARGET_HOME/.phoronix-test-suite"
+    printf "Y\nN\nN\nN\nN\nN\nY\n" | "$LAUNCHER" batch-setup
+fi
+
+USER_CONFIG="$TARGET_HOME/.phoronix-test-suite/user-config.xml"
 if [ -f "$USER_CONFIG" ]; then
     sed -i 's|<UploadResults>TRUE</UploadResults>|<UploadResults>FALSE</UploadResults>|g' "$USER_CONFIG"
 fi
