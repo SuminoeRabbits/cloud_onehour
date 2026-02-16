@@ -434,8 +434,8 @@ class CpuminerOptRunner:
         nproc = os.cpu_count() or 1
         install_cmd = (
             f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 '
-            f'CFLAGS="-O3 -march=native -mtune=native" '
-            f'CXXFLAGS="-O3 -march=native -mtune=native" '
+            f'CFLAGS="-O3 -march=native -mtune=native -Wno-error -fpermissive" '
+            f'CXXFLAGS="-O3 -march=native -mtune=native -Wno-error -fpermissive" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
         )
 
