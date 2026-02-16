@@ -28,6 +28,8 @@ docker run -it --rm --privileged \
   bash -c "
     # 基本パッケージインストール
     dnf -y update && dnf -y install sudo git shadow-utils && \
+    # rootパスワードを設定
+    echo 'root:root' | chpasswd && \
     # 非rootユーザー作成（OCI（Oracle Cloud）のopcを模倣）
     useradd -m -G wheel opc && \
     echo 'opc ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
@@ -38,25 +40,29 @@ docker run -it --rm --privileged \
     su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
     # cloud_onehour/scripts_rhel9へ移動してprepare_tools.sh実行
     cd /home/opc/cloud_onehour/scripts_rhel9 && \
-    ./prepare_tools.sh && \
+    ./prepare_tools.sh && su -opc && \
     # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
     bash
   "
 ```
 
-コンテナ内（ec2-user）で試験実行：
+`prepare_tools.sh` 完了後、コンテナ内で試験実行（opc）：
+
+※ `prepare_tools.sh` を root で実行した場合でも、PTS の `batch-setup` は `opc` ユーザー向けに作成されます。
+
 ```bash
-# 最小限のセットアップ（時間短縮）
-cd ~/cloud_onehour/scripts_rhel9
-./setup_init.sh
-./setup_gcc14.sh
-./setup_pts.sh
+# opcへ切り替え（rootパスワードは不要）
+su - opc
+
+# opcのHOMEを確認して移動
+echo "$HOME"
+cd "$HOME"
 
 # PTS確認（~/.phoronix-test-suite/が使われることを確認）
 phoronix-test-suite diagnostics | grep -E "PTS_USER_PATH|PTS_TEST_INSTALL"
 
 # CoreMark実行
-cd ~/cloud_onehour
+cd "$HOME/cloud_onehour"
 ./pts_runner/pts_runner_coremark-1.0.1.py 288 --quick
 ```
 
@@ -80,6 +86,8 @@ docker run -it --rm --privileged --platform linux/arm64 \
   bash -c "
     # 基本パッケージインストール
     dnf -y update && dnf -y install sudo git shadow-utils && \
+    # rootパスワードを設定
+    echo 'root:root' | chpasswd && \
     # 非rootユーザー作成（OCI（Oracle Cloud）のopcを模倣）
     useradd -m -G wheel opc && \
     echo 'opc ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
@@ -90,7 +98,7 @@ docker run -it --rm --privileged --platform linux/arm64 \
     su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
     # cloud_onehour/scripts_rhel9へ移動してprepare_tools.sh実行
     cd /home/opc/cloud_onehour/scripts_rhel9 && \
-    ./prepare_tools.sh && \
+    ./prepare_tools.sh && su - opc && \
     # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
     bash
   "
@@ -104,11 +112,15 @@ docker run -it --rm --privileged --platform linux/arm64 \
 # opcへ切り替え（rootパスワードは不要）
 su - opc
 
+# opcのHOMEを確認して移動
+echo "$HOME"
+cd "$HOME"
+
 # PTS確認（~/.phoronix-test-suite/が使われることを確認）
 phoronix-test-suite diagnostics | grep -E "PTS_USER_PATH|PTS_TEST_INSTALL"
 
 # CoreMark実行
-cd ~/cloud_onehour
+cd "$HOME/cloud_onehour"
 ./pts_runner/pts_runner_coremark-1.0.1.py 288 --quick
 ```
 
