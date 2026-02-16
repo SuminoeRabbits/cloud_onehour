@@ -2,7 +2,7 @@
 set -e
 
 TARGET_VERSION="2.44"
-THRESHOLD_VERSION="2.42"
+THRESHOLD_VERSION="2.41"
 PREFIX="/opt/binutils-${TARGET_VERSION}"
 TOOLS=("as" "ld" "ld.gold" "nm" "objcopy" "objdump" "readelf" "strip" "ar" "ranlib" "size" "strings")
 

@@ -28,16 +28,19 @@ docker run -it --rm --privileged \
   bash -c "
     # 基本パッケージインストール
     dnf -y update && dnf -y install sudo git shadow-utils && \
-    # 非rootユーザー作成（AWS EC2のec2-userを模倣）
-    useradd -m -G wheel ec2-user && \
-    echo 'ec2-user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
+    # 非rootユーザー作成（OCI（Oracle Cloud）のopcを模倣）
+    useradd -m -G wheel opc && \
+    echo 'opc ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
     # マウントしたscriptsをコピー
-    cp -r /mnt/scripts_rhel9 /home/ec2-user/ && \
-    chown -R ec2-user:ec2-user /home/ec2-user/scripts_rhel9 && \
-    # ec2-userでリポジトリクローン
-    su - ec2-user -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
-    # ec2-userに切り替えて対話型シェル起動
-    su - ec2-user
+    cp -r /mnt/scripts_rhel9 /home/opc/ && \
+    chown -R opc:opc /home/opc/scripts_rhel9 && \
+    # opcユーザーでリポジトリクローン
+    su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
+    # マウントしたscripts_rhel9へ移動してprepare_tools.sh実行
+    cd /home/opc/scripts_rhel9 && \
+    ./prepare_tools.sh && \
+    # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
+    bash
   "
 ```
 
@@ -60,13 +63,20 @@ cd ~/cloud_onehour
 
 ### RHEL10(rocky linux10)検証
 `rockylinux:10`は2026年2月時点ではDocker HubにUpstreamされていないので代替として、`almalinux:10`を利用。
+arm64コンテナで検証する場合は `--platform linux/arm64` を指定します。
 
-### Oracle Linux 9を使ったInteractive mode（非rootユーザー）での検証
+```bash
+docker run -it --rm --privileged --platform linux/arm64 \
+  almalinux:10 \
+  bash
+```
+
+### Oracle Linux 10/arm64を使ったInteractive mode（非rootユーザー）での検証
 OCI (Oracle Cloud Infrastructure) 形式に合わせて `opc` ユーザーを作成します。
 ```bash
-docker run -it --rm --privileged \
+docker run -it --rm --privileged --platform linux/arm64 \
   -v /home/snakajim/work/cloud_onehour/scripts_rhel9:/mnt/scripts_rhel9 \
-  oraclelinux:9 \
+  oraclelinux:10 \
   bash -c "
     # 基本パッケージインストール
     dnf -y update && dnf -y install sudo git shadow-utils && \
@@ -78,18 +88,18 @@ docker run -it --rm --privileged \
     chown -R opc:opc /home/opc/scripts_rhel9 && \
     # opcユーザーでリポジトリクローン
     su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
-    # opcユーザーに切り替えて対話型シェル起動
-    su - opc
+    # cloud_onehour/scripts_rhel9へ移動してprepare_tools.sh実行
+    cd /home/opc/cloud_onehour/scripts_rhel9 && \
+    ./prepare_tools.sh && \
+    # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
+    bash
   "
 ```
 
-コンテナ内（opc）で試験実行：
+`prepare_tools.sh` 完了後、コンテナ内で試験実行（opc）：
 ```bash
-# 最小限のセットアップ（時間短縮）
-cd ~/cloud_onehour/scripts_rhel9
-./setup_init.sh
-./setup_gcc14.sh
-./setup_pts.sh
+# opcへ切り替え（rootパスワードは不要）
+su - opc
 
 # PTS確認（~/.phoronix-test-suite/が使われることを確認）
 phoronix-test-suite diagnostics | grep -E "PTS_USER_PATH|PTS_TEST_INSTALL"

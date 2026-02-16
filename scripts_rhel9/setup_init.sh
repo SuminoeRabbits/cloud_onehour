@@ -23,6 +23,11 @@ OS_ID=$(detect_os)
 EL_VER=$(get_el_version)
 echo "=== EL${EL_VER} Initialization (detected OS: $OS_ID) ==="
 
+USE_REMI_PHP81=1
+if [[ ("$OS_ID" == "ol" || "$OS_ID" == "oracle") && "$EL_VER" -ge 10 ]]; then
+    USE_REMI_PHP81=0
+fi
+
 # 1. Enable EPEL and CRB (CodeReady Builder)
 echo "Enabling EPEL and CRB repositories..."
 case "$OS_ID" in
@@ -46,19 +51,23 @@ case "$OS_ID" in
         ;;
 esac
 
-# 2. Enable Remi repository for PHP 8.1
-echo "Enabling Remi repository for PHP 8.1..."
-if ! rpm -q remi-release >/dev/null 2>&1; then
-    sudo dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${EL_VER}.rpm"
-fi
-if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
-    # EL10: dnf module system may differ; try module first, fall back to direct install
-    sudo dnf module reset php -y 2>/dev/null || true
-    sudo dnf module enable php:remi-8.1 -y 2>/dev/null || \
-        echo "[INFO] EL${EL_VER}: dnf module not available for PHP, using default Remi config"
+# 2. Enable Remi repository for PHP 8.1 (skip on Oracle Linux 10+)
+if [ "$USE_REMI_PHP81" -eq 1 ]; then
+    echo "Enabling Remi repository for PHP 8.1..."
+    if ! rpm -q remi-release >/dev/null 2>&1; then
+        sudo dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${EL_VER}.rpm"
+    fi
+    if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+        # EL10: dnf module system may differ; try module first, fall back to direct install
+        sudo dnf module reset php -y 2>/dev/null || true
+        sudo dnf module enable php:remi-8.1 -y 2>/dev/null || \
+            echo "[INFO] EL${EL_VER}: dnf module not available for PHP, using default Remi config"
+    else
+        sudo dnf module reset php -y
+        sudo dnf module enable php:remi-8.1 -y
+    fi
 else
-    sudo dnf module reset php -y
-    sudo dnf module enable php:remi-8.1 -y
+    echo "[INFO] Oracle Linux ${EL_VER}: skipping Remi PHP 8.1 setup (remi-release dependency mismatch on EL10)."
 fi
 
 # 3. Install core tools and libraries
@@ -96,15 +105,20 @@ sudo dnf -y install \
     libevent-devel \
     python3-tabulate \
     expat-devel \
-    pcre-devel \
     pcre2-devel \
     p7zip \
     p7zip-plugins \
     glibc-devel \
     numactl \
+    which \
     wget \
     tar \
     gzip
+
+# Some EL10 variants do not provide pcre-devel (PCRE1). Install only when available.
+if ! sudo dnf -y install pcre-devel 2>/dev/null; then
+    echo "[INFO] pcre-devel is not available on this system. Continuing with pcre2-devel only."
+fi
 
 # 4. Architecture Detection
 ARCH=$(uname -m)

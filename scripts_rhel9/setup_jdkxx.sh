@@ -11,16 +11,61 @@ if [ "$CURRENT_VERSION" = "$TARGET_VERSION" ]; then
     echo "OpenJDK $TARGET_VERSION is already the default."
 else
     echo "Installing java-$TARGET_VERSION-openjdk-devel..."
-    sudo dnf install -y "java-$TARGET_VERSION-openjdk-devel"
-    
-    # Switch default Java
-    # RHEL9 JDK paths include full version and arch (e.g. java-17-openjdk-17.0.13.0.11-5.el9.x86_64)
-    # so we dynamically find the actual binary path registered with alternatives.
-    JAVA_BIN=$(find /usr/lib/jvm -name "java" -path "*/java-${TARGET_VERSION}-openjdk*/bin/java" 2>/dev/null | head -1)
-    if [ -n "$JAVA_BIN" ]; then
-        sudo alternatives --set java "$JAVA_BIN"
+    if sudo dnf install -y "java-$TARGET_VERSION-openjdk-devel"; then
+        # Switch default Java (RHEL 9 / Standard Repos)
+        # RHEL9 JDK paths include full version and arch so we find it dynamically
+        JAVA_BIN=$(find /usr/lib/jvm -name "java" -path "*/java-${TARGET_VERSION}-openjdk*/bin/java" 2>/dev/null | head -1)
+        if [ -n "$JAVA_BIN" ]; then
+            sudo alternatives --set java "$JAVA_BIN"
+        else
+            echo "[WARN] Could not find java binary for OpenJDK $TARGET_VERSION, skipping alternatives --set"
+        fi
     else
-        echo "[WARN] Could not find java binary for OpenJDK $TARGET_VERSION, skipping alternatives --set"
+        echo "[WARN] Package java-$TARGET_VERSION-openjdk-devel not found (common on RHEL 10)."
+        echo "Attempting manual installation of Adoptium Temurin JDK $TARGET_VERSION..."
+        
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+            ADOPT_ARCH="x64"
+        elif [ "$ARCH" = "aarch64" ]; then
+            ADOPT_ARCH="aarch64"
+        else
+            echo "[ERROR] Unsupported architecture for manual install: $ARCH"
+            exit 1
+        fi
+        
+        # Download latest GA release for version
+        API_URL="https://api.adoptium.net/v3/binary/latest/${TARGET_VERSION}/ga/linux/${ADOPT_ARCH}/jdk/hotspot/normal/eclipse"
+        INSTALL_DIR="/opt/jdk-${TARGET_VERSION}-manual"
+        
+        if [ -d "$INSTALL_DIR" ]; then
+            echo "[INFO] Cleaning existing manual install at $INSTALL_DIR"
+            sudo rm -rf "$INSTALL_DIR"
+        fi
+        sudo mkdir -p "$INSTALL_DIR"
+        
+        echo "Downloading JDK from $API_URL..."
+        wget -q -O /tmp/jdk.tar.gz "$API_URL"
+        
+        echo "Extracting to $INSTALL_DIR..."
+        sudo tar -xzf /tmp/jdk.tar.gz -C "$INSTALL_DIR" --strip-components=1
+        rm -f /tmp/jdk.tar.gz
+        
+        JAVA_BIN="$INSTALL_DIR/bin/java"
+        JAVAC_BIN="$INSTALL_DIR/bin/javac"
+        
+        if [ -x "$JAVA_BIN" ]; then
+            echo "Registering binaries with alternatives..."
+            sudo alternatives --install /usr/bin/java java "$JAVA_BIN" 2000
+            sudo alternatives --install /usr/bin/javac javac "$JAVAC_BIN" 2000
+            
+            sudo alternatives --set java "$JAVA_BIN"
+            sudo alternatives --set javac "$JAVAC_BIN"
+            echo "[OK] Manual installation successful."
+        else
+            echo "[ERROR] Manual installation failed: Binary not found at $JAVA_BIN"
+            exit 1
+        fi
     fi
 fi
 

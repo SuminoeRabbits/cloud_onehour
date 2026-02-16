@@ -5,6 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/dnf_utils.sh"
 
 EL_VER=$(get_el_version)
+OS_ID=$(. /etc/os-release && echo "${ID:-unknown}")
+
+USE_REMI_PHP81=1
+if [[ ("$OS_ID" == "ol" || "$OS_ID" == "oracle") && "$EL_VER" -ge 10 ]]; then
+    USE_REMI_PHP81=0
+fi
 
 dnf_install() {
     wait_for_dnf_lock
@@ -28,31 +34,36 @@ sudo rm -f "$LAUNCHER"
 rm -rf "$HOME/.phoronix-test-suite"
 echo "[OK] Uninstall and cleanup completed"
 
-# 1.5. Install PHP 8.1 via Remi Repo (RHEL9 target)
-echo "=== Step 1.5: Installing PHP 8.1 via Remi ==="
+# 1.5. Install PHP runtime
+echo "=== Step 1.5: Installing PHP runtime ==="
 
 # Check current PHP version
 CURRENT_PHP_VERSION=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "none")
 echo "Current PHP version: $CURRENT_PHP_VERSION"
 
 if [[ "$CURRENT_PHP_VERSION" != "8.1" ]]; then
-    echo "Configuring Remi repo for PHP 8.1..."
-    # epel and remi-release should be installed by setup_init.sh, but verify
-    if ! rpm -q remi-release >/dev/null 2>&1; then
-        sudo dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${EL_VER}.rpm"
-    fi
-    if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
-        sudo dnf module reset php -y 2>/dev/null || true
-        sudo dnf module enable php:remi-8.1 -y 2>/dev/null || \
-            echo "[INFO] EL${EL_VER}: dnf module not available for PHP, using default Remi config"
+    if [ "$USE_REMI_PHP81" -eq 1 ]; then
+        echo "Configuring Remi repo for PHP 8.1..."
+        # epel and remi-release should be installed by setup_init.sh, but verify
+        if ! rpm -q remi-release >/dev/null 2>&1; then
+            sudo dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${EL_VER}.rpm"
+        fi
+        if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+            sudo dnf module reset php -y 2>/dev/null || true
+            sudo dnf module enable php:remi-8.1 -y 2>/dev/null || \
+                echo "[INFO] EL${EL_VER}: dnf module not available for PHP, using default Remi config"
+        else
+            sudo dnf module reset php -y
+            sudo dnf module enable php:remi-8.1 -y
+        fi
+
+        echo "Installing PHP 8.1 packages..."
+        # Note: php-json is not needed on PHP 8.0+ (JSON is bundled in core)
+        dnf_install php-cli php-xml php-gd php-curl unzip
     else
-        sudo dnf module reset php -y
-        sudo dnf module enable php:remi-8.1 -y
+        echo "[INFO] Oracle Linux ${EL_VER}: using distro PHP packages (skip Remi PHP 8.1)."
+        dnf_install php php-cli php-xml php-gd php-curl unzip
     fi
-    
-    echo "Installing PHP 8.1 packages..."
-    # Note: php-json is not needed on PHP 8.0+ (JSON is bundled in core)
-    dnf_install php-cli php-xml php-gd php-curl unzip
 else
     echo "[OK] PHP 8.1 is already installed"
 fi

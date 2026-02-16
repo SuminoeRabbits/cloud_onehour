@@ -1,6 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# Check for RHEL 10 / Oracle Linux 10
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$VERSION_ID" == 10* ]] && [[ "$ID" =~ ^(rhel|ol)$ ]]; then
+        echo "RHEL/Oracle Linux 10 detected. Using system default zlib (zlib-ng)."
+        echo "Installing zlib-devel..."
+        sudo dnf -y install zlib-devel
+        exit 0
+    fi
+fi
+
 VERSION="1.3.1"
 ARCH=$(uname -m)
 LIBSUBDIR=$([ "$ARCH" = "x86_64" ] && echo "lib64" || echo "lib")
