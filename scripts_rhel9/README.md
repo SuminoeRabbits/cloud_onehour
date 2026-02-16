@@ -40,7 +40,7 @@ docker run -it --rm --privileged \
     su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
     # cloud_onehour/scripts_rhel9へ移動してprepare_tools.sh実行
     cd /home/opc/cloud_onehour/scripts_rhel9 && \
-    ./prepare_tools.sh && su -opc && \
+    ./prepare_tools.sh && su -opc \
     # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
     bash
   "
@@ -98,7 +98,7 @@ docker run -it --rm --privileged --platform linux/arm64 \
     su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
     # cloud_onehour/scripts_rhel9へ移動してprepare_tools.sh実行
     cd /home/opc/cloud_onehour/scripts_rhel9 && \
-    ./prepare_tools.sh && su - opc && \
+    ./prepare_tools.sh && su - opc \
     # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
     bash
   "

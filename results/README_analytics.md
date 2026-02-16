@@ -254,7 +254,7 @@ JSON 出力の先頭に `generation log` を含めます。
 | `--cost` | 任意 | Cost comparison のみ出力 |
 | `--th` | 任意 | Thread scaling comparison のみ出力 |
 | `--csp` | 任意 | CSP instance comparison のみ出力 |
-| `--arm64` | 任意 | x86_64インスタンスの結果のみ出力 |
+| `--arm64` | 任意 | arm64インスタンスの結果のみ出力 |
 | `--x86_64` | 任意 | x86_64インスタンスの結果のみ出力 |
 | `--all` | 任意 | すべての結果を出力 |
 | `--output` | 任意 | 出力先ファイル名。デフォルトは `${PWD}/one_big_json_analytics_<type>.json` |
