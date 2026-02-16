@@ -24,7 +24,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 import subprocess
 
 # Script version
-VERSION = "v1.3.0"
+VERSION = "v1.3.1"
 
 
 class AnalyticsError(RuntimeError):
@@ -158,8 +158,12 @@ def get_performance_score(test_data: Dict[str, Any]) -> Tuple[Any, bool]:
     values = test_data.get("values")
     unit = str(test_data.get("unit", "")).lower()
     
+    
     # If unit is Microseconds or Seconds, lower is better.
-    is_time_unit = "microsecond" in unit or "second" in unit
+    # EXCEPTION: "per second" (rate) is higher is better.
+    unit_lower = unit.lower()
+    is_rate = "per second" in unit_lower
+    is_time_unit = ("microsecond" in unit_lower or "second" in unit_lower) and not is_rate
     
     if values not in (None, "N/A"):
         try:

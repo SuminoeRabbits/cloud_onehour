@@ -21,7 +21,7 @@
 - **性能値の選択**: 
   - `test_name` に `values` が存在する場合：その数値を性能値とします。
         "unit": "Microseconds", "Seconds"などと`values`の単位が時間の場合、小さいほうが優位。
-        それ以外は大きいほうが優位。
+        それ以外は大きいほうが優位。"Frames Per Second", "Requests Per Second"などは大きいほうが優位なことに注意。
   - `values` が存在しない場合：`time`（秒）を性能値（低スコアほど良好）とします。
 - **相対性能**: 各 OS・スレッド数における最速機を基準（1.0）とした比率（`relative_performance`）を算出します。
 

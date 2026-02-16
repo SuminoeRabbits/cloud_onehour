@@ -5,7 +5,7 @@ set -e
 
 # --- 設定 ---
 TARGET_VERSION="2.44"
-THRESHOLD_VERSION="2.42"  # これより古ければインストールを実行
+THRESHOLD_VERSION="2.41"  # これより古ければインストールを実行
 PREFIX="/opt/binutils-${TARGET_VERSION}"
 SOURCE_URL="https://ftp.gnu.org/gnu/binutils/binutils-${TARGET_VERSION}.tar.gz"
 WORK_DIR="/tmp/binutils_build"
