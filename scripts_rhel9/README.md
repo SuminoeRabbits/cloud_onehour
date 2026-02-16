@@ -36,8 +36,8 @@ docker run -it --rm --privileged \
     chown -R opc:opc /home/opc/scripts_rhel9 && \
     # opcユーザーでリポジトリクローン
     su - opc -c 'git clone https://github.com/SuminoeRabbits/cloud_onehour.git' && \
-    # マウントしたscripts_rhel9へ移動してprepare_tools.sh実行
-    cd /home/opc/scripts_rhel9 && \
+    # cloud_onehour/scripts_rhel9へ移動してprepare_tools.sh実行
+    cd /home/opc/cloud_onehour/scripts_rhel9 && \
     ./prepare_tools.sh && \
     # 完了後にrootシェルで待機（必要時に su - opc で切り替える）
     bash
