@@ -80,7 +80,14 @@ def validate_json_syntax(file_path: Path) -> bool:
         print(f"Error: JSON syntax error in {file_path}: {e}", file=sys.stderr)
         return False
     except FileNotFoundError:
-        print(f"Error: File not found: {file_path}", file=sys.stderr)
+        print(
+            "Error: Input JSON file was not found.\n"
+            f"  path: {file_path}\n"
+            "  hint: specify an existing file with --input <path/to/one_big_json.json>\n"
+            "  hint: if you only have raw result files, create JSON first with:\n"
+            "        ./make_one_big_json.py --dir <results_dir> --output <path/to/one_big_json.json>",
+            file=sys.stderr,
+        )
         return False
     except Exception as e:
         print(f"Error: Failed to read {file_path}: {e}", file=sys.stderr)
