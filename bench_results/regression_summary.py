@@ -282,7 +282,7 @@ def run_analytics(
     analytics_script: Path,
     input_json: Path,
     output_json: Path,
-    mode_flag: str,
+    mode_flags: List[str],
     cwd: Path,
 ) -> None:
     cmd = [
@@ -290,10 +290,11 @@ def run_analytics(
         str(analytics_script),
         "--input",
         str(input_json),
-        mode_flag,
+        *mode_flags,
+        "--output",
+        str(output_json),
     ]
-    result = run_script(cmd, cwd)
-    output_json.write_text(result.stdout, encoding="utf-8")
+    run_script(cmd, cwd)
 
 
 def run_postmortem(
@@ -434,16 +435,29 @@ def main() -> int:
             cost_output = global_dir / "global_cost_analysis.json"
             th_output = global_dir / "global_thread_scaling_analysis.json"
             csp_output = global_dir / "global_csp_comparison_analysis.json"
+            perf_arm64_output = global_dir / "global_performance_analysis_arm64.json"
+            cost_arm64_output = global_dir / "global_cost_analysis_arm64.json"
+            th_arm64_output = global_dir / "global_thread_scaling_analysis_arm64.json"
+            csp_arm64_output = global_dir / "global_csp_comparison_analysis_arm64.json"
             
-            run_analytics(analytics_script, global_results, perf_output, "--perf", global_dir)
-            run_analytics(analytics_script, global_results, cost_output, "--cost", global_dir)
-            run_analytics(analytics_script, global_results, th_output, "--th", global_dir)
-            run_analytics(analytics_script, global_results, csp_output, "--csp", global_dir)
+            run_analytics(analytics_script, global_results, perf_output, ["--perf"], global_dir)
+            run_analytics(analytics_script, global_results, cost_output, ["--cost"], global_dir)
+            run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
+            run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
+
+            run_analytics(analytics_script, global_results, perf_arm64_output, ["--perf", "--arm64"], global_dir)
+            run_analytics(analytics_script, global_results, cost_arm64_output, ["--cost", "--arm64"], global_dir)
+            run_analytics(analytics_script, global_results, th_arm64_output, ["--th", "--arm64"], global_dir)
+            run_analytics(analytics_script, global_results, csp_arm64_output, ["--csp", "--arm64"], global_dir)
             
             print(f"Generated analysis -> {perf_output}")
             print(f"Generated analysis -> {cost_output}")
             print(f"Generated analysis -> {th_output}")
             print(f"Generated analysis -> {csp_output}")
+            print(f"Generated analysis -> {perf_arm64_output}")
+            print(f"Generated analysis -> {cost_arm64_output}")
+            print(f"Generated analysis -> {th_arm64_output}")
+            print(f"Generated analysis -> {csp_arm64_output}")
         except Exception as exc:
             print(f"Failed to run analytics: {exc}", file=sys.stderr)
             return 1

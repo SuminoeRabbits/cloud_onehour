@@ -24,7 +24,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 import subprocess
 
 # Script version
-VERSION = "v1.3.1"
+VERSION = "v1.4.0"
 
 
 class AnalyticsError(RuntimeError):
@@ -147,6 +147,26 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                             })
 
     return workloads
+
+
+def filter_data_by_arch(data: Dict[str, Any], arch_filter: Optional[Set[str]]) -> Dict[str, Any]:
+    """Return data filtered by machine architecture. arch_filter values: {'arm64'} or {'x86_64'}."""
+    if not arch_filter:
+        return data
+
+    filtered: Dict[str, Any] = {}
+    for key in ("generation_log", "generation log"):
+        if key in data:
+            filtered[key] = data[key]
+
+    for machinename, machine_data in data.items():
+        if machinename in ("generation_log", "generation log"):
+            continue
+        arch = get_arch_from_machinename(machinename, machine_data)
+        if arch in arch_filter:
+            filtered[machinename] = machine_data
+
+    return filtered
 
 
 def get_performance_score(test_data: Dict[str, Any]) -> Tuple[Any, bool]:
@@ -551,8 +571,14 @@ def main():
                         help='Generate thread scaling comparison only')
     parser.add_argument('--csp', action='store_true',
                         help='Generate CSP instance comparison only')
+    parser.add_argument('--arm64', action='store_true',
+                        help='Include arm64 instances only')
+    parser.add_argument('--x86_64', action='store_true',
+                        help='Include x86_64 instances only')
     parser.add_argument('--all', action='store_true',
-                        help='Generate all comparisons (default if no option specified)')
+                        help='Generate all comparisons')
+    parser.add_argument('--output', type=str,
+                        help='Output file path (default: ${PWD}/one_big_json_analytics_<type>.json)')
 
     args = parser.parse_args()
 
@@ -560,9 +586,15 @@ def main():
     if not validate_script_syntax():
         sys.exit(1)
 
-    # If no specific option, default to --all
+    # If no specific option, default to --perf
     if not (args.perf or args.cost or args.th or args.csp or args.all):
-        args.all = True
+        args.perf = True
+
+    arch_filter: Optional[Set[str]] = None
+    if args.arm64 and not args.x86_64:
+        arch_filter = {"arm64"}
+    elif args.x86_64 and not args.arm64:
+        arch_filter = {"x86_64"}
 
     # Load data
     input_path = Path(args.input)
@@ -570,6 +602,8 @@ def main():
 
     if data is None:
         sys.exit(1)
+
+    data = filter_data_by_arch(data, arch_filter)
 
     # Generate outputs with generation log
     output = get_generation_log()
@@ -586,7 +620,33 @@ def main():
     if args.csp or args.all:
         output["csp_instance_comparison"] = csp_instance_comparison(data)
 
-    # Output to stdout
+    selected_modes = [
+        flag_name for enabled, flag_name in [
+            (args.perf, "perf"),
+            (args.cost, "cost"),
+            (args.th, "th"),
+            (args.csp, "csp"),
+        ] if enabled
+    ]
+
+    if args.all:
+        output_type = "all"
+    elif len(selected_modes) == 1:
+        output_type = selected_modes[0]
+    else:
+        output_type = "mixed"
+
+    arch_suffix = ""
+    if arch_filter == {"arm64"}:
+        arch_suffix = "_arm64"
+    elif arch_filter == {"x86_64"}:
+        arch_suffix = "_x86_64"
+
+    default_output = Path.cwd() / f"one_big_json_analytics_{output_type}{arch_suffix}.json"
+    output_path = Path(args.output) if args.output else default_output
+    output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding='utf-8')
+
+    # Keep stdout output for CLI compatibility.
     print(json.dumps(output, indent=2, ensure_ascii=False))
 
 
