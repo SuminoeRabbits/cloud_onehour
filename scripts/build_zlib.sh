@@ -3,7 +3,11 @@ set -euo pipefail
 
 VERSION="1.3.1"
 ARCHIVE="zlib-${VERSION}.tar.gz"
-DOWNLOAD_URL="https://www.zlib.net/${ARCHIVE}"
+DOWNLOAD_URLS=(
+    "https://www.zlib.net/${ARCHIVE}"
+    "https://zlib.net/fossils/${ARCHIVE}"
+    "https://github.com/madler/zlib/releases/download/v${VERSION}/${ARCHIVE}"
+)
 INSTALL_PREFIX="/usr/local"
 
 # Detect lib directory based on architecture (早めに検出)
@@ -57,8 +61,20 @@ fi
 # Set LDFLAGS to ensure RPATH is embedded
 export LDFLAGS="-Wl,-rpath,${LIBDIR}"
 
-# Download source
-wget --no-check-certificate -O "$ARCHIVE" "$DOWNLOAD_URL"
+# Download source (zlib.net may return 404 for older snapshots)
+download_ok=false
+for url in "${DOWNLOAD_URLS[@]}"; do
+    echo "Trying download URL: $url"
+    if wget --no-check-certificate -O "$ARCHIVE" "$url"; then
+        download_ok=true
+        break
+    fi
+done
+
+if [ "$download_ok" = false ]; then
+    echo "Error: Failed to download ${ARCHIVE} from all known mirrors"
+    exit 1
+fi
 
 # Extract
 tar -xf "$ARCHIVE"
