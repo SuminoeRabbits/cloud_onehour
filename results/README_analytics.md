@@ -254,8 +254,16 @@ JSON 出力の先頭に `generation log` を含めます。
 | `--cost` | 任意 | Cost comparison のみ出力 |
 | `--th` | 任意 | Thread scaling comparison のみ出力 |
 | `--csp` | 任意 | CSP instance comparison のみ出力 |
-| `--arm64` | 任意 | arm64インスタンスの結果のみ出力 |
-| `--x86_64` | 任意 | x86_64インスタンスの結果のみ出力 |
+| `--no_arm64` | 任意 | arm64インスタンスの結果を出力から取り除く。JSON生成完了後の Post Process でのみ作用する。ランキング項目は取り除いたうえで再集計する。 |
+| `--no_amd64` | 任意 | amd64/x86_64インスタンスの結果を出力から取り除く。JSON生成完了後の Post Process でのみ作用する。ランキング項目は取り除いたうえで再集計する。 |
 | `--all` | 任意 | すべての結果を出力 |
 | `--output` | 任意 | 出力先ファイル名。デフォルトは `${PWD}/one_big_json_analytics_<type>.json` |
 | `--help` | 任意 | ヘルプメッセージを表示 |
+
+### アーキ除外フラグの適用方針
+- `--no_arm64` / `--no_amd64` の有無にかかわらず、解析ロジックは同一ルールで JSON を生成します。
+- これらのフラグは **出力直前の Post Process** としてのみ適用し、該当アーキのインスタンス情報を削除してから出力します。
+- 生成ロジック本体（Performance/Cost/Thread/CSP の計算処理）に分岐は入れません。
+- 再集計対象はランキング項目（`performance_comparison.leaderboard` / `cost_comparison.ranking`）です。除外後のデータで `rank` と相対値（`relative_performance` / `relative_cost_efficiency`）を再計算します。
+- 除外後に要素が空になった `thread` / `os` / `test_name` / `benchmark` / `testcategory` は出力から削除します。
+- `thread_scaling_comparison` / `csp_instance_comparison` は該当アーキのエントリを除外し、結果が空になったノードは同様に削除します。

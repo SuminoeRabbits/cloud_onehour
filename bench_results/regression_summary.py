@@ -445,10 +445,10 @@ def main() -> int:
             run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
             run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
 
-            run_analytics(analytics_script, global_results, perf_arm64_output, ["--perf", "--arm64"], global_dir)
-            run_analytics(analytics_script, global_results, cost_arm64_output, ["--cost", "--arm64"], global_dir)
-            run_analytics(analytics_script, global_results, th_arm64_output, ["--th", "--arm64"], global_dir)
-            run_analytics(analytics_script, global_results, csp_arm64_output, ["--csp", "--arm64"], global_dir)
+            run_analytics(analytics_script, global_results, perf_arm64_output, ["--perf", "--no_amd64"], global_dir)
+            run_analytics(analytics_script, global_results, cost_arm64_output, ["--cost", "--no_amd64"], global_dir)
+            run_analytics(analytics_script, global_results, th_arm64_output, ["--th", "--no_amd64"], global_dir)
+            run_analytics(analytics_script, global_results, csp_arm64_output, ["--csp", "--no_amd64"], global_dir)
             
             print(f"Generated analysis -> {perf_output}")
             print(f"Generated analysis -> {cost_output}")

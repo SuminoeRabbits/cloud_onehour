@@ -20,11 +20,11 @@ import sys
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple
 import subprocess
 
 # Script version
-VERSION = "v1.4.0"
+VERSION = "v1.5.0"
 
 
 class AnalyticsError(RuntimeError):
@@ -156,24 +156,164 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return workloads
 
 
-def filter_data_by_arch(data: Dict[str, Any], arch_filter: Optional[Set[str]]) -> Dict[str, Any]:
-    """Return data filtered by machine architecture. arch_filter values: {'arm64'} or {'x86_64'}."""
-    if not arch_filter:
-        return data
+def infer_arch_from_text(value: str) -> str:
+    """Infer architecture from a free-form string (machinename/label/cpu_isa)."""
+    text = (value or "").lower()
+    if any(token in text for token in ["arm64", "aarch64", "armv8", "armv9", "neoverse", "graviton", "axion"]):
+        return "arm64"
+    if any(token in text for token in ["x86_64", "amd64", "intel", "epyc", "xeon"]):
+        return "x86_64"
+    return "x86_64"
 
-    filtered: Dict[str, Any] = {}
-    for key in ("generation_log", "generation log"):
-        if key in data:
-            filtered[key] = data[key]
 
-    for machinename, machine_data in data.items():
-        if machinename in ("generation_log", "generation log"):
-            continue
-        arch = get_arch_from_machinename(machinename, machine_data)
-        if arch in arch_filter:
-            filtered[machinename] = machine_data
+def should_exclude_arch(arch: str, no_arm64: bool, no_amd64: bool) -> bool:
+    if arch == "arm64" and no_arm64:
+        return True
+    if arch == "x86_64" and no_amd64:
+        return True
+    return False
 
-    return filtered
+
+def is_higher_better_from_unit(unit: str) -> bool:
+    """Infer higher-is-better from unit text using same rule as performance scoring."""
+    unit_lower = str(unit or "").lower()
+    is_rate = "per second" in unit_lower
+    is_time_unit = ("microsecond" in unit_lower or "second" in unit_lower) and not is_rate
+    return not is_time_unit
+
+
+def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64: bool) -> Dict[str, Any]:
+    """Apply architecture exclusion as a post-process on generated JSON."""
+    if not no_arm64 and not no_amd64:
+        return output
+
+    # performance_comparison: leaderboard filtering
+    perf = output.get("performance_comparison", {}).get("workload", {})
+    for tc in list(perf.keys()):
+        for bm in list(perf[tc].keys()):
+            for tn in list(perf[tc][bm].keys()):
+                os_map = perf[tc][bm][tn].get("os", {})
+                for os_name in list(os_map.keys()):
+                    th_map = os_map[os_name].get("thread", {})
+                    for th in list(th_map.keys()):
+                        lb = th_map[th].get("leaderboard", [])
+                        kept = []
+                        for ent in lb:
+                            arch = infer_arch_from_text(ent.get("cpu_isa", "") + " " + ent.get("machinename", ""))
+                            if not should_exclude_arch(arch, no_arm64, no_amd64):
+                                kept.append(ent)
+                        if kept:
+                            hib = is_higher_better_from_unit(th_map[th].get("unit", ""))
+                            best_score = kept[0].get("score", 0)
+                            reranked = []
+                            for idx, item in enumerate(kept, start=1):
+                                score = item.get("score", 0)
+                                rel = 0.0
+                                if best_score not in (0, None) and score not in (0, None):
+                                    rel = round((score / best_score), 2) if hib else round((best_score / score), 2)
+                                new_item = dict(item)
+                                new_item["rank"] = idx
+                                new_item["relative_performance"] = rel
+                                reranked.append(new_item)
+                            th_map[th]["leaderboard"] = reranked
+                        else:
+                            del th_map[th]
+                    if not th_map:
+                        del os_map[os_name]
+                if not os_map:
+                    del perf[tc][bm][tn]
+            if not perf[tc][bm]:
+                del perf[tc][bm]
+        if not perf[tc]:
+            del perf[tc]
+
+    # cost_comparison: ranking filtering
+    cost = output.get("cost_comparison", {}).get("workload", {})
+    for tc in list(cost.keys()):
+        for bm in list(cost[tc].keys()):
+            for tn in list(cost[tc][bm].keys()):
+                os_map = cost[tc][bm][tn].get("os", {})
+                for os_name in list(os_map.keys()):
+                    th_map = os_map[os_name].get("thread", {})
+                    for th in list(th_map.keys()):
+                        rk = th_map[th].get("ranking", [])
+                        kept = []
+                        for ent in rk:
+                            arch = infer_arch_from_text(ent.get("cpu_isa", "") + " " + ent.get("machinename", ""))
+                            if not should_exclude_arch(arch, no_arm64, no_amd64):
+                                kept.append(ent)
+                        if kept:
+                            best_eff = kept[0].get("efficiency_score", 0)
+                            reranked = []
+                            for idx, item in enumerate(kept, start=1):
+                                eff = item.get("efficiency_score", 0)
+                                rel = 0.0
+                                if best_eff not in (0, None) and eff not in (0, None):
+                                    rel = round(eff / best_eff, 2)
+                                new_item = dict(item)
+                                new_item["rank"] = idx
+                                new_item["relative_cost_efficiency"] = rel
+                                reranked.append(new_item)
+                            th_map[th]["ranking"] = reranked
+                        else:
+                            del th_map[th]
+                    if not th_map:
+                        del os_map[os_name]
+                if not os_map:
+                    del cost[tc][bm][tn]
+            if not cost[tc][bm]:
+                del cost[tc][bm]
+        if not cost[tc]:
+            del cost[tc]
+
+    # thread_scaling_comparison: curves filtering by machine label
+    th_cmp = output.get("thread_scaling_comparison", {}).get("workload", {})
+    for tc in list(th_cmp.keys()):
+        for bm in list(th_cmp[tc].keys()):
+            for tn in list(th_cmp[tc][bm].keys()):
+                curves = th_cmp[tc][bm][tn].get("curves", {})
+                kept_curves = {}
+                for machine_label, points in curves.items():
+                    arch = infer_arch_from_text(machine_label)
+                    if not should_exclude_arch(arch, no_arm64, no_amd64):
+                        kept_curves[machine_label] = points
+                if kept_curves:
+                    th_cmp[tc][bm][tn]["curves"] = kept_curves
+                else:
+                    del th_cmp[tc][bm][tn]
+            if not th_cmp[tc][bm]:
+                del th_cmp[tc][bm]
+        if not th_cmp[tc]:
+            del th_cmp[tc]
+
+    # csp_instance_comparison: trends filtering; remove if baseline excluded/empty
+    csp = output.get("csp_instance_comparison", {}).get("workload", {})
+    for tc in list(csp.keys()):
+        for bm in list(csp[tc].keys()):
+            for tn in list(csp[tc][bm].keys()):
+                entry = csp[tc][bm][tn]
+                baseline = entry.get("baseline", {})
+                baseline_arch = infer_arch_from_text(baseline.get("arch", "") + " " + baseline.get("machinename", ""))
+                if should_exclude_arch(baseline_arch, no_arm64, no_amd64):
+                    del csp[tc][bm][tn]
+                    continue
+
+                trends = entry.get("trends", {})
+                kept_trends = {}
+                for label, tval in trends.items():
+                    arch = infer_arch_from_text(label)
+                    if not should_exclude_arch(arch, no_arm64, no_amd64):
+                        kept_trends[label] = tval
+                if kept_trends:
+                    entry["trends"] = kept_trends
+                else:
+                    del csp[tc][bm][tn]
+            if not csp[tc][bm]:
+                del csp[tc][bm]
+        if not csp[tc]:
+            del csp[tc]
+
+    return output
 
 
 def get_performance_score(test_data: Dict[str, Any]) -> Tuple[Any, bool]:
@@ -578,10 +718,10 @@ def main():
                         help='Generate thread scaling comparison only')
     parser.add_argument('--csp', action='store_true',
                         help='Generate CSP instance comparison only')
-    parser.add_argument('--arm64', action='store_true',
-                        help='Include arm64 instances only')
-    parser.add_argument('--x86_64', action='store_true',
-                        help='Include x86_64 instances only')
+    parser.add_argument('--no_arm64', action='store_true',
+                        help='Exclude arm64 instances from output JSON (post-process stage)')
+    parser.add_argument('--no_amd64', action='store_true',
+                        help='Exclude amd64/x86_64 instances from output JSON (post-process stage)')
     parser.add_argument('--all', action='store_true',
                         help='Generate all comparisons')
     parser.add_argument('--output', type=str,
@@ -597,20 +737,12 @@ def main():
     if not (args.perf or args.cost or args.th or args.csp or args.all):
         args.perf = True
 
-    arch_filter: Optional[Set[str]] = None
-    if args.arm64 and not args.x86_64:
-        arch_filter = {"arm64"}
-    elif args.x86_64 and not args.arm64:
-        arch_filter = {"x86_64"}
-
     # Load data
     input_path = Path(args.input)
     data = load_data(input_path)
 
     if data is None:
         sys.exit(1)
-
-    data = filter_data_by_arch(data, arch_filter)
 
     # Generate outputs with generation log
     output = get_generation_log()
@@ -626,6 +758,9 @@ def main():
 
     if args.csp or args.all:
         output["csp_instance_comparison"] = csp_instance_comparison(data)
+
+    # Post-process architecture filtering on generated JSON only
+    output = postprocess_output_by_arch(output, args.no_arm64, args.no_amd64)
 
     selected_modes = [
         flag_name for enabled, flag_name in [
@@ -644,10 +779,12 @@ def main():
         output_type = "mixed"
 
     arch_suffix = ""
-    if arch_filter == {"arm64"}:
-        arch_suffix = "_arm64"
-    elif arch_filter == {"x86_64"}:
-        arch_suffix = "_x86_64"
+    if args.no_arm64 and args.no_amd64:
+        arch_suffix = "_no_arm64_no_amd64"
+    elif args.no_arm64:
+        arch_suffix = "_no_arm64"
+    elif args.no_amd64:
+        arch_suffix = "_no_amd64"
 
     default_output = Path.cwd() / f"one_big_json_analytics_{output_type}{arch_suffix}.json"
     output_path = Path(args.output) if args.output else default_output
