@@ -35,6 +35,19 @@ log_step() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/apt_utils.sh"
 
+# Force non-interactive apt behavior for automation (e.g., SSH BatchMode)
+export DEBIAN_FRONTEND=noninteractive
+export TZ=Etc/UTC
+export NEEDRESTART_MODE=a
+
+ensure_noninteractive_timezone() {
+    wait_for_apt_lock
+    sudo ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime
+    sudo DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=300 -o Acquire::Retries=3 update -y
+    sudo DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Lock::Timeout=300 -o Acquire::Retries=3 install -y tzdata
+    sudo DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1 || true
+}
+
 get_ubuntu_version() {
     if command -v lsb_release >/dev/null 2>&1; then
         lsb_release -rs
@@ -102,6 +115,10 @@ echo ""
 # Temporarily disable unattended upgrades to reduce apt lock contention
 log_step "Disable unattended upgrades"
 disable_unattended_upgrades
+
+# Pre-configure timezone to prevent tzdata interactive prompt
+log_step "Ensure non-interactive timezone"
+ensure_noninteractive_timezone
 
 # Ensure Python versions per Ubuntu release
 log_step "Ensure Python versions"
