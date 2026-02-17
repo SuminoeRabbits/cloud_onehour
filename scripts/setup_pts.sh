@@ -318,6 +318,54 @@ fi
 echo "[OK] Batch mode configured"
 echo ""
 
+echo "=== Step 4: Verifying installation and runtime ==="
+# Configure verification target user similar to EL script behavior.
+TARGET_USER="$(id -un)"
+if [ "$(id -u)" -eq 0 ]; then
+    if id -u ubuntu >/dev/null 2>&1; then
+        TARGET_USER="ubuntu"
+    elif [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+        TARGET_USER="${SUDO_USER}"
+    else
+        TARGET_USER="root"
+    fi
+fi
+
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [ -z "$TARGET_HOME" ]; then
+    TARGET_HOME="$HOME"
+fi
+
+echo "Launcher: $LAUNCHER"
+echo "Target user: $TARGET_USER"
+echo "Target home: $TARGET_HOME"
+echo "Expected PTS_USER_PATH: $TARGET_HOME/.phoronix-test-suite"
+
+if [ ! -x "$LAUNCHER" ]; then
+    echo "[ERROR] Launcher is missing or not executable: $LAUNCHER"
+    exit 1
+fi
+
+if [ ! -d "$INSTALL_DIR" ]; then
+    echo "[ERROR] Install directory is missing: $INSTALL_DIR"
+    exit 1
+fi
+
+VERIFY_CMD="export PTS_USER_PATH=\"$TARGET_HOME/.phoronix-test-suite\"; test -d \"$PTS_USER_PATH\""
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
+    su - "$TARGET_USER" -c "$VERIFY_CMD"
+else
+    export PTS_USER_PATH="$TARGET_HOME/.phoronix-test-suite"
+    test -d "$PTS_USER_PATH"
+fi
+
+VERSION_CMD="export PTS_USER_PATH=\"$TARGET_HOME/.phoronix-test-suite\"; '$LAUNCHER' --v >/dev/null 2>&1 || '$LAUNCHER' version"
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
+    su - "$TARGET_USER" -c "$VERSION_CMD"
+else
+    eval "$VERSION_CMD"
+fi
+
 echo "=== Setup completed successfully ==="
 echo "PHP version: $(php --version | head -1)"
 "$LAUNCHER" version

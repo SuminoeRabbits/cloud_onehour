@@ -140,5 +140,36 @@ if [ -f "$USER_CONFIG" ]; then
     sed -i 's|<UploadResults>TRUE</UploadResults>|<UploadResults>FALSE</UploadResults>|g' "$USER_CONFIG"
 fi
 
+echo "=== Step 4: Verifying installation and runtime ==="
+echo "Launcher: $LAUNCHER"
+echo "Target user: $TARGET_USER"
+echo "Target home: $TARGET_HOME"
+echo "Expected PTS_USER_PATH: $TARGET_HOME/.phoronix-test-suite"
+
+if [ ! -x "$LAUNCHER" ]; then
+    echo "[ERROR] Launcher is missing or not executable: $LAUNCHER"
+    exit 1
+fi
+
+if [ ! -d "$INSTALL_DIR" ]; then
+    echo "[ERROR] Install directory is missing: $INSTALL_DIR"
+    exit 1
+fi
+
+VERIFY_CMD="export PTS_USER_PATH=\"$TARGET_HOME/.phoronix-test-suite\"; test -d \"$PTS_USER_PATH\""
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
+    su - "$TARGET_USER" -c "$VERIFY_CMD"
+else
+    export PTS_USER_PATH="$TARGET_HOME/.phoronix-test-suite"
+    test -d "$PTS_USER_PATH"
+fi
+
+VERSION_CMD="export PTS_USER_PATH=\"$TARGET_HOME/.phoronix-test-suite\"; '$LAUNCHER' --v >/dev/null 2>&1 || '$LAUNCHER' version"
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
+    su - "$TARGET_USER" -c "$VERSION_CMD"
+else
+    eval "$VERSION_CMD"
+fi
+
 echo "=== Setup completed successfully ==="
 "$LAUNCHER" version
