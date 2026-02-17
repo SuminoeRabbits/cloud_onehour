@@ -47,6 +47,75 @@ active_instances_lock = threading.Lock()
 DASHBOARD = None
 
 # =========================================================================================
+# OS TYPE PARSING AND SSH USER LOOKUP
+# =========================================================================================
+
+# SSH user lookup table: (os_family, csp) -> ssh_username
+SSH_USER_TABLE = {
+    ('ubuntu', 'aws'): 'ubuntu',
+    ('ubuntu', 'gcp'): 'ubuntu',
+    ('ubuntu', 'oci'): 'ubuntu',
+    ('rhel',   'aws'): 'ec2-user',
+    ('rhel',   'gcp'): 'gcp_user',   # Set via instance metadata
+    ('rhel',   'oci'): 'opc',
+    ('orcl',   'oci'): 'opc',
+}
+
+
+def parse_os_version(os_version: str) -> dict:
+    """
+    Parse os_version string from cloud_config.json into structured info.
+
+    Supports:
+      - Ubuntu versions: "24.04", "22.04", "25.04" -> os_family='ubuntu'
+      - RHEL:            "rhel9", "rhel10"          -> os_family='rhel'
+      - Oracle Linux:    "orcl9", "orcl10"          -> os_family='orcl'
+
+    Returns:
+        dict with keys: os_family, version, raw
+    """
+    if os_version.startswith('rhel'):
+        return {'os_family': 'rhel', 'version': os_version[4:], 'raw': os_version}
+    elif os_version.startswith('orcl'):
+        return {'os_family': 'orcl', 'version': os_version[4:], 'raw': os_version}
+    else:
+        return {'os_family': 'ubuntu', 'version': os_version, 'raw': os_version}
+
+
+def get_effective_os_for_csp(os_info: dict, csp: str) -> dict:
+    """
+    Determine the effective OS to provision on a given CSP.
+
+    Rules:
+      - 'ubuntu' -> Ubuntu on all CSPs
+      - 'rhel'   -> RHEL on AWS/GCP, Oracle Linux on OCI (RHEL not available)
+      - 'orcl'   -> Oracle Linux on OCI, RHEL on AWS/GCP (fallback)
+    """
+    family = os_info['os_family']
+    version = os_info['version']
+
+    if family == 'orcl' and csp != 'oci':
+        return {'os_family': family, 'provision_as': 'rhel', 'version': version}
+    if family == 'rhel' and csp == 'oci':
+        return {'os_family': family, 'provision_as': 'orcl', 'version': version}
+    return {'os_family': family, 'provision_as': family, 'version': version}
+
+
+def get_ssh_user(os_info: dict, csp: str) -> str:
+    """Look up the SSH user from the LUT."""
+    effective = get_effective_os_for_csp(os_info, csp)
+    key = (effective['provision_as'], csp)
+    if key not in SSH_USER_TABLE:
+        raise ValueError(f"No SSH user defined for os='{effective['provision_as']}', csp='{csp}'")
+    return SSH_USER_TABLE[key]
+
+
+def get_os_label(os_info: dict) -> str:
+    """Generate a label for result filenames (e.g. 'ubuntu24_04', 'rhel9', 'orcl9')."""
+    return f"{os_info['os_family']}{os_info['version'].replace('.', '_')}"
+
+
+# =========================================================================================
 # CLOUD PROVIDER ABSTRACT BASE CLASS
 # =========================================================================================
 
@@ -1261,26 +1330,47 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
         log(f"Launching AWS instance: {inst['name']} ({inst['type']})")
 
     os_version = config['common']['os_version']
-    version_to_codename = {
-        '20.04': 'focal',
-        '22.04': 'jammy',
-        '24.04': 'noble',
-        '25.04': 'plucky'
-    }
-    codename = version_to_codename.get(os_version, 'jammy')
+    os_info = parse_os_version(os_version)
+    effective = get_effective_os_for_csp(os_info, 'aws')
 
-    if logger:
-        logger.info(f"Finding AMI for Ubuntu {os_version} ({codename}) {inst['arch']}...")
-    elif False:
-        log(f"Finding AMI for Ubuntu {os_version} ({codename}) {inst['arch']}...")
+    if effective['provision_as'] == 'ubuntu':
+        # --- Ubuntu AMI search ---
+        version_to_codename = {
+            '20.04': 'focal',
+            '22.04': 'jammy',
+            '24.04': 'noble',
+            '25.04': 'plucky'
+        }
+        codename = version_to_codename.get(os_info['version'], 'jammy')
+        if logger:
+            logger.info(f"Finding AMI for Ubuntu {os_info['version']} ({codename}) {inst['arch']}...")
+        ami_patterns = [
+            f"ubuntu/images/hvm-ssd-gp3/ubuntu-{codename}-{os_info['version']}-{inst['arch']}-server-*",
+            f"ubuntu/images/hvm-ssd/ubuntu-{codename}-{os_info['version']}-{inst['arch']}-server-*",
+            f"ubuntu/images/*ubuntu-{codename}-{os_info['version']}-{inst['arch']}-server-*"
+        ]
+        owner_id = "099720109477"  # Canonical
+        os_desc = f"Ubuntu {os_info['version']} ({codename})"
 
-    # Try multiple AMI patterns (gp3, gp2, standard ssd) to find the latest image
-    # Pattern priority: hvm-ssd-gp3 (newest), hvm-ssd (older)
-    ami_patterns = [
-        f"ubuntu/images/hvm-ssd-gp3/ubuntu-{codename}-{os_version}-{inst['arch']}-server-*",
-        f"ubuntu/images/hvm-ssd/ubuntu-{codename}-{os_version}-{inst['arch']}-server-*",
-        f"ubuntu/images/*ubuntu-{codename}-{os_version}-{inst['arch']}-server-*"
-    ]
+    elif effective['provision_as'] == 'rhel':
+        # --- RHEL AMI search ---
+        # AMI arch: amd64 -> x86_64, arm64 stays arm64
+        rhel_arch = "x86_64" if inst['arch'] in ("amd64", "x86_64") else "arm64"
+        if logger:
+            logger.info(f"Finding AMI for RHEL {effective['version']} {rhel_arch}...")
+        ami_patterns = [
+            f"RHEL-{effective['version']}*_HVM*-{rhel_arch}-*-Hourly2-GP3",
+            f"RHEL-{effective['version']}*_HVM*-{rhel_arch}-*-Hourly2-GP2",
+            f"RHEL-{effective['version']}*_HVM*-{rhel_arch}-*",
+        ]
+        owner_id = "309956199498"  # Red Hat
+        os_desc = f"RHEL {effective['version']}"
+
+    else:
+        msg = f"Unsupported OS for AWS: {effective['provision_as']}"
+        if logger:
+            logger.error(msg)
+        return None, None
 
     ami = None
     for pattern in ami_patterns:
@@ -1290,7 +1380,7 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
             log(f"Trying AMI pattern: {pattern}")
 
         ami = run_cmd(
-            f"aws ec2 describe-images --region {region} --owners 099720109477 "
+            f"aws ec2 describe-images --region {region} --owners {owner_id} "
             f"--filters 'Name=name,Values={pattern}' "
             f"--query 'reverse(sort_by(Images, &CreationDate))[:1] | [0].ImageId' --output text",
             logger=logger
@@ -1305,7 +1395,7 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
 
 
     if not ami or ami == "None":
-        msg = f"No AMI found for Ubuntu {os_version} ({codename}) {inst['arch']} in {region}"
+        msg = f"No AMI found for {os_desc} {inst['arch']} in {region}"
         if logger:
             logger.error(msg)
         elif False:
@@ -1367,37 +1457,54 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
         log(f"Launching GCP instance: {name} ({inst['type']})")
 
     os_version = config['common']['os_version']
+    os_info = parse_os_version(os_version)
+    effective = get_effective_os_for_csp(os_info, 'gcp')
     img_arch = "arm64" if inst['arch'] == "arm64" else "amd64"
 
-    version_number = os_version.replace('.', '')
-    is_lts = os_version.endswith('.04') and int(os_version.split('.')[0]) % 2 == 0
-    lts_suffix = "-lts" if is_lts else ""
-    # GCP Ubuntu families changed for some releases (e.g., 24.04 requires arch suffix).
-    # Probe candidates and pick the first family that exists.
-    arch_suffix = img_arch
-    # Try several known family naming variants across releases.
-    # Examples:
-    # 24.04: ubuntu-2404-lts-amd64 / ubuntu-2404-lts-arm64
-    # 22.04: ubuntu-2204-lts (amd64), ubuntu-2204-lts-arm64
-    base = f"ubuntu-{version_number}"
-    candidates = [
-        f"{base}{lts_suffix}-{arch_suffix}",
-        f"{base}{lts_suffix}",
-        f"{base}-{arch_suffix}",
-        f"{base}",
-    ]
-    # De-duplicate while preserving order
-    seen = set()
-    family_candidates = []
-    for c in candidates:
-        if c and c not in seen:
-            seen.add(c)
-            family_candidates.append(c)
+    if effective['provision_as'] == 'ubuntu':
+        # --- Ubuntu image family search ---
+        version_number = os_info['version'].replace('.', '')
+        is_lts = os_info['version'].endswith('.04') and int(os_info['version'].split('.')[0]) % 2 == 0
+        lts_suffix = "-lts" if is_lts else ""
+        arch_suffix = img_arch
+        base = f"ubuntu-{version_number}"
+        candidates = [
+            f"{base}{lts_suffix}-{arch_suffix}",
+            f"{base}{lts_suffix}",
+            f"{base}-{arch_suffix}",
+            f"{base}",
+        ]
+        # De-duplicate while preserving order
+        seen = set()
+        family_candidates = []
+        for c in candidates:
+            if c and c not in seen:
+                seen.add(c)
+                family_candidates.append(c)
+        image_project = "ubuntu-os-cloud"
+        os_desc = f"Ubuntu {os_info['version']} ({img_arch})"
+
+    elif effective['provision_as'] == 'rhel':
+        # --- RHEL image family search ---
+        # GCP families: rhel-{ver} (x86_64), rhel-{ver}-arm64 (arm64)
+        if img_arch == "arm64":
+            family_candidates = [f"rhel-{effective['version']}-arm64"]
+        else:
+            family_candidates = [f"rhel-{effective['version']}"]
+        image_project = "rhel-cloud"
+        os_desc = f"RHEL {effective['version']} ({img_arch})"
+
+    else:
+        msg = f"Unsupported OS for GCP: {effective['provision_as']}"
+        if logger:
+            logger.error(msg)
+        return None, None
+
     image_family = None
     for candidate in family_candidates:
         # Use list+filter for better compatibility with gcloud versions
         exists = run_cmd(
-            f"gcloud compute images list --project=ubuntu-os-cloud "
+            f"gcloud compute images list --project={image_project} "
             f"--filter=\"family={candidate}\" --limit=1 --format='get(name)'",
             logger=logger,
             ignore=True
@@ -1407,7 +1514,7 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
             break
 
     if not image_family:
-        msg = f"No Ubuntu image family found for {os_version} ({img_arch}) in ubuntu-os-cloud"
+        msg = f"No image family found for {os_desc} in {image_project}"
         if logger:
             logger.error(msg)
         else:
@@ -1424,11 +1531,25 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
     # Build storage configuration using centralized helper
     storage_config = build_storage_config(inst, 'gcp')
 
+    # For RHEL on GCP, inject SSH key via metadata (no default user exists)
+    metadata_flag = ""
+    if effective['provision_as'] == 'rhel':
+        ssh_user = get_ssh_user(os_info, 'gcp')
+        pub_key_path = Path(config['common']['ssh_key_path']).with_suffix('.pub')
+        if not pub_key_path.exists():
+            pub_key_path = Path(str(config['common']['ssh_key_path']) + ".pub")
+        if pub_key_path.exists():
+            metadata_flag = f"--metadata=ssh-keys={ssh_user}:$(cat {pub_key_path}) "
+        else:
+            if logger:
+                logger.warn(f"Public key not found at {pub_key_path}, RHEL SSH may fail")
+
     ip = run_cmd(
         f"gcloud compute instances create {name} --project={project} "
         f"--zone={zone} --machine-type={inst['type']} "
         f"{storage_config}"
-        f"--image-family={image_family} --image-project=ubuntu-os-cloud "
+        f"--image-family={image_family} --image-project={image_project} "
+        f"{metadata_flag}"
         f"--format='get(networkInterfaces[0].accessConfigs[0].natIP)'",
         logger=logger,
         timeout=600
@@ -1752,7 +1873,8 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_connect_timeout = config['common'].get('ssh_timeout', 20)
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ConnectTimeout={ssh_connect_timeout} -o ServerAliveInterval=300 -o ServerAliveCountMax=3 -o BatchMode=yes -o NumberOfPasswordPrompts=0"
-    ssh_user = config['common']['ssh_user']
+    os_info = parse_os_version(config['common']['os_version'])
+    ssh_user = get_ssh_user(os_info, inst.get('_csp', 'aws'))
     # Each workload timeout (backward compatible with command_timeout)
     workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
 
@@ -2365,7 +2487,8 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
 
     strict_hk = "yes" if ssh_strict_host_key_checking else "no"
     ssh_opt = f"-i {key_path} -o StrictHostKeyChecking={strict_hk} -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -o ServerAliveCountMax=10 -o BatchMode=yes -o NumberOfPasswordPrompts=0"
-    ssh_user = config['common']['ssh_user']
+    os_info = parse_os_version(config['common']['os_version'])
+    ssh_user = get_ssh_user(os_info, cloud)
     cloud_rep_dir = config['common']['cloud_reports_dir']
 
     if logger:
@@ -2383,9 +2506,8 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     host_rep_dir = config['common']['host_reports_dir']
     # Use hostname if specified, otherwise fallback to cloud_name format
     file_basename = inst.get('hostname', f"{cloud}_{name}")
-    # Format OS version: "25.04" -> "ubuntu25_04"
-    os_version = config['common']['os_version'].replace('.', '_')
-    os_label = f"ubuntu{os_version}"
+    # Format OS label: "24.04" -> "ubuntu24_04", "rhel9" -> "rhel9", "orcl9" -> "orcl9"
+    os_label = get_os_label(parse_os_version(config['common']['os_version']))
     # Add timestamp to filename (yymmdd_HHMMSS format)
     timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
     local_f = f"{host_rep_dir}/{file_basename}_{os_label}_{timestamp}.tar.gz"
@@ -3067,22 +3189,43 @@ class OCIProvider(CloudProvider):
                 logger.error("Failed to get Availability Domain")
             return None, None
 
-        # 3. Find Ubuntu Image
+        # 3. Find Image (Ubuntu, RHEL, or Oracle Linux)
         os_version = self.config['common']['os_version']
+        os_info = parse_os_version(os_version)
+        effective = get_effective_os_for_csp(os_info, 'oci')
 
-        # Normalize Ubuntu version for OCI (OCI-specific fallback)
-        os_ver_major = self._normalize_ubuntu_version_for_oci(os_version, logger)
-        op_sys = "Canonical Ubuntu"
+        if effective['provision_as'] == 'ubuntu':
+            # Ubuntu path (existing logic)
+            os_ver_for_query = self._normalize_ubuntu_version_for_oci(os_info['version'], logger)
+            op_sys = "Canonical Ubuntu"
+            os_desc = f"Ubuntu {os_ver_for_query}"
+            if logger:
+                if os_info['version'].startswith(os_ver_for_query):
+                    logger.info(f"Searching for {op_sys} {os_ver_for_query} image...")
+                else:
+                    logger.info(f"Searching for {op_sys} {os_ver_for_query} image (normalized from {os_info['version']})...")
 
-        if logger:
-            if os_version.startswith(os_ver_major):
-                logger.info(f"Searching for {op_sys} {os_ver_major} image...")
-            else:
-                logger.info(f"Searching for {op_sys} {os_ver_major} image (normalized from {os_version})...")
+        elif effective['provision_as'] in ('orcl', 'rhel'):
+            # Oracle Linux (also used as RHEL fallback on OCI)
+            op_sys = "Oracle Linux"
+            os_ver_for_query = effective['version']  # e.g. "9", "10"
+            os_desc = f"Oracle Linux {os_ver_for_query}"
+            if effective['os_family'] == 'rhel' and logger:
+                logger.warn(
+                    f"RHEL is not available on OCI. "
+                    f"Falling back to Oracle Linux {os_ver_for_query}."
+                )
+            if logger:
+                logger.info(f"Searching for {op_sys} {os_ver_for_query} image...")
+
+        else:
+            if logger:
+                logger.error(f"Unsupported OS for OCI: {effective['provision_as']}")
+            return None, None
 
         image_query = (
             f"{cmd_prefix}oci compute image list --compartment-id {compartment_id} "
-            f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+            f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_for_query}\" "
             f"--shape {inst['type']} --sort-by TIMECREATED --sort-order DESC "
             f"--query 'data[0].id' --raw-output"
         )
@@ -3093,7 +3236,7 @@ class OCIProvider(CloudProvider):
             # Fallback: try searching without shape filter
             image_query_fallback = (
                 f"{cmd_prefix}oci compute image list --compartment-id {compartment_id} "
-                f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_major}\" "
+                f"--operating-system \"{op_sys}\" --operating-system-version \"{os_ver_for_query}\" "
                 f"--sort-by TIMECREATED --sort-order DESC "
                 f"--query 'data[0].id' --raw-output"
             )
@@ -3101,7 +3244,7 @@ class OCIProvider(CloudProvider):
 
         if not image_id or image_id == "None":
             if logger:
-                logger.error(f"Could not find Ubuntu {os_ver_major} image for {inst['type']}")
+                logger.error(f"Could not find {os_desc} image for {inst['type']}")
             return None, None
 
         if logger:
@@ -3316,6 +3459,9 @@ def process_instance(
     ip = None
     commands_success = False
 
+    # Inject CSP name into inst dict for downstream SSH user lookup
+    inst['_csp'] = provider.csp_config.get('name', 'unknown')
+
     try:
         # Launch instance
         progress(instance_name, "Launching instance", logger)
@@ -3360,7 +3506,7 @@ def process_instance(
             try:
                 run_cmd(
                     f"ssh {'-o StrictHostKeyChecking=no' if not ssh_strict else ''} "
-                    f"-i {key_path} ubuntu@{ip} 'sudo hostnamectl set-hostname {hostname}'",
+                    f"-i {key_path} {get_ssh_user(parse_os_version(config['common']['os_version']), inst['_csp'])}@{ip} 'sudo hostnamectl set-hostname {hostname}'",
                     timeout=30,
                     logger=logger
                 )
