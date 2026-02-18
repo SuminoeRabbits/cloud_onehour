@@ -432,58 +432,96 @@ class CpuminerOptRunner:
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         nproc = os.cpu_count() or 1
+        arch = os.uname().machine.lower()
+        is_arm64 = arch in ('aarch64', 'arm64')
+
+        if is_arm64:
+            cc = 'gcc'
+            cxx = 'g++'
+            base_flags = '-O3 -march=native -mtune=native -Wno-error -fpermissive -flax-vector-conversions'
+        else:
+            cc = 'gcc-14'
+            cxx = 'g++-14'
+            base_flags = '-O3 -march=native -mtune=native -Wno-error -fpermissive'
+
         install_cmd = (
-            f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 '
-            f'CFLAGS="-O3 -march=native -mtune=native -Wno-error -fpermissive" '
-            f'CXXFLAGS="-O3 -march=native -mtune=native -Wno-error -fpermissive" '
+            f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
+            f'CFLAGS="{base_flags}" '
+            f'CXXFLAGS="{base_flags}" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
         )
 
-        print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
-        print(f"  {install_cmd}")
-        print(f"{'<'*80}\n")
-
-        print(f"  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
-        log_f = open(install_log, 'w') if use_install_log else None
-        if log_f:
-            log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
-            log_f.flush()
+        if use_install_log:
+            with open(install_log, 'w') as log_f:
+                log_f.write("")
 
-        process = subprocess.Popen(
-            ['bash', '-c', install_cmd],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
+        def run_install_command(cmd: str, title: str):
+            print(f"\n{'>'*80}")
+            print(f"[PTS INSTALL COMMAND - {title}]")
+            print(f"  {cmd}")
+            print(f"{'<'*80}\n")
+            print("  Running installation...")
+
+            log_f = open(install_log, 'a') if use_install_log else None
+            if log_f:
+                log_f.write(f"[PTS INSTALL COMMAND - {title}]\n{cmd}\n\n")
+                log_f.flush()
+
+            process = subprocess.Popen(
+                ['bash', '-c', cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+            output_lines = []
+            for line in process.stdout:
+                print(line, end='')
+                if log_f:
+                    log_f.write(line)
+                    log_f.flush()
+                output_lines.append(line)
+
+            process.wait()
+            if log_f:
+                log_f.close()
+
+            return process.returncode, ''.join(output_lines)
+
+        returncode, full_output = run_install_command(install_cmd, "primary")
+
+        def install_has_failure(code: int, output: str) -> bool:
+            if code != 0:
+                return True
+            if 'Checksum Failed' in output or 'Downloading of needed test files failed' in output:
+                return True
+            if 'ERROR' in output or 'FAILED' in output:
+                return True
+            return False
+
+        install_failed = install_has_failure(returncode, full_output)
+
+        neon_type_error = (
+            ('simd-neon.h' in full_output and 'vorrq_u32' in full_output)
+            or ('incompatible type for argument 2 of' in full_output and 'vorrq_u32' in full_output)
         )
 
-        install_output = []
-        for line in process.stdout:
-            print(line, end='')
-            if log_f:
-                log_f.write(line)
-                log_f.flush()
-            install_output.append(line)
-
-        process.wait()
-        returncode = process.returncode
-        if log_f:
-            log_f.close()
-
-        install_failed = False
-        full_output = ''.join(install_output)
-
-        if returncode != 0:
-            install_failed = True
-        elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
-            install_failed = True
-        elif 'ERROR' in full_output or 'FAILED' in full_output:
-            install_failed = True
+        if install_failed and is_arm64 and neon_type_error:
+            print("\n  [WARN] ARM64 NEON compile type error detected. Retrying with conservative flags...")
+            fallback_flags = '-O3 -march=native -mtune=native -Wno-error -fpermissive -flax-vector-conversions'
+            fallback_cmd = (
+                f'MAKEFLAGS="-j{nproc}" CC=gcc CXX=g++ '
+                f'CFLAGS="{fallback_flags}" '
+                f'CXXFLAGS="{fallback_flags}" '
+                f'phoronix-test-suite batch-install {self.benchmark_full}'
+            )
+            returncode, full_output = run_install_command(fallback_cmd, "arm64-fallback")
+            install_failed = install_has_failure(returncode, full_output)
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
