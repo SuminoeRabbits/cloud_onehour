@@ -512,16 +512,9 @@ class CpuminerOptRunner:
         )
 
         if install_failed and is_arm64 and neon_type_error:
-            print("\n  [WARN] ARM64 NEON compile type error detected. Retrying with conservative flags...")
-            fallback_flags = '-O3 -march=native -mtune=native -Wno-error -fpermissive -flax-vector-conversions'
-            fallback_cmd = (
-                f'MAKEFLAGS="-j{nproc}" CC=gcc CXX=g++ '
-                f'CFLAGS="{fallback_flags}" '
-                f'CXXFLAGS="{fallback_flags}" '
-                f'phoronix-test-suite batch-install {self.benchmark_full}'
-            )
-            returncode, full_output = run_install_command(fallback_cmd, "arm64-fallback")
-            install_failed = install_has_failure(returncode, full_output)
+            print("\n  [ERROR] ARM64 NEON compile type error detected in upstream cpuminer-opt source.")
+            print("  [INFO] Skipping redundant retry because compile flags are already optimized for ARM64.")
+            print("  [INFO] Required fix is source-level type cast compatibility in simd-neon.h.")
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
