@@ -419,6 +419,57 @@ class CpuminerOptRunner:
 
         return ','.join(cpu_list)
 
+    def _find_simd_neon_headers(self):
+        """Find simd-neon.h files under current PTS installed test tree."""
+        pts_home = Path.home() / '.phoronix-test-suite'
+        installed_root = pts_home / 'installed-tests' / 'pts' / self.benchmark
+        if not installed_root.exists():
+            return []
+        return sorted(installed_root.rglob('simd-utils/simd-neon.h'))
+
+    def _apply_simd_neon_gcc14_patch(self):
+        """Apply pinpoint type-cast patch to simd-neon.h for GCC strict NEON type checks."""
+        headers = self._find_simd_neon_headers()
+        if not headers:
+            print("  [WARN] simd-neon.h not found under installed-tests tree")
+            return False
+
+        patched_any = False
+        for header in headers:
+            try:
+                with open(header, 'r', encoding='utf-8', errors='ignore') as f:
+                    original = f.read()
+            except Exception as e:
+                print(f"  [WARN] Failed to read {header}: {e}")
+                continue
+
+            updated = original
+            updated = updated.replace('vorrq_32(', 'vorrq_u32(')
+
+            new_lines = []
+            for line in updated.splitlines(keepends=True):
+                if 'vorrq_u32(' in line and '#define v128_or' not in line and '(uint32x4_t)' not in line:
+                    line = re.sub(
+                        r'vorrq_u32\s*\(\s*([^,]+?)\s*,\s*([^\)]+?)\s*\)',
+                        r'vorrq_u32((uint32x4_t)(\1), (uint32x4_t)(\2))',
+                        line
+                    )
+                new_lines.append(line)
+            updated = ''.join(new_lines)
+
+            if updated != original:
+                try:
+                    with open(header, 'w', encoding='utf-8') as f:
+                        f.write(updated)
+                    print(f"  [OK] Patched simd-neon.h: {header}")
+                    patched_any = True
+                except Exception as e:
+                    print(f"  [WARN] Failed to write {header}: {e}")
+
+        if not patched_any:
+            print("  [WARN] simd-neon.h patch did not change any line")
+        return patched_any
+
     def install_benchmark(self):
         """Install benchmark with error detection and verification."""
         print(f"\n>>> Checking for large files to pre-seed...")
@@ -512,9 +563,13 @@ class CpuminerOptRunner:
         )
 
         if install_failed and is_arm64 and neon_type_error:
-            print("\n  [ERROR] ARM64 NEON compile type error detected in upstream cpuminer-opt source.")
-            print("  [INFO] Skipping redundant retry because compile flags are already optimized for ARM64.")
-            print("  [INFO] Required fix is source-level type cast compatibility in simd-neon.h.")
+            print("\n  [WARN] ARM64 NEON compile type error detected. Applying simd-neon.h pinpoint patch...")
+            patched = self._apply_simd_neon_gcc14_patch()
+            if patched:
+                returncode, full_output = run_install_command(install_cmd, "arm64-simd-neon-patched-retry")
+                install_failed = install_has_failure(returncode, full_output)
+            else:
+                print("  [ERROR] Could not apply simd-neon.h patch automatically.")
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
