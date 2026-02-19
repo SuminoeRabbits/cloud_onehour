@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 
 
@@ -919,6 +920,7 @@ class ApacheRunner:
 
         process.wait()
         returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if log_f:
             log_f.close()
 
@@ -1635,10 +1637,28 @@ class ApacheRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        self.clean_pts_cache()
-
         # Install benchmark once (not per thread count, since single-threaded)
-        self.install_benchmark()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
+
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
+
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                "Treating as broken install and reinstalling."
+            )
+
+        if not already_installed:
+            self.install_benchmark()
+        else:
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
         # Run for each thread count (should only be 1)
         failed = []

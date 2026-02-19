@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 
 class PreSeedDownloader:
@@ -754,12 +755,17 @@ class CpuminerOptRunner:
 
             process.wait()
             returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
         print(f"\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
             print(f"  [OK] End frequency recorded")
         else:
             print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+
+        if returncode == 0 and pts_test_failed:
+            print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
+            return False
 
         if returncode == 0:
             print(f"\n[OK] Benchmark completed successfully")
@@ -909,8 +915,28 @@ class CpuminerOptRunner:
         print(f"# Quick Mode: {'ENABLED' if self.quick_mode else 'DISABLED'}")
         print(f"{'#'*80}\n")
 
-        self.clean_pts_cache()
-        self.install_benchmark()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
+
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
+
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                "Treating as broken install and reinstalling."
+            )
+
+        if not already_installed:
+            self.clean_pts_cache()
+            self.install_benchmark()
+        else:
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
         for t in self.thread_list:
             if not self.run_benchmark(t):
                 return False

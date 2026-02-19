@@ -27,6 +27,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 class PreSeedDownloader:
     """
@@ -623,6 +624,7 @@ class CoreMarkRunner:
 
         process.wait()
         returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if log_f:
             log_f.close()
 
@@ -995,6 +997,10 @@ class CoreMarkRunner:
         else:
             print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
+        if returncode == 0 and pts_test_failed:
+            print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
+            return False
+
         if returncode == 0:
             print(f"\n[OK] Benchmark completed successfully")
             print(f"     Thread log: {log_file}")
@@ -1205,13 +1211,53 @@ class CoreMarkRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        self.clean_pts_cache()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
+
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
+
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                "Treating as broken install and reinstalling."
+            )
+
+        if not already_installed:
+            self.clean_pts_cache()
+
+        else:
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
         # Run for each thread count
         failed = []
         for num_threads in self.thread_list:
-            # For compile-time mode, we need to reinstall for each thread count
-            self.install_benchmark(num_threads)
+            install_status = get_install_status(self.benchmark_full, self.benchmark)
+            info_installed = install_status["info_installed"]
+            test_installed_ok = install_status["test_installed_ok"]
+            installed_dir_exists = install_status["installed_dir_exists"]
+            already_installed = install_status["already_installed"]
+
+            print(
+                f"[INFO] Install check -> info:{info_installed}, "
+                f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+            )
+
+            if not already_installed and installed_dir_exists:
+                print(
+                    f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                    "Treating as broken install and reinstalling."
+                )
+
+            if not already_installed:
+                self.install_benchmark(num_threads)
+            else:
+                print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
             # Run benchmark
             if not self.run_benchmark(num_threads):

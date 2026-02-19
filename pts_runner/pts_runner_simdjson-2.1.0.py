@@ -22,6 +22,7 @@ import json
 import shutil
 import time
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 class SimdJsonRunner:
     def __init__(self, num_threads=None, quick_mode=False):
@@ -392,7 +393,12 @@ class SimdJsonRunner:
             
         subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_end_file}'])
         
-        return process.returncode == 0
+        returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+        if returncode == 0 and pts_test_failed:
+            print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
+            return False
+        return returncode == 0
 
     def export_results(self):
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -426,8 +432,28 @@ class SimdJsonRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        self.clean_pts_cache()
-        self.install_benchmark()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
+
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
+
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                "Treating as broken install and reinstalling."
+            )
+
+        if not already_installed:
+            self.clean_pts_cache()
+            self.install_benchmark()
+        else:
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
         for t in self.thread_list:
             self.run_benchmark(t)
         self.export_results()

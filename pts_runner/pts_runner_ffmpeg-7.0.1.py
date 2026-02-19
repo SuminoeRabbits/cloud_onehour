@@ -31,6 +31,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 
 class PreSeedDownloader:
@@ -741,6 +742,7 @@ class FFmpegRunner:
 
         process.wait()
         returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         full_output = ''.join(install_output)
 
         # Check for installation failure
@@ -1086,7 +1088,26 @@ class FFmpegRunner:
         else:
             print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
-        if returncode == 0:
+        pts_test_failed = False
+        failure_reason = ""
+        if log_file.exists():
+            try:
+                log_content = log_file.read_text(errors='ignore')
+                failure_patterns = [
+                    ("Multiple tests are not installed", "PTS test profile is not installed"),
+                    ("The following tests failed", "PTS reported test execution failure"),
+                    ("quit with a non-zero exit status", "PTS benchmark subprocess failed"),
+                    ("failed to properly run", "PTS benchmark did not run properly"),
+                ]
+                for pattern, reason in failure_patterns:
+                    if pattern.lower() in log_content.lower():
+                        pts_test_failed = True
+                        failure_reason = reason
+                        break
+            except Exception as e:
+                print(f"  [WARN] Could not inspect benchmark log for failure patterns: {e}")
+
+        if returncode == 0 and not pts_test_failed:
             print(f"\n[OK] Benchmark completed successfully")
 
             try:
@@ -1105,11 +1126,22 @@ class FFmpegRunner:
                 print(f"  [ERROR] Failed to parse perf stats: {e}")
 
         else:
-            print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+            if returncode == 0 and pts_test_failed:
+                print(f"\n[ERROR] Benchmark command returned 0 but benchmark did not execute successfully")
+                print(f"       Reason: {failure_reason or 'PTS log indicates failure'}")
+            else:
+                print(f"\n[ERROR] Benchmark failed with return code {returncode}")
             err_file = self.results_dir / f"{num_threads}-thread.err"
             with open(err_file, 'w') as f:
-                f.write(f"Benchmark failed with return code {returncode}\n")
+                if returncode == 0 and pts_test_failed:
+                    f.write("Benchmark failed: PTS reported failure despite zero exit code\n")
+                    if failure_reason:
+                        f.write(f"Reason: {failure_reason}\n")
+                else:
+                    f.write(f"Benchmark failed with return code {returncode}\n")
                 f.write(f"See {log_file} for details.\n")
+                if returncode == 0 and pts_test_failed:
+                    f.write("Hint: ensure test is installed, e.g. `phoronix-test-suite batch-install pts/ffmpeg-7.0.1`\n")
             print(f"     Error log: {err_file}")
             return False
 
@@ -1278,17 +1310,23 @@ class FFmpegRunner:
         installed_dir = Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark
         installed_dir_exists = installed_dir.exists()
 
-        already_installed = info_installed or test_installed_ok or installed_dir_exists
+        already_installed = info_installed or test_installed_ok
         print(
             f"[INFO] Install check -> info:{info_installed}, "
             f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
         )
 
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Found installation directory but PTS does not recognize {self.benchmark_full}. "
+                "Treating as broken install and reinstalling."
+            )
+
         if not already_installed:
             self.clean_pts_cache()
             self.install_benchmark()
         else:
-            print(f">>> Benchmark {self.benchmark_full} already installed, skipping installation\n")
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
         failed = []
         for num_threads in self.thread_list:

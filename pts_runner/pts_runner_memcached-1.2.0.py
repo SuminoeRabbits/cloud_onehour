@@ -22,6 +22,7 @@ import json
 import shutil
 import time
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 class MemcachedRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
@@ -452,6 +453,8 @@ class MemcachedRunner:
             stdout_f.write(f"\n[PTS EXIT CODE] {returncode}\n")
             stdout_f.flush()
 
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+
         cleanup_stale_memcached_processes()
             
         # Record end freq
@@ -460,6 +463,10 @@ class MemcachedRunner:
         if returncode == 124:
             print(f"  [ERROR] Memcached benchmark timed out at {thread_timeout}s for {num_threads} threads")
             return False
+        if returncode == 0 and pts_test_failed:
+            print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
+            return False
+
         if returncode == 0:
             return True
         return False
@@ -502,8 +509,28 @@ class MemcachedRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        self.clean_pts_cache()
-        self.install_benchmark()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
+
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
+
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                "Treating as broken install and reinstalling."
+            )
+
+        if not already_installed:
+            self.clean_pts_cache()
+            self.install_benchmark()
+        else:
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
         
         for t in self.thread_list:
             self.run_benchmark(t)

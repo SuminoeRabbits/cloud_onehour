@@ -807,6 +807,43 @@ def run_benchmark(self, num_threads):
         return False
 ```
 
+### 共通失敗判定パターン（推奨: 全runner共通）
+
+**重要**: `returncode == 0` だけでは成功判定しないこと。PTSは失敗しても 0 を返すケースがあります。
+
+特に以下は共通で検出対象にしてください（ベンチ固有ではない）:
+- `Multiple tests are not installed`
+- `The following tests failed`
+- `quit with a non-zero exit status`
+- `failed to properly run`
+
+```python
+pts_test_failed = False
+failure_reason = ""
+if log_file.exists():
+    log_content = log_file.read_text(errors='ignore')
+    failure_patterns = [
+        ("Multiple tests are not installed", "PTS test profile is not installed"),
+        ("The following tests failed", "PTS reported test execution failure"),
+        ("quit with a non-zero exit status", "PTS benchmark subprocess failed"),
+        ("failed to properly run", "PTS benchmark did not run properly"),
+    ]
+    for pattern, reason in failure_patterns:
+        if pattern.lower() in log_content.lower():
+            pts_test_failed = True
+            failure_reason = reason
+            break
+
+if returncode == 0 and not pts_test_failed:
+    print("[OK] Benchmark completed successfully")
+else:
+    print("[ERROR] Benchmark failed")
+    print(f"  Reason: {failure_reason or f'returncode={returncode}'}")
+    return False
+```
+
+このパターンを採用すると、「短時間で終わったのに成功扱い」の誤判定を防げます。
+
 ---
 
 ## オプション: install ログの有効化
@@ -1119,6 +1156,46 @@ def install_benchmark(self):
 - **デバッグ性**: ★★★★★ - 問題発生時の原因特定が容易
 - **ユーザー体験**: ★★★★☆ - 進捗可視化で待ち時間の不安解消
 - **メンテナンス性**: ★★★★★ - トラブルシューティング時間を大幅削減
+
+### run()での事前インストール判定（共通化可能）
+
+**推奨**: `already_installed` 判定は `info` / `test-installed` を優先し、
+`installed-tests` ディレクトリ存在だけでは成功扱いしない。
+
+```python
+verify_result = subprocess.run(
+    ['bash', '-c', f'phoronix-test-suite info {self.benchmark_full}'],
+    capture_output=True,
+    text=True
+)
+info_installed = verify_result.returncode == 0 and 'Test Installed: Yes' in verify_result.stdout
+
+test_installed_result = subprocess.run(
+    ['bash', '-c', f'phoronix-test-suite test-installed {self.benchmark_full}'],
+    capture_output=True,
+    text=True
+)
+test_installed_ok = test_installed_result.returncode == 0
+
+installed_dir_exists = (Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark).exists()
+
+already_installed = info_installed or test_installed_ok
+if not already_installed and installed_dir_exists:
+    print("[WARN] Directory exists but PTS does not recognize install. Reinstalling.")
+
+if not already_installed:
+    self.clean_pts_cache()
+    self.install_benchmark()
+```
+
+この判定は ffmpeg 固有ではなく、PTS runner 全般に適用可能です。
+
+### 重要事項: Python 3.10 互換性
+
+- Runner スクリプトは **Python 3.10 で実行可能** であること（必須）
+- 3.11+ 専用の言語機能・標準ライブラリに依存しないこと
+    - 例: `except*`, `typing.Self`, `tomllib` など
+- 新規実装・修正時は、少なくとも構文レベルで Python 3.10 互換を維持すること
 
 ### 後方互換性
 

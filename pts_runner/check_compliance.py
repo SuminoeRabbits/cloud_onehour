@@ -80,6 +80,8 @@ class ComplianceChecker:
             self.print_results()
             return (False, len(self.errors), len(self.warnings))
 
+        self.check_python310_syntax_compatibility()
+
 
 
         # Critical checks (must pass)
@@ -94,6 +96,8 @@ class ComplianceChecker:
         self.check_generate_summary_method()
 
         self.check_run_method_return()
+        self.check_common_failure_detection()
+        self.check_install_status_policy()
 
         self.check_dot_removal()
 
@@ -168,6 +172,38 @@ class ComplianceChecker:
         except Exception as e:
             self.syntax_ok = False
             self.errors.append(f"❌ CRITICAL: Failed to parse Python file: {str(e)}")
+
+    def check_python310_syntax_compatibility(self):
+        """Check whether file syntax is compatible with Python 3.10 grammar."""
+        try:
+            ast.parse(self.content, feature_version=10)
+            self.passed.append("✅ Python 3.10 syntax compatibility verified")
+        except TypeError:
+            try:
+                ast.parse(self.content, feature_version=(3, 10))
+                self.passed.append("✅ Python 3.10 syntax compatibility verified")
+            except SyntaxError as e:
+                self.errors.append(
+                    f"❌ CRITICAL: Python 3.10 incompatible syntax at line {e.lineno}:\n"
+                    f"   {e.msg}\n"
+                    f"   {e.text.strip() if e.text else ''}\n"
+                    "   Fix: avoid Python 3.11+ syntax and keep runner compatible with Python 3.10"
+                )
+            except Exception as e:
+                self.warnings.append(
+                    f"⚠️  WARNING: Could not verify Python 3.10 syntax compatibility: {str(e)}"
+                )
+        except SyntaxError as e:
+            self.errors.append(
+                f"❌ CRITICAL: Python 3.10 incompatible syntax at line {e.lineno}:\n"
+                f"   {e.msg}\n"
+                f"   {e.text.strip() if e.text else ''}\n"
+                "   Fix: avoid Python 3.11+ syntax and keep runner compatible with Python 3.10"
+            )
+        except Exception as e:
+            self.warnings.append(
+                f"⚠️  WARNING: Could not verify Python 3.10 syntax compatibility: {str(e)}"
+            )
 
 
 
@@ -1020,6 +1056,96 @@ class ComplianceChecker:
                     "⚠️  WARNING: self.thread_list not initialized in __init__"
                 )
 
+    def check_common_failure_detection(self):
+        """Check common failure detection policy from CODE_TEMPLATE common section."""
+        has_import = bool(
+            re.search(r'from\s+runner_common\s+import\s+.*detect_pts_failure_from_log', self.content)
+        )
+        has_call = bool(
+            re.search(r'detect_pts_failure_from_log\s*\(\s*log_file\s*\)', self.content)
+        )
+        has_guard = bool(
+            re.search(r'if\s+returncode\s*==\s*0\s+and\s+pts_test_failed', self.content)
+            or re.search(r'if\s+returncode\s*==\s*0\s+and\s+not\s+pts_test_failed', self.content)
+        )
+
+        if has_import and has_call and has_guard:
+            self.passed.append("✅ Common failure detection implemented (log pattern + guarded returncode)")
+        else:
+            missing = []
+            if not has_import:
+                missing.append("runner_common import: detect_pts_failure_from_log")
+            if not has_call:
+                missing.append("detect_pts_failure_from_log(log_file) call")
+            if not has_guard:
+                missing.append("guarded returncode branch using pts_test_failed")
+            self.errors.append(
+                "❌ CRITICAL: Common failure detection policy incomplete\n"
+                f"   Missing: {', '.join(missing)}\n"
+                "   Required by CODE_TEMPLATE common policy"
+            )
+
+    def check_install_status_policy(self):
+        """Check install status policy from CODE_TEMPLATE common section."""
+        has_import = bool(
+            re.search(r'from\s+runner_common\s+import\s+.*get_install_status', self.content)
+        )
+        has_call = bool(
+            re.search(r'get_install_status\s*\(\s*self\.benchmark_full\s*,\s*self\.benchmark\s*\)', self.content)
+        )
+        has_already = bool(
+            re.search(
+                r'already_installed\s*=\s*install_status\s*\[\s*["\']already_installed["\']\s*\]',
+                self.content
+            )
+        )
+        has_broken_branch = bool(
+            re.search(r'if\s+not\s+already_installed\s+and\s+installed_dir_exists\s*:', self.content)
+        )
+        has_if_not_already = bool(
+            re.search(r'if\s+not\s+already_installed\s*:', self.content)
+        )
+        has_install_call = 'self.install_benchmark(' in self.content
+        has_reinstall = has_if_not_already and has_install_call
+
+        helper_style_ok = has_import and has_call and has_already
+
+        manual_info_check = bool(
+            re.search(r'info_installed\s*=\s*.*returncode\s*==\s*0.*Test Installed:\s*Yes', self.content)
+        )
+        manual_test_installed = bool(
+            re.search(r'phoronix-test-suite\s+test-installed', self.content)
+            and re.search(r'test_installed_ok\s*=\s*.*returncode\s*==\s*0', self.content)
+        )
+        manual_already = bool(
+            re.search(
+                r'already_installed\s*=\s*(info_installed\s+or\s+test_installed_ok|test_installed_ok\s+or\s+info_installed)',
+                self.content
+            )
+        )
+        manual_style_ok = manual_info_check and manual_test_installed and manual_already
+
+        if (helper_style_ok or manual_style_ok) and has_broken_branch and has_reinstall:
+            self.passed.append(
+                "✅ Install status policy implemented (info/test-installed priority + broken-install handling)"
+            )
+        else:
+            missing = []
+            if not (helper_style_ok or manual_style_ok):
+                missing.append(
+                    "either helper-style (get_install_status + install_status['already_installed']) or "
+                    "equivalent manual-style (info/test-installed + already_installed merge)"
+                )
+            if not has_broken_branch:
+                missing.append("if not already_installed and installed_dir_exists branch")
+            if not has_reinstall:
+                missing.append("reinstall path in if not already_installed")
+            self.errors.append(
+                "❌ CRITICAL: Install status policy incomplete\n"
+                f"   Missing: {', '.join(missing)}\n"
+                "   Required by CODE_TEMPLATE common policy"
+            )
+
     def find_hardcoded_thread_lists(self):
         """
         Detect hardcoded numeric thread lists assigned to self.thread_list.
@@ -1433,6 +1559,8 @@ Critical Checks:
 
   - Python syntax is valid (no syntax errors)
 
+    - Python 3.10 syntax compatible
+
   - self.benchmark defined in __init__
 
   - TEST_RESULTS_NAME uses {self.benchmark} (not hardcoded)
@@ -1440,6 +1568,10 @@ Critical Checks:
   - export_results() method exists
 
   - generate_summary() method exists
+
+    - Common failure detection (detect_pts_failure_from_log + guarded returncode)
+
+    - Install status policy (get_install_status + broken-install handling)
 
   - Dot removal implemented
 

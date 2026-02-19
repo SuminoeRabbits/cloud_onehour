@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from runner_common import detect_pts_failure_from_log, get_install_status
 
 class PreSeedDownloader:
     """
@@ -1327,6 +1328,7 @@ eval "$REAL_CC" $ARGS
 
             process.wait()
             returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
@@ -1335,6 +1337,10 @@ eval "$REAL_CC" $ARGS
             print(f"  [OK] End frequency recorded")
         else:
             print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+
+        if returncode == 0 and pts_test_failed:
+            print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
+            return False
 
         if returncode == 0:
             print(f"\n[OK] Benchmark completed successfully")
@@ -1391,8 +1397,28 @@ eval "$REAL_CC" $ARGS
                 print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
         # Clean and install
-        self.clean_pts_cache()
-        self.install_benchmark()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
+
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
+
+        if not already_installed and installed_dir_exists:
+            print(
+                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
+                "Treating as broken install and reinstalling."
+            )
+
+        if not already_installed:
+            self.clean_pts_cache()
+            self.install_benchmark()
+        else:
+            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
         if self.dry_run:
             print("\n>>> Dry run enabled: skipping benchmark run.")
             return True
