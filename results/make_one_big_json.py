@@ -299,8 +299,8 @@ LOOKUP_TARGETS = [
         "type": "VM.Standard.A1.Flex",
         "name_contains": "vcpu-8",
         "csp": "OCI",
-        "cpu_name": "Ampere one (v8.6A)",
-        "cpu_isa": "Armv8.6 (NEON-128)",
+        "cpu_name": "Neoverse-N1(Ampere Altra)",
+        "cpu_isa": "Armv8.2 (NEON-128)",
         "default_total_vcpu": 8,
         "default_cost": 0.1367,
     },
@@ -310,8 +310,8 @@ LOOKUP_TARGETS = [
         "type": "VM.Standard.A1.Flex",
         "name_contains": "vcpu-16",
         "csp": "OCI",
-        "cpu_name": "Ampere one (v8.6A)",
-        "cpu_isa": "Armv8.6 (NEON-128)",
+        "cpu_name": "Neoverse-N1(Ampere Altra)",
+        "cpu_isa": "Armv8.2 (NEON-128)",
         "default_total_vcpu": 16,
         "default_cost": 0.2647,
     },
@@ -447,6 +447,7 @@ def _build_machine_lookup() -> List[Dict[str, Any]]:
 
         lookup.append({"match": target["match"], "info": info})
 
+    lookup.sort(key=lambda item: len(item["match"]), reverse=True)
     return lookup
 
 
@@ -532,9 +533,14 @@ def parse_version(version_str: str) -> Optional[tuple]:
 def check_version_compatibility(version1: str, version2: str) -> bool:
     """
     Check if two versions are compatible for merging.
-    Per README_results.md, versions must be exactly equal.
+    Versions are compatible when their base semantic version (vX.Y.Z)
+    matches, regardless of git hash suffix.
     """
-    return version1 == version2
+    match1 = re.match(r'^(v\d+\.\d+\.\d+)', version1)
+    match2 = re.match(r'^(v\d+\.\d+\.\d+)', version2)
+    if not match1 or not match2:
+        return False
+    return match1.group(1) == match2.group(1)
 
 
 def extract_version_info(json_data: Dict[str, Any]) -> Optional[str]:

@@ -195,7 +195,11 @@ def is_valid_one_big_json(json_path: Path, machinename: str, target_major: Optio
 
     # Version check
     if target_major:
-        file_version = data.get("generation_log", {}).get("version_info", "unknown")
+        file_version = (
+            data.get("generation log", {}).get("version info")
+            or data.get("generation_log", {}).get("version_info")
+            or "unknown"
+        )
         match = re.match(r'(v\d+)\.\d+\.\d+', file_version)
         if not match or match.group(1) != target_major:
             print(f"Version mismatch in {json_path}: expected {target_major}, found {file_version}", file=sys.stderr)
@@ -385,15 +389,20 @@ def main() -> int:
                 return 1
 
             output_json = results_path / f"all_results_{csp_dir.name}.json"
-            input_jsons = sorted(results_path.glob("one_big_json_*.json"))
             try:
-                # Ensure each input JSON is valid and modern before copying/merging
+                # Always regenerate canonical one_big_json with latest parser/lookup logic
+                generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
+
+                # Ensure any additional one_big_json_*.json are still valid
+                input_jsons = sorted(results_path.glob("one_big_json_*.json"))
                 for json_file in input_jsons:
                     if not is_valid_one_big_json(json_file, csp_dir.name, target_major):
-                        generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
-                
-                # Refresh input list after potential regeneration
+                        print(f"Removing invalid JSON -> {json_file}")
+                        json_file.unlink(missing_ok=True)
+
                 input_jsons = sorted(results_path.glob("one_big_json_*.json"))
+                if not input_jsons:
+                    raise RuntimeError(f"No valid one_big_json files found in {results_path}")
 
                 if len(input_jsons) == 1:
                     shutil.copy2(input_jsons[0], output_json)
