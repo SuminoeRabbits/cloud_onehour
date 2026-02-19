@@ -1092,7 +1092,10 @@ class InstanceLogger:
     def __init__(self, instance_name, global_dashboard, log_dir):
         self.name = instance_name
         self.dashboard = global_dashboard
+        self.log_dir = log_dir
         self.log_file = log_dir / f"{instance_name.replace(':', '_')}.log"
+        self.io_failed = False
+        self.last_io_error = None
 
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1130,8 +1133,33 @@ class InstanceLogger:
         try:
             with open(self.log_file, 'a') as f:
                 f.write(f"[{timestamp}] {line}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            self.io_failed = True
+            self.last_io_error = str(e)
+
+    def log_dir_unavailable(self):
+        """Return True if logger detected I/O failure or log directory disappeared."""
+        if self.io_failed:
+            return True
+        return (not self.log_dir.exists()) or (not self.log_dir.is_dir())
+
+
+class LogDirectoryUnavailableError(RuntimeError):
+    """Raised when log directory disappears during execution."""
+    pass
+
+
+def ensure_log_dir_available(log_dir: Path, logger: Optional[InstanceLogger] = None, context: str = "") -> None:
+    """Ensure log directory exists; raise explicit error if it is gone."""
+    if not log_dir.exists() or not log_dir.is_dir():
+        message = f"Log directory unavailable{f' ({context})' if context else ''}: {log_dir}"
+        if logger:
+            logger.io_failed = True
+            logger.last_io_error = message
+        raise LogDirectoryUnavailableError(message)
+    if logger and logger.log_dir_unavailable():
+        suffix = f" ({context})" if context else ""
+        raise LogDirectoryUnavailableError(f"Logger I/O failure detected{suffix}: {logger.last_io_error}")
 
 
 def progress(instance_name, step, logger=None):
@@ -1940,6 +1968,51 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
         print(f"  [Workloads] Starting execution of {total_workloads} workloads...")
 
     for i, workload in enumerate(workloads, start=1):
+        def archive_failure_logs(reason: str, current_cmd: str, wrapper_log_path: Optional[str] = None) -> None:
+            """Archive remote debug logs into cloud_reports_dir/debug_logs for postmortem."""
+            try:
+                cloud_rep_dir = config['common']['cloud_reports_dir']
+                workload_log_match = re.search(r'>\s*(/tmp/[^\s]+\.log)', current_cmd)
+                workload_log_path = workload_log_match.group(1) if workload_log_match else ""
+
+                candidates = [
+                    f"/tmp/cloud_exec_cmd_{i}.log",
+                    f"/tmp/cloud_exec_cmd_{i}_done.marker",
+                    "/tmp/prepare_tools.log",
+                    "/tmp/apt_update.log",
+                    "/tmp/apt_install.log",
+                    "/tmp/pts_runner_cpuminer-opt.log",
+                    "/tmp/pts_runner_openssl.log",
+                    "/tmp/pts_runner_rustls.log",
+                    "/tmp/pts_runner_nginx.log",
+                    "/tmp/pts_runner_ffmpeg.log",
+                    "/tmp/pts_runner_compress-zstd.log",
+                    "/tmp/pts_runner_compress-xz.log",
+                    "/tmp/pts_runner_compress-lz4.log",
+                ]
+                if wrapper_log_path:
+                    candidates.append(wrapper_log_path)
+                if workload_log_path:
+                    candidates.append(workload_log_path)
+
+                quoted_candidates = " ".join([f'"{p}"' for p in candidates])
+                debug_cmd = (
+                    f"ssh {ssh_opt} {ssh_user}@{ip} "
+                    f"'DBG_DIR={cloud_rep_dir}/debug_logs; "
+                    f"mkdir -p \"$DBG_DIR\"; "
+                    f"TS=$(date +%Y%m%d_%H%M%S); "
+                    f"for f in {quoted_candidates}; do "
+                    f"if [ -f \"$f\" ]; then cp -f \"$f\" \"$DBG_DIR/$(basename \"$f\").w{i}.${{TS}}\"; fi; "
+                    f"done; "
+                    f"echo archived:{reason}'"
+                )
+                run_cmd(debug_cmd, capture=True, ignore=True, timeout=60, logger=logger)
+                if logger:
+                    logger.info(f"Archived failure logs to {cloud_rep_dir}/debug_logs ({reason})")
+            except Exception as archive_error:
+                if logger:
+                    logger.warn(f"Failed to archive failure logs ({reason}): {archive_error}")
+
         workload_start = time.time()
         # Format workload with vcpu substitution
         cmd = workload.format(vcpus=inst['vcpus'])
@@ -1982,6 +2055,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             # Create unique marker file for this command
             marker_file = f"/tmp/cloud_exec_cmd_{i}_done.marker"
             log_file = f"/tmp/cloud_exec_cmd_{i}.log"
+            remote_log_path = log_file
 
             # Wrap command with nohup and marker file creation
             # Use double quotes for outer command to avoid nested single quote issues
@@ -1998,8 +2072,8 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                 # We will proceed to polling to verify.
                 if logger:
                     logger.warn("Timeout while starting background command, proceeding to verification...")
-                #elif DEBUG_MODE:
-                    log("Timeout while starting background command, proceeding to verification...", "WARN")
+                else:
+                    print("  [Warn] Timeout while starting background command, proceeding to verification...")
 
             if logger:
                 logger.info("Command started in background, waiting for completion...")
@@ -2013,6 +2087,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             check_count = 0
             last_log_size = 0
             ssh_fail_count = 0
+            ssh_fail_threshold = 2
             warned_90_percent = False  # Track if we've issued 90% warning
 
             while time.time() - start_time < workload_timeout:
@@ -2031,28 +2106,36 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     ssh_fail_count = 0
                 else:
                     ssh_fail_count += 1
-                    if ssh_fail_count >= 3:
+                    if ssh_fail_count >= ssh_fail_threshold:
                         # consecutive SSH failures, check cloud status
                         if logger:
                             logger.warn(f"SSH failed {ssh_fail_count} times, checking instance status...")
                         elif False:
                             log(f"SSH failed {ssh_fail_count} times, checking instance status...", "WARN")
 
+                        cloud_name = (inst.get('cloud') or inst.get('_csp') or '').lower()
+                        status_instance_id = inst.get('instance_id') or inst.get('name')
+                        if cloud_name == 'gcp':
+                            status_instance_id = inst.get('name') or status_instance_id
+
                         status = get_instance_status(
-                            cloud=inst.get('cloud'),
-                            instance_id=inst.get('instance_id') or inst.get('name'),
+                            cloud=cloud_name,
+                            instance_id=status_instance_id,
                             region=inst.get('region'),
                             project=inst.get('project'),
                             zone=inst.get('region') or inst.get('zone'),
                             logger=logger
                         )
-                        
-                        if status in ['terminated', 'TERMINATED', 'stopped', 'STOPPING', 'shutting-down']:
+
+                        normalized_status = (status or "unknown").strip().lower()
+                        if normalized_status in ['terminated', 'stopped', 'stopping', 'shutting-down', 'shutting_down', 'deleted', 'notfound']:
                             msg = f"Instance {instance_name} terminated externally (Status: {status})"
                             if logger: 
                                 logger.error(msg)
                             elif False:
                                 log(msg, "ERROR")
+
+                            archive_failure_logs("external-termination", cmd, log_file)
                             
                             DASHBOARD.update(instance_name, status='TERMINATED')
                             duration = time.time() - workload_start
@@ -2161,6 +2244,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "ERROR")
+                    archive_failure_logs("long-running-failed", cmd, log_file)
                     return False
                 elif marker_check and marker_check != "RUNNING":
                     if logger:
@@ -2403,6 +2487,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
+                    archive_failure_logs("regular-timeout", cmd)
                     # No abort on timeout? The original code continued.
                     continue 
 
@@ -2423,6 +2508,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "ERROR")
+                    archive_failure_logs("regular-command-error", cmd)
                     return False
 
         # Special handling: Verify SSH build after SSH-related scripts execution
@@ -2452,6 +2538,7 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                             log("SSH build verification failed, aborting command execution", "ERROR")
                         #elif DEBUG_MODE == False:
                             print("  [Error] SSH build verification failed")
+                        archive_failure_logs("ssh-build-verify-failed", cmd)
                         return False
                 else:
                     # Status file doesn't exist - SSH build was not executed (skip verification)
@@ -2504,6 +2591,7 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     )
 
     host_rep_dir = config['common']['host_reports_dir']
+    Path(host_rep_dir).mkdir(parents=True, exist_ok=True)
     # Use hostname if specified, otherwise fallback to cloud_name format
     file_basename = inst.get('hostname', f"{cloud}_{name}")
     # Format OS label: "24.04" -> "ubuntu24_04", "rhel9" -> "rhel9", "orcl9" -> "orcl9"
@@ -3458,9 +3546,11 @@ def process_instance(
     instance_id = None
     ip = None
     commands_success = False
+    results_collected = False
 
     # Inject CSP name into inst dict for downstream SSH user lookup
     inst['_csp'] = provider.csp_config.get('name', 'unknown')
+    inst['cloud'] = inst['_csp']
 
     try:
         # Launch instance
@@ -3498,6 +3588,8 @@ def process_instance(
         logger.info(f"Waiting 60s for SSH (IP: {ip})...")
         time.sleep(60)
 
+        ensure_log_dir_available(log_dir, logger, "after SSH wait")
+
         # Set hostname if specified
         if 'hostname' in inst and inst['hostname']:
             hostname = inst['hostname']
@@ -3515,8 +3607,10 @@ def process_instance(
 
         # Run workloads
         try:
+            ensure_log_dir_available(log_dir, logger, "before workload execution")
             ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
             commands_success = run_ssh_commands(ip, config, inst, key_path, ssh_strict, instance_name, logger)
+            ensure_log_dir_available(log_dir, logger, "after workload execution")
         except Exception as workload_error:
             logger.error(f"Workload execution failed: {workload_error}")
             commands_success = False
@@ -3524,14 +3618,48 @@ def process_instance(
         # Collect results
         try:
             collect_results(ip, config, provider.csp_config.get('name', 'unknown'), sanitized_name, inst, key_path, ssh_strict, instance_name, logger)
+            results_collected = True
         except Exception as collect_error:
             logger.error(f"Result collection failed: {collect_error}")
 
         # Update status
-        if commands_success:
-            DASHBOARD.update(instance_name, status="COMPLETED")
-        else:
-            DASHBOARD.update(instance_name, status="COMPLETED", color=DASHBOARD.WARNING)
+        terminal_statuses = {"TERMINATED", "ERROR", "TERM_TIMEOUT", "TERM_FAILED"}
+        current_status = None
+        with DASHBOARD.lock:
+            if instance_name in DASHBOARD.instances:
+                current_status = DASHBOARD.instances[instance_name].get('status')
+
+        if current_status not in terminal_statuses:
+            if commands_success:
+                DASHBOARD.update(instance_name, status="COMPLETED")
+            else:
+                DASHBOARD.update(instance_name, status="COMPLETED", color=DASHBOARD.WARNING)
+
+    except LogDirectoryUnavailableError as log_dir_error:
+        print(f"[FAILSAFE] {instance_name}: {log_dir_error}", flush=True)
+        if ip and not results_collected:
+            try:
+                ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
+                collect_results(
+                    ip,
+                    config,
+                    provider.csp_config.get('name', 'unknown'),
+                    sanitized_name,
+                    inst,
+                    key_path,
+                    ssh_strict,
+                    instance_name,
+                    logger
+                )
+                results_collected = True
+                print(f"[FAILSAFE] {instance_name}: collected partial results before termination", flush=True)
+            except Exception as emergency_collect_error:
+                print(
+                    f"[FAILSAFE] {instance_name}: emergency result collection failed: {emergency_collect_error}",
+                    flush=True
+                )
+
+        DASHBOARD.update(instance_name, status="ERROR", step="Log dir lost", color=DASHBOARD.FAIL)
 
     except Exception as e:
         logger.error(f"Instance processing failed: {e}")
@@ -3591,10 +3719,14 @@ def execute_instances_parallel(
             except Exception as exc:
                 # Log to general errors file
                 error_log = log_dir / "general_errors.log"
-                with open(error_log, "a") as f:
-                    f.write(f"[{datetime.now()}] {inst['name']} failed: {exc}\n")
-                    import traceback
-                    f.write(traceback.format_exc() + "\n")
+                try:
+                    error_log.parent.mkdir(parents=True, exist_ok=True)
+                    with open(error_log, "a") as f:
+                        f.write(f"[{datetime.now()}] {inst['name']} failed: {exc}\n")
+                        import traceback
+                        f.write(traceback.format_exc() + "\n")
+                except Exception:
+                    print(f"[WARN] Failed to write general error log for {inst['name']}: {exc}", flush=True)
 
     except KeyboardInterrupt:
         print("\n[INTERRUPT] KeyboardInterrupt detected in main thread")
