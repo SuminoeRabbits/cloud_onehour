@@ -440,6 +440,7 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 | :---                   | :---:| :---:| :---:  |:---:  | :---:      |
 |"rpi5"                   |local|	4  |Cortex-A76|	Armv8.2-A| 0.0 |
 |"t3" and "medium"|	AWS|	2|	Intel Xeon Platinum (8000 series)|	x86-64 (AVX-512)| 0.0183 |
+|"m6g" and "4xlarge"|	AWS|16|	Neoverse-N1 (Graviton2)|	Armv8.2-A (NEON-128)| 0.8133 |
 |"m7g" and "2xlarge"|	AWS|8|	Neoverse-V1 (Graviton3)|	Armv8.4-A (SVE-256)| 0.4413 |
 |"m7g" and "4xlarge"|	AWS|	16|	Neoverse-V1 (Graviton3)|	Armv8.4-A (SVE-256)| 0.8629 |
 |"m7i" and "2xlarge"|	AWS|8|	Intel Xeon 4 (4th Sapphire Rapids)|	x86-64 (AMX + AVX-512)| 0.5405 |
@@ -458,13 +459,13 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 |"c4-standard-16"|	GCP|	16|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.7928 |
 |"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.3869 |
 |"c4a-standard-16"|	GCP|	16|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.7712 |
-|"t2a-standard-8"|	GCP|	8|	Ampere Altra|	Armv8.2-A (NEON-128)| 0.40654 |
-|"t2a-standard-16"|	GCP|	16|	Ampere Altra|	Armv8.2-A (NEON-128)| 0.75968 |
+|"t2a-standard-8"|	GCP|	8|	Neoverse-N1(Ampere Altra)|	Armv8.2-A (NEON-128)| 0.40654 |
+|"t2a-standard-16"|	GCP|	16|	Neoverse-N1(Ampere Altra)|	Armv8.2-A (NEON-128)| 0.75968 |
 |"E5" and "Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1727 |
 |"E6" and "Flex"|	OCI|	8|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.1927 |
 |"E6" and "Flex" and "vcpu-16"|	OCI|	16|	AMD EPYC 9J45 (Zen 5 "Turin")|	x86-64 (AMX + AVX-512)| 0.368 |
-|"A1" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1367 |
-|"A1" and "Flex" and "vcpu-16"|	OCI|	16|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.2647 |
+|"A1" and "Flex"|	OCI|	8|	Neoverse-N1(Ampere Altra) |	Armv8.2 (NEON-128)| 0.1367 |
+|"A1" and "Flex" and "vcpu-16"|	OCI|	16|	Neoverse-N1(Ampere Altra) |	Armv8.2 (NEON-128)| 0.2647 |
 |"A2" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1287 |
 |"A2" and "Flex" and "vcpu-16"|	OCI|	16|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.3607 |
 |"A4" and "Flex"|	OCI|	8|	Ampere one (v8.6A)|	Armv8.6 (NEON-128)| 0.1503 |

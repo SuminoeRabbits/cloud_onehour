@@ -5,7 +5,7 @@ make_one_big_json.py
 Generates one_big_json.json from results directory structure.
 Based on README_results.md specification.
 
-Version info: v2.0.0 (Updated: 2026-02-14)
+Version info: v2.0.1 (Updated: 2026-02-19)
 
 Benchmark parsing is delegated to json_parser/json_parser_<benchmark>.py modules.
 Each module exports _collect_thread_payload(benchmark_dir, thread_num, cost_hour)
@@ -36,7 +36,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 
 # Script version - Format: v<major>.<minor>.<patch>
-SCRIPT_VERSION = "v2.0.0"
+SCRIPT_VERSION = "v2.0.1"
 
 CLOUD_INSTANCES_FILE = Path(__file__).resolve().parent.parent / "cloud_instances.json"
 
@@ -492,7 +492,7 @@ def get_version_info() -> str:
 
     Returns:
         Version string like "v2.0.0-g1277d46" if in git repo,
-        or "v2.0.0-unknown" if not in git repo or git not available
+        or "v2.0.0-gunknown" if not in git repo or git not available
     """
     try:
         git_hash = subprocess.check_output(
@@ -503,7 +503,7 @@ def get_version_info() -> str:
 
         return f"{SCRIPT_VERSION}-g{git_hash}"
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return f"{SCRIPT_VERSION}-unknown"
+        return f"{SCRIPT_VERSION}-gunknown"
 
 
 def get_generation_timestamp() -> str:
@@ -514,8 +514,8 @@ def get_generation_timestamp() -> str:
 def create_generation_log() -> Dict[str, Any]:
     """Create generation log dict for output JSON."""
     return {
-        "generation_log": {
-            "version_info": get_version_info(),
+        "generation log": {
+            "version info": get_version_info(),
             "date": get_generation_timestamp()
         }
     }
@@ -532,15 +532,30 @@ def parse_version(version_str: str) -> Optional[tuple]:
 def check_version_compatibility(version1: str, version2: str) -> bool:
     """
     Check if two versions are compatible for merging.
-    Versions must have matching major version for merging.
+    Per README_results.md, versions must be exactly equal.
     """
-    v1_match = re.match(r'(v\d+)\.\d+\.\d+', version1)
-    v2_match = re.match(r'(v\d+)\.\d+\.\d+', version2)
+    return version1 == version2
 
-    if not v1_match or not v2_match:
-        return False
 
-    return v1_match.group(1) == v2_match.group(1)
+def extract_version_info(json_data: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract version info from JSON data.
+    Supports both current keys ("generation log"/"version info")
+    and legacy keys ("generation_log"/"version_info").
+    """
+    gen_log_new = json_data.get("generation log")
+    if isinstance(gen_log_new, dict):
+        version_new = gen_log_new.get("version info")
+        if isinstance(version_new, str) and version_new:
+            return version_new
+
+    gen_log_old = json_data.get("generation_log")
+    if isinstance(gen_log_old, dict):
+        version_old = gen_log_old.get("version_info")
+        if isinstance(version_old, str) and version_old:
+            return version_old
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -941,9 +956,8 @@ def main():
                 with open(json_file, 'r') as f:
                     json_data = json.load(f)
 
-                if "generation_log" in json_data and "version_info" in json_data["generation_log"]:
-                    file_version = json_data["generation_log"]["version_info"]
-
+                file_version = extract_version_info(json_data)
+                if file_version:
                     if idx == 0:
                         first_version = file_version
                         print(f"    Version: {file_version}")
@@ -953,12 +967,15 @@ def main():
                             print(f"Error: Version mismatch detected!", file=sys.stderr)
                             print(f"  First file version: {first_version}", file=sys.stderr)
                             print(f"  Current file version: {file_version}", file=sys.stderr)
-                            print(f"  JSON files with different major versions cannot be merged.", file=sys.stderr)
+                            print(f"  JSON files with different versions cannot be merged.", file=sys.stderr)
                             sys.exit(1)
 
+                    json_data.pop("generation log", None)
                     json_data.pop("generation_log", None)
                 else:
-                    print(f"    Warning: No version info found in {json_file}", file=sys.stderr)
+                    print(f"Error: No version info found in {json_file}", file=sys.stderr)
+                    print("  Each JSON must include generation log version info for merge validation.", file=sys.stderr)
+                    sys.exit(1)
 
                 merged_data = merge_json_data(merged_data, json_data)
             except json.JSONDecodeError as e:
