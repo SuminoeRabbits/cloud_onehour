@@ -388,6 +388,22 @@ class MemcachedRunner:
         perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+        quick_thread_timeout = int(os.environ.get('MEMCACHED_QUICK_THREAD_TIMEOUT', '1800'))
+        normal_thread_timeout = int(os.environ.get('MEMCACHED_THREAD_TIMEOUT', '5400'))
+        thread_timeout = quick_thread_timeout if self.quick_mode else normal_thread_timeout
+
+        def cleanup_stale_memcached_processes():
+            cleanup_cmds = [
+                "pkill -f 'memtier_benchmark.*memcache_text' || true",
+                "pkill -f '^memtier_benchmark' || true",
+                "pkill -f '^./memcached -c 4096 -t ' || true",
+                "pkill -f '/opt/phoronix-test-suite/phoronix-test-suite batch-run pts/memcached-1.2.0' || true",
+            ]
+            for c in cleanup_cmds:
+                subprocess.run(['bash', '-c', c], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        cleanup_stale_memcached_processes()
+        time.sleep(1)
         
         # Remove existing PTS result to avoid interactive prompts
         sanitized_benchmark = self.benchmark.replace('.', '')
@@ -406,6 +422,10 @@ class MemcachedRunner:
              pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
         else:
              pts_cmd = f'{batch_env} {pts_base_cmd}'
+
+        timeout_cmd = shutil.which('timeout')
+        if timeout_cmd:
+            pts_cmd = f'{timeout_cmd} --signal=TERM --kill-after=30s {thread_timeout}s {pts_cmd}'
 
         # Record start freq
         subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_start_file}'])
@@ -431,12 +451,17 @@ class MemcachedRunner:
             returncode = process.returncode
             stdout_f.write(f"\n[PTS EXIT CODE] {returncode}\n")
             stdout_f.flush()
+
+        cleanup_stale_memcached_processes()
             
         # Record end freq
         subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_end_file}'])
         
+        if returncode == 124:
+            print(f"  [ERROR] Memcached benchmark timed out at {thread_timeout}s for {num_threads} threads")
+            return False
         if returncode == 0:
-             return True
+            return True
         return False
 
     def export_results(self):

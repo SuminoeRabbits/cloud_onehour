@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -793,6 +794,20 @@ class FFmpegRunner:
             log_f.close()
 
         if install_failed:
+            # Archive PTS install failure evidence for postmortem
+            try:
+                failed_logs = sorted((Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark).rglob('install-failed.log'))
+                if failed_logs:
+                    debug_dir = self.project_root / 'results' / 'debug_logs'
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    for i, src in enumerate(failed_logs, 1):
+                        dst = debug_dir / f'ffmpeg_install-failed.{self.machine_name}.{ts}.{i}.log'
+                        shutil.copy2(src, dst)
+                        print(f"  [INFO] Archived install-failed.log: {dst}")
+            except Exception as archive_error:
+                print(f"  [WARN] Failed to archive install-failed.log: {archive_error}")
+
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
             print(f"  [INFO] Check output above for details")
             if use_install_log:
@@ -1250,8 +1265,24 @@ class FFmpegRunner:
             capture_output=True,
             text=True
         )
+        info_installed = verify_result.returncode == 0 and 'Test Installed: Yes' in verify_result.stdout
 
-        already_installed = verify_result.returncode == 0 and 'Test Installed: Yes' in verify_result.stdout
+        test_installed_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
+        test_installed_result = subprocess.run(
+            ['bash', '-c', test_installed_cmd],
+            capture_output=True,
+            text=True
+        )
+        test_installed_ok = test_installed_result.returncode == 0
+
+        installed_dir = Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark
+        installed_dir_exists = installed_dir.exists()
+
+        already_installed = info_installed or test_installed_ok or installed_dir_exists
+        print(
+            f"[INFO] Install check -> info:{info_installed}, "
+            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
+        )
 
         if not already_installed:
             self.clean_pts_cache()
