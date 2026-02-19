@@ -318,9 +318,10 @@ def print_commands(commands):
     print(f"{'='*80}\n")
 
 
-def _add_log_redirection(cmd: str) -> str:
+def _add_log_redirection(cmd: str, seen_log_paths: set = None) -> str:
     """
     Append log redirection using testname-derived log file.
+    If seen_log_paths is provided, use '>>' for repeated log paths, otherwise '>'.
     """
     import re
 
@@ -332,7 +333,14 @@ def _add_log_redirection(cmd: str) -> str:
     else:
         log_path = "/tmp/pts_runner.log"
 
-    return f"{cmd} > {log_path} 2>&1"
+    operator = ">"
+    if seen_log_paths is not None:
+        if log_path in seen_log_paths:
+            operator = ">>"
+        else:
+            seen_log_paths.add(log_path)
+
+    return f"{cmd} {operator} {log_path} 2>&1"
 
 
 def print_commands_json_fragment(commands):
@@ -346,7 +354,8 @@ def print_commands_json_fragment(commands):
         print("\n[WARN] No commands to generate")
         return
 
-    payload = [_add_log_redirection(cmd) for cmd in commands]
+    seen_log_paths = set()
+    payload = [_add_log_redirection(cmd, seen_log_paths) for cmd in commands]
     print(f"\n{'='*80}")
     print(f"Generated workloads JSON fragment ({len(commands)} commands)")
     print(f"{'='*80}")
