@@ -742,12 +742,15 @@ class FFmpegRunner:
 
         process.wait()
         returncode = process.returncode
+        log_file = install_log
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         full_output = ''.join(install_output)
 
         # Check for installation failure
         install_failed = False
         if returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
             install_failed = True
         elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
             install_failed = True
@@ -1291,26 +1294,11 @@ class FFmpegRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        verify_cmd = f'phoronix-test-suite info {self.benchmark_full}'
-        verify_result = subprocess.run(
-            ['bash', '-c', verify_cmd],
-            capture_output=True,
-            text=True
-        )
-        info_installed = verify_result.returncode == 0 and 'Test Installed: Yes' in verify_result.stdout
-
-        test_installed_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
-        test_installed_result = subprocess.run(
-            ['bash', '-c', test_installed_cmd],
-            capture_output=True,
-            text=True
-        )
-        test_installed_ok = test_installed_result.returncode == 0
-
-        installed_dir = Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark
-        installed_dir_exists = installed_dir.exists()
-
-        already_installed = info_installed or test_installed_ok
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        info_installed = install_status["info_installed"]
+        test_installed_ok = install_status["test_installed_ok"]
+        installed_dir_exists = install_status["installed_dir_exists"]
+        already_installed = install_status["already_installed"]
         print(
             f"[INFO] Install check -> info:{info_installed}, "
             f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"

@@ -48,7 +48,27 @@ def get_install_status(benchmark_full: str, benchmark: str) -> dict:
             text=True,
             check=False,
         )
-        test_installed_ok = test_installed_result.returncode == 0
+        combined_output = (
+            f"{test_installed_result.stdout}\n{test_installed_result.stderr}"
+        ).lower()
+        indicates_not_installed = "not installed" in combined_output
+        looks_like_help_text = (
+            "usage:" in combined_output
+            or "available commands" in combined_output
+            or "command" in combined_output and "not found" in combined_output
+        )
+        has_positive_install_signal = (
+            benchmark_full.lower() in combined_output
+            or "is installed" in combined_output
+            or "already installed" in combined_output
+            or "test installed: yes" in combined_output
+        )
+        test_installed_ok = (
+            test_installed_result.returncode == 0
+            and not indicates_not_installed
+            and not looks_like_help_text
+            and has_positive_install_signal
+        )
     except Exception:
         test_installed_ok = False
 
