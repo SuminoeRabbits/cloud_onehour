@@ -844,18 +844,6 @@ README_results.md の `"test_name"のキー生成ルール` に従う。
 
 ## 既存スクリプト一覧
 
-| スクリプト | パターン | テスト数 | 備考 |
-|-----------|---------|---------|------|
-| `json_parser_apache-3.0.0.py` | C (JSON) | 複数 (Concurrent Requests) | `<N>-thread.json` から全データ取得 |
-| `json_parser_build-gcc-1.5.0.py` | D (ビルド系) | 単一 | time = values |
-| `json_parser_build-linux-kernel-1.17.1.py` | D (ビルド系) | 複数 (Build config) | ログ内に複数ビルド設定 |
-| `json_parser_build-llvm-1.6.0.py` | D (ビルド系) | 複数 (Build System) | ログ内に複数ビルドシステム |
-| `json_parser_compress-7zip-1.12.0.py` | C (JSON) | 複数 (Compression/Decompression) | `<N>-thread.json` から全データ取得 |
-| `json_parser_coremark-1.0.1.py` | A (ログ単一) | 単一 | time 取得不可 |
-| `json_parser_pgbench-1.11.1.py` | B (ログ複数) | 複数 (SF/Clients/Mode) | `<N>-thread.json` 存在時はパターンC化を検討 |
-| `json_parser_redis-1.3.1.py` | - | - | 要確認 |
-| `json_parser_renaissance-1.4.0.py` | - | - | 要確認 |
-| `json_parser_simdjson-2.1.0.py` | - | - | 要確認 |
-| `json_parser_sysbench-1.1.0.py` | B (ログ複数) | 2 (CPU + Memory) | time 取得不可 |
-| `json_parser_tensorflow-lite-1.1.0.py` | - | - | 要確認 |
-| `json_parser_tinymembench-1.0.2.py` | - | - | 要確認 |
+既存スクリプト一覧は以下の独立ファイルで管理します。
+
+- [README_json_parser_list.md](README_json_parser_list.md)
