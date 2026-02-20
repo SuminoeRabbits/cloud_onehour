@@ -31,14 +31,56 @@ log_step() {
     echo "=== [STEP] $1 @ $(date -Is) ==="
 }
 
+DNF_AUTOMATIC_DISABLED=0
+
+cleanup_on_exit() {
+    local exit_code=$?
+    if [ "$DNF_AUTOMATIC_DISABLED" -eq 1 ]; then
+        enable_dnf_automatic || true
+    fi
+    if [ "$exit_code" -ne 0 ]; then
+        echo "[ERROR] prepare_tools.sh aborted with exit code ${exit_code}. See log: ${LOG_FILE}"
+    fi
+}
+
+trap cleanup_on_exit EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/dnf_utils.sh"
 
 EL_VER=$(get_el_version)
+OS_ID=$(get_os_id)
+
+log_step "Preflight checks"
+
+if ! command -v dnf >/dev/null 2>&1; then
+    echo "[ERROR] dnf command is not available. This script supports EL systems only."
+    exit 1
+fi
+
+if ! sudo -n true >/dev/null 2>&1; then
+    echo "[ERROR] sudo -n failed. Configure passwordless sudo for this automation user."
+    exit 1
+fi
+
+if [ "$EL_VER" -lt 9 ] 2>/dev/null; then
+    echo "[ERROR] Unsupported EL version: ${EL_VER}. Expected EL9+ for scripts_rhel9."
+    exit 1
+fi
+
+for required_script in setup_init.sh setup_gcc14.sh setup_binutil244.sh setup_jdkxx.sh build_zlib.sh setup_pts.sh setup_rust.sh; do
+    if [ ! -f "$SCRIPT_DIR/$required_script" ]; then
+        echo "[ERROR] Missing required script: $SCRIPT_DIR/$required_script"
+        exit 1
+    fi
+done
+
+echo "=== EL${EL_VER} prepare_tools preflight OK (detected OS: ${OS_ID}) ==="
 
 log_step "Wait for dnf locks"
 wait_for_dnf_lock
 disable_dnf_automatic
+DNF_AUTOMATIC_DISABLED=1
 
 log_step "Ensure Python"
 if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
@@ -60,6 +102,13 @@ fi
 # Must run BEFORE setup_gcc14.sh.
 log_step "Setup init tools (EPEL/CRB repos)"
 "$SCRIPT_DIR/setup_init.sh"
+
+log_step "Validate dnf repositories after setup_init"
+if ! sudo dnf repolist --enabled >/dev/null 2>&1; then
+    echo "[ERROR] No usable enabled repositories after setup_init."
+    echo "[INFO] On RHEL/OL cloud images, verify RHUI/subscription repositories are reachable."
+    exit 1
+fi
 
 log_step "Setup GCC 14"
 "$SCRIPT_DIR/setup_gcc14.sh"
@@ -86,4 +135,5 @@ if ! command -v pkg-config >/dev/null 2>&1; then
 fi
 
 enable_dnf_automatic
+DNF_AUTOMATIC_DISABLED=0
 echo "=== prepare_tools.sh (EL${EL_VER}) end: $(date -Is) ==="

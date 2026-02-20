@@ -43,7 +43,7 @@ EL_VER=$(get_el_version)
 echo "=== EL${EL_VER} Initialization (detected OS: $OS_ID) ==="
 
 USE_REMI_PHP81=1
-if [[ ("$OS_ID" == "ol" || "$OS_ID" == "oracle") && "$EL_VER" -ge 10 ]]; then
+if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
     USE_REMI_PHP81=0
 fi
 
@@ -104,7 +104,7 @@ if [ "$USE_REMI_PHP81" -eq 1 ]; then
         sudo dnf module enable php:remi-8.1 -y
     fi
 else
-    echo "[INFO] Oracle Linux ${EL_VER}: skipping Remi PHP 8.1 setup (remi-release dependency mismatch on EL10)."
+    echo "[INFO] EL${EL_VER}: skipping Remi PHP 8.1 setup (EL10 remi-release often depends on unavailable epel-release)."
 fi
 
 # 3. Install core tools and libraries
