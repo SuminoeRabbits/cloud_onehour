@@ -49,24 +49,42 @@ fi
 
 # 1. Enable EPEL and CRB (CodeReady Builder)
 echo "Enabling EPEL and CRB repositories..."
+
+try_enable_crb() {
+    if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+        sudo dnf config-manager --set-enabled "ol${EL_VER}_codeready_builder" 2>/dev/null || \
+            sudo dnf config-manager --set-enabled crb 2>/dev/null || \
+            sudo dnf config-manager --set-enabled ol9_codeready_builder 2>/dev/null || \
+            echo "[WARN] Could not enable CRB/CodeReady repo (continuing)."
+    else
+        sudo dnf config-manager --set-enabled ol9_codeready_builder 2>/dev/null || \
+            sudo dnf config-manager --set-enabled crb 2>/dev/null || \
+            echo "[WARN] Could not enable CRB/CodeReady repo (continuing)."
+    fi
+}
+
+try_enable_epel() {
+    # Best-effort only: EL10 and unregistered enterprise images may not provide epel-release.
+    sudo dnf install -y "oracle-epel-release-el${EL_VER}" 2>/dev/null || \
+        sudo dnf install -y epel-release 2>/dev/null || \
+        echo "[WARN] EPEL release package is unavailable on this host (continuing without EPEL)."
+}
+
 case "$OS_ID" in
     ol|oracle)
-        sudo dnf install -y "oracle-epel-release-el${EL_VER}"
-        if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
-            sudo dnf config-manager --set-enabled "ol${EL_VER}_codeready_builder" 2>/dev/null || \
-                sudo dnf config-manager --set-enabled crb 2>/dev/null || true
-        else
-            sudo dnf config-manager --set-enabled ol9_codeready_builder
-        fi
+        try_enable_epel
+        try_enable_crb
         ;;
     rocky|almalinux|rhel|centos)
-        sudo dnf install -y epel-release
-        sudo dnf config-manager --set-enabled crb
+        try_enable_epel
+        sudo dnf config-manager --set-enabled crb 2>/dev/null || \
+            echo "[WARN] Could not enable CRB repo on $OS_ID (continuing)."
         ;;
     *)
         echo "[WARN] Unknown OS ID: $OS_ID, attempting EL defaults..."
-        sudo dnf install -y epel-release
-        sudo dnf config-manager --set-enabled crb
+        try_enable_epel
+        sudo dnf config-manager --set-enabled crb 2>/dev/null || \
+            echo "[WARN] Could not enable CRB repo on unknown OS (continuing)."
         ;;
 esac
 
