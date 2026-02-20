@@ -50,15 +50,92 @@ fi
 # 1. Enable EPEL and CRB (CodeReady Builder)
 echo "Enabling EPEL and CRB repositories..."
 
+enable_repo_candidates() {
+    local repo_id
+    for repo_id in "$@"; do
+        if [ -z "$repo_id" ]; then
+            continue
+        fi
+        if sudo dnf config-manager --set-enabled "$repo_id" >/dev/null 2>&1; then
+            echo "[OK] Enabled repository: $repo_id"
+            return 0
+        fi
+    done
+    return 1
+}
+
+try_enable_codeready_autodetect() {
+    local repo_ids=()
+    local repo_id
+
+    while IFS= read -r repo_id; do
+        [ -n "$repo_id" ] && repo_ids+=("$repo_id")
+    done < <(
+        sudo dnf repolist all 2>/dev/null |
+            awk 'NR > 1 {print $1}' |
+            grep -Ei 'codeready|code-ready|crb' |
+            sort -u
+    )
+
+    if [ "${#repo_ids[@]}" -eq 0 ]; then
+        return 1
+    fi
+
+    if enable_repo_candidates "${repo_ids[@]}"; then
+        echo "[INFO] Auto-detected and enabled CodeReady/CRB-style repo."
+        return 0
+    fi
+
+    return 1
+}
+
 try_enable_crb() {
+    local arch
+    arch="$(uname -m)"
+
+    if [ "$OS_ID" = "ol" ] || [ "$OS_ID" = "oracle" ]; then
+        if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+            enable_repo_candidates \
+                "ol${EL_VER}_codeready_builder" \
+                "ol9_codeready_builder" \
+                crb || true
+        else
+            enable_repo_candidates \
+                ol9_codeready_builder \
+                crb || true
+        fi
+        return 0
+    fi
+
+    if [ "$OS_ID" = "rhel" ] && [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+        if enable_repo_candidates \
+            "codeready-builder-for-rhel-${EL_VER}-${arch}-rhui-rpms" \
+            "codeready-builder-for-rhel-${EL_VER}-${arch}-eus-rhui-rpms" \
+            "codeready-builder-for-rhel-${EL_VER}-${arch}-rpms" \
+            "rhel-${EL_VER}-for-${arch}-codeready-builder-rhui-rpms" \
+            "rhel-${EL_VER}-codeready-builder-rhui-rpms" \
+            crb; then
+            return 0
+        fi
+
+        if try_enable_codeready_autodetect; then
+            return 0
+        fi
+
+        echo "[WARN] Could not enable RHEL${EL_VER} CodeReady/CRB repo (continuing)."
+        return 1
+    fi
+
     if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
-        sudo dnf config-manager --set-enabled "ol${EL_VER}_codeready_builder" 2>/dev/null || \
-            sudo dnf config-manager --set-enabled crb 2>/dev/null || \
-            sudo dnf config-manager --set-enabled ol9_codeready_builder 2>/dev/null || \
-            echo "[WARN] Could not enable CRB/CodeReady repo (continuing)."
+        if enable_repo_candidates crb; then
+            return 0
+        fi
+        if try_enable_codeready_autodetect; then
+            return 0
+        fi
+        echo "[WARN] Could not enable CRB/CodeReady repo (continuing)."
     else
-        sudo dnf config-manager --set-enabled ol9_codeready_builder 2>/dev/null || \
-            sudo dnf config-manager --set-enabled crb 2>/dev/null || \
+        enable_repo_candidates ol9_codeready_builder crb || \
             echo "[WARN] Could not enable CRB/CodeReady repo (continuing)."
     fi
 }
@@ -77,14 +154,12 @@ case "$OS_ID" in
         ;;
     rocky|almalinux|rhel|centos)
         try_enable_epel
-        sudo dnf config-manager --set-enabled crb 2>/dev/null || \
-            echo "[WARN] Could not enable CRB repo on $OS_ID (continuing)."
+        try_enable_crb || true
         ;;
     *)
         echo "[WARN] Unknown OS ID: $OS_ID, attempting EL defaults..."
         try_enable_epel
-        sudo dnf config-manager --set-enabled crb 2>/dev/null || \
-            echo "[WARN] Could not enable CRB repo on unknown OS (continuing)."
+        try_enable_crb || true
         ;;
 esac
 
@@ -130,6 +205,18 @@ install_required_from_candidates() {
             return 0
         fi
     done
+
+    if [ "$logical_name" = "jansson-devel" ]; then
+        echo "[WARN] ${logical_name} not found. Retrying after CodeReady/CRB enable attempt..."
+        try_enable_crb || true
+        for candidate in "${candidates[@]}"; do
+            if repo_has_package "$candidate"; then
+                echo "[OK] ${logical_name}: using package '${candidate}' after CRB remediation"
+                sudo dnf -y install "$candidate"
+                return 0
+            fi
+        done
+    fi
 
     echo "[ERROR] Required package '${logical_name}' is unavailable in enabled repositories."
     echo "[ERROR] Tried candidates: ${candidates_csv}"
