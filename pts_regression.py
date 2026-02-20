@@ -172,8 +172,14 @@ def generate_test_commands(test_suite, max_threads=None, quick_mode=False, regre
             # Determine -number- argument based on thread configuration
             th_fix_in_compile = test_config.get("THFix_in_compile", False)
             th_change_at_runtime = test_config.get("THChange_at_runtime", False)
+            th_scaling = str(test_config.get("TH_scaling", "")).lower()
+            single_thread_declared = "single-thread" in th_scaling
 
-            if th_fix_in_compile:
+            if single_thread_declared:
+                # Explicit single-thread declaration has highest priority
+                number_arg = "1"
+                print(f"  [INFO] {testname}: TH_scaling indicates single-thread, using 1 thread")
+            elif th_fix_in_compile:
                 # Thread count fixed at compile time - use nproc
                 number_arg = str(nproc)
                 print(f"  [INFO] {testname}: THFix_in_compile=true, using {number_arg} threads")

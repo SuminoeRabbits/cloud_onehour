@@ -3,6 +3,25 @@
 # Stop on error
 set -e
 
+# In some container environments, /usr/bin/sudo may be unusable
+# (e.g., missing setuid bit or nosuid mount). Handle this explicitly.
+if [ "$(id -u)" -eq 0 ]; then
+    sudo() { "$@"; }
+else
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "[ERROR] sudo command is not available for user $(id -un)."
+        echo "[INFO] Run this script as root or install/configure sudo."
+        exit 1
+    fi
+
+    if ! sudo -n true >/dev/null 2>&1; then
+        echo "[ERROR] sudo is not usable for user $(id -un)."
+        echo "[INFO] This often happens in containers when /usr/bin/sudo cannot run (setuid/nosuid issue)."
+        echo "[INFO] Workaround: run this script as root in this environment."
+        exit 1
+    fi
+fi
+
 # Source dnf utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/dnf_utils.sh"
@@ -197,12 +216,32 @@ build_x264_from_source() {
 
 build_x265_from_source() {
     echo "[INFO] Building x265 from source..."
-    sudo dnf -y install git gcc gcc-c++ make cmake pkgconf-pkg-config 2>/dev/null || true
+    sudo dnf -y install git gcc gcc-c++ make pkgconf-pkg-config 2>/dev/null || true
+
+    # Ensure CMake and Ninja are available for faster x265 build
+    if ! command -v cmake >/dev/null 2>&1; then
+        echo "[INFO] Installing cmake..."
+        sudo dnf -y install cmake 2>/dev/null || true
+    fi
+    if ! command -v ninja >/dev/null 2>&1; then
+        echo "[INFO] Installing ninja-build..."
+        sudo dnf -y install ninja-build 2>/dev/null || sudo dnf -y install ninja 2>/dev/null || true
+    fi
+
+    if ! command -v cmake >/dev/null 2>&1; then
+        echo "[WARN] cmake is still unavailable; skipping x265 source build"
+        return 1
+    fi
+    if ! command -v ninja >/dev/null 2>&1; then
+        echo "[WARN] ninja is still unavailable; skipping x265 source build"
+        return 1
+    fi
+
     rm -rf /tmp/cloud_onehour-x265
     git clone --depth 1 https://github.com/videolan/x265.git /tmp/cloud_onehour-x265
     pushd /tmp/cloud_onehour-x265 >/dev/null
-    cmake -S source -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_SHARED=ON
-    cmake --build build -j"$(nproc)"
+    cmake -G Ninja -S source -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_SHARED=ON
+    cmake --build build
     sudo cmake --install build
     popd >/dev/null
 }
