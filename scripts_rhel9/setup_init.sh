@@ -130,17 +130,29 @@ echo "Architecture: $ARCH"
 echo "OS: $OS_NAME"
 echo "--------------------"
 
-# 5. x86_64 specific tools
-if [ "$ARCH" = "x86_64" ]; then
-    echo "[Target: x86_64] Installing NASM and YASM..."
-    sudo dnf install -y yasm nasm
-    echo "--------------------------------------"
-    echo "Installation Complete!"
-    nasm -v
-    yasm --version | head -n 1
-    echo "--------------------------------------"
-else
-    echo "[Target: $ARCH] NASM/YASM are x86-specific. Skipping."
+# 5. NASM/YASM tools (required by ffmpeg/x264 build path in PTS)
+echo "[Target: $ARCH] Installing NASM and YASM..."
+
+# Try bulk install first, then retry per package for distro/repo differences
+if ! sudo dnf install -y nasm yasm; then
+    echo "[WARN] Bulk install (nasm yasm) failed. Retrying individually..."
+    sudo dnf install -y nasm || echo "[WARN] nasm package is not available on this system"
+    sudo dnf install -y yasm || echo "[WARN] yasm package is not available on this system"
 fi
+
+echo "--------------------------------------"
+echo "NASM/YASM installation check"
+if command -v nasm >/dev/null 2>&1; then
+    nasm -v
+else
+    echo "[WARN] nasm is not installed"
+fi
+
+if command -v yasm >/dev/null 2>&1; then
+    yasm --version | head -n 1
+else
+    echo "[WARN] yasm is not installed"
+fi
+echo "--------------------------------------"
 
 echo "setup_init.sh completed successfully."

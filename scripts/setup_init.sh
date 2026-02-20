@@ -26,27 +26,30 @@ echo "Architecture: $ARCH"
 echo "OS: $OS_ID $VERSION_ID"
 echo "--------------------"
 
-# 2. x86_64 specific tools
-if [ "$ARCH" = "x86_64" ]; then
-    echo "[Target: x86_64] Starting installation of NASM and YASM..."
+# 2. NASM/YASM tools (required by ffmpeg/x264 build path in PTS)
+echo "[Target: $ARCH] Installing NASM and YASM..."
 
-    # Update repositories
-    sudo apt-get update -y
+# Update repositories
+sudo apt-get update -y
 
-    # --- YASM & NASM Installation via apt ---
-    # Ubuntu 24.04/25.04 repositories contain recent NASM versions (2.16+)
-    # This is more robust than downloading specific .deb files which may disappear.
-    echo "Installing YASM and NASM via apt..."
-    sudo apt-get install -y yasm nasm
-
-    echo "--------------------------------------"
-    echo "Installation Complete!"
-    nasm -v
-    yasm --version | head -n 1
-    echo "--------------------------------------"
-
-else
-    # 3. x86_64 以外（aarch64等）の場合
-    echo "[Target: $ARCH] NASM/YASM are x86-specific tools. Skipping installation."
-    echo "Note: GCC 14 will handle SVE/SVE2 optimizations for this architecture."
+# Try bulk install first, then retry per package for distro differences
+if ! sudo apt-get install -y nasm yasm; then
+    echo "[WARN] Bulk install (nasm yasm) failed. Retrying individually..."
+    sudo apt-get install -y nasm || echo "[WARN] nasm package is not available on this system"
+    sudo apt-get install -y yasm || echo "[WARN] yasm package is not available on this system"
 fi
+
+echo "--------------------------------------"
+echo "NASM/YASM installation check"
+if command -v nasm >/dev/null 2>&1; then
+    nasm -v
+else
+    echo "[WARN] nasm is not installed"
+fi
+
+if command -v yasm >/dev/null 2>&1; then
+    yasm --version | head -n 1
+else
+    echo "[WARN] yasm is not installed"
+fi
+echo "--------------------------------------"
