@@ -144,10 +144,42 @@ try_enable_crb() {
 }
 
 try_enable_epel() {
-    # Best-effort only: EL10 and unregistered enterprise images may not provide epel-release.
-    sudo dnf install -y "oracle-epel-release-el${EL_VER}" 2>/dev/null || \
-        sudo dnf install -y epel-release 2>/dev/null || \
-        echo "[WARN] EPEL release package is unavailable on this host (continuing without EPEL)."
+    local epel_url_candidates=()
+    local epel_url
+
+    if rpm -q epel-release >/dev/null 2>&1; then
+        echo "[OK] epel-release is already installed"
+        return 0
+    fi
+
+    # 1) Package-based attempts (works on Oracle Linux and some derivatives)
+    if sudo dnf install -y "oracle-epel-release-el${EL_VER}" 2>/dev/null; then
+        echo "[OK] Installed oracle-epel-release-el${EL_VER}"
+        return 0
+    fi
+
+    if sudo dnf install -y epel-release 2>/dev/null; then
+        echo "[OK] Installed epel-release from configured repositories"
+        return 0
+    fi
+
+    # 2) URL bootstrap fallback (important for RHEL RHUI where epel-release is not in default repos)
+    if [[ "$OS_ID" == "rhel" || "$OS_ID" == "rocky" || "$OS_ID" == "almalinux" || "$OS_ID" == "centos" ]]; then
+        epel_url_candidates=(
+            "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${EL_VER}.noarch.rpm"
+            "https://www.mirrorservice.org/sites/dl.fedoraproject.org/pub/epel/epel-release-latest-${EL_VER}.noarch.rpm"
+        )
+
+        for epel_url in "${epel_url_candidates[@]}"; do
+            if sudo dnf install -y "$epel_url" 2>/dev/null; then
+                echo "[OK] Installed epel-release from URL: $epel_url"
+                return 0
+            fi
+        done
+    fi
+
+    echo "[WARN] EPEL release package is unavailable on this host (continuing without EPEL)."
+    return 1
 }
 
 case "$OS_ID" in
