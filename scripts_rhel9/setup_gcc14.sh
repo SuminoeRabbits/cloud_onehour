@@ -14,7 +14,38 @@ echo "=== GCC-14 Setup (EL${EL_VER}) ==="
 echo "Installing build dependencies for GCC..."
 wait_for_dnf_lock
 sudo dnf -y groupinstall "Development Tools"
-sudo dnf -y install gmp-devel mpfr-devel libmpc-devel flex bison texinfo libzstd-devel zlib-devel wget aria2
+
+repo_has_pkg() {
+    local pkg="$1"
+    sudo dnf -q list --available "$pkg" >/dev/null 2>&1 || sudo dnf -q repoquery "$pkg" >/dev/null 2>&1
+}
+
+install_required_pkg() {
+    local pkg="$1"
+    if ! repo_has_pkg "$pkg"; then
+        echo "[ERROR] Required GCC dependency '$pkg' is unavailable in enabled repositories."
+        sudo dnf repolist --enabled || true
+        exit 1
+    fi
+    sudo dnf -y install "$pkg"
+}
+
+GCC_DEP_LIST=(
+    gmp-devel
+    mpfr-devel
+    libmpc-devel
+    flex
+    bison
+    texinfo
+    libzstd-devel
+    zlib-devel
+    wget
+    aria2
+)
+
+for pkg in "${GCC_DEP_LIST[@]}"; do
+    install_required_pkg "$pkg"
+done
 
 # ---------------------------------------------------------------
 # EL10+: GCC 14.2 is the system default compiler.

@@ -110,13 +110,41 @@ fi
 # 3. Install core tools and libraries
 echo "Installing core tools and libraries..."
 
+repo_has_package() {
+    local pkg="$1"
+    sudo dnf -q list --available "$pkg" >/dev/null 2>&1 || sudo dnf -q repoquery "$pkg" >/dev/null 2>&1
+}
+
+install_required_from_candidates() {
+    local logical_name="$1"
+    local candidates_csv="$2"
+    local candidate
+
+    IFS=',' read -r -a candidates <<< "$candidates_csv"
+    for candidate in "${candidates[@]}"; do
+        if repo_has_package "$candidate"; then
+            echo "[OK] ${logical_name}: using package '${candidate}'"
+            sudo dnf -y install "$candidate"
+            return 0
+        fi
+    done
+
+    echo "[ERROR] Required package '${logical_name}' is unavailable in enabled repositories."
+    echo "[ERROR] Tried candidates: ${candidates_csv}"
+    echo "[INFO] Enabled repositories:" 
+    sudo dnf repolist --enabled || true
+    return 1
+}
+
 # perf package: on Oracle Linux with UEK, perf may not be available
 # as a standalone package. Try installing, but don't fail if unavailable.
 PERF_PKG="perf"
 if ! sudo dnf install -y "$PERF_PKG" 2>/dev/null; then
     echo "[WARN] '$PERF_PKG' package not available. Trying kernel-uek-tools..."
-    sudo dnf install -y kernel-uek-tools 2>/dev/null || \
-        echo "[WARN] perf not available on this system (benchmark will run without perf)"
+    if ! sudo dnf install -y kernel-uek-tools 2>/dev/null; then
+        echo "[ERROR] Neither '$PERF_PKG' nor 'kernel-uek-tools' is available."
+        exit 1
+    fi
 fi
 
 # Minimal Docker images ship curl-minimal which conflicts with full curl.
@@ -125,32 +153,40 @@ if ! rpm -q curl-minimal >/dev/null 2>&1; then
     sudo dnf -y install curl
 fi
 
-sudo dnf -y install \
-    bc \
-    libuuid-devel \
-    libxml2-devel \
-    pkgconf-pkg-config \
-    libcurl-devel \
-    jansson-devel \
-    sysstat \
-    htop \
-    aria2 \
-    flex \
-    bison \
-    openssl-devel \
-    elfutils-libelf-devel \
-    libevent-devel \
-    python3-tabulate \
-    expat-devel \
-    pcre2-devel \
-    p7zip \
-    p7zip-plugins \
-    glibc-devel \
-    numactl \
-    which \
-    wget \
-    tar \
-    gzip
+echo "Installing required packages with repository-backed name resolution..."
+PACKAGE_SPECS=(
+    "bc:bc"
+    "libuuid-devel:libuuid-devel"
+    "libxml2-devel:libxml2-devel"
+    "pkgconf-pkg-config:pkgconf-pkg-config"
+    "libcurl-devel:libcurl-devel"
+    "jansson-devel:jansson-devel"
+    "sysstat:sysstat"
+    "htop:htop"
+    "aria2:aria2"
+    "flex:flex"
+    "bison:bison"
+    "openssl-devel:openssl-devel"
+    "elfutils-libelf-devel:elfutils-libelf-devel"
+    "libevent-devel:libevent-devel"
+    "python3-tabulate:python3-tabulate,python3.12-tabulate"
+    "expat-devel:expat-devel"
+    "pcre2-devel:pcre2-devel"
+    "p7zip:p7zip,7zip"
+    "p7zip-plugins:p7zip-plugins,7zip-plugins"
+    "glibc-devel:glibc-devel"
+    "numactl:numactl"
+    "which:which"
+    "wget:wget"
+    "tar:tar"
+    "gzip:gzip"
+)
+
+for spec in "${PACKAGE_SPECS[@]}"; do
+    logical_name="${spec%%:*}"
+    candidates_csv="${spec#*:}"
+    install_required_from_candidates "$logical_name" "$candidates_csv"
+done
 
 # FFmpeg (PTS) requires libx264/libx265 via pkg-config when
 # FFMPEG_CONFIGURE_EXTRA_OPTS enables those encoders.
@@ -285,6 +321,11 @@ ensure_codec_pkgconfig_ready() {
 
 ensure_codec_pkgconfig_ready
 
+if ! codec_pkgconfig_ready; then
+    echo "[ERROR] x264/x265 are still unavailable via pkg-config after repository/source attempts."
+    exit 1
+fi
+
 # Some EL10 variants do not provide pcre-devel (PCRE1). Install only when available.
 if ! sudo dnf -y install pcre-devel 2>/dev/null; then
     echo "[INFO] pcre-devel is not available on this system. Continuing with pcre2-devel only."
@@ -326,8 +367,8 @@ echo "[Target: $ARCH] Installing NASM and YASM..."
 # Try bulk install first, then retry per package for distro/repo differences
 if ! sudo dnf install -y nasm yasm; then
     echo "[WARN] Bulk install (nasm yasm) failed. Retrying individually..."
-    sudo dnf install -y nasm || echo "[WARN] nasm package is not available on this system"
-    sudo dnf install -y yasm || echo "[WARN] yasm package is not available on this system"
+    sudo dnf install -y nasm || { echo "[ERROR] nasm package is required but unavailable"; exit 1; }
+    sudo dnf install -y yasm || { echo "[ERROR] yasm package is required but unavailable"; exit 1; }
 fi
 
 echo "--------------------------------------"

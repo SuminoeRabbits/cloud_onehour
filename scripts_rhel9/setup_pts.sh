@@ -8,13 +8,38 @@ EL_VER=$(get_el_version)
 OS_ID=$(. /etc/os-release && echo "${ID:-unknown}")
 
 USE_REMI_PHP81=1
-if [[ ("$OS_ID" == "ol" || "$OS_ID" == "oracle") && "$EL_VER" -ge 10 ]]; then
+if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
     USE_REMI_PHP81=0
 fi
 
 dnf_install() {
     wait_for_dnf_lock
     sudo dnf -y install "$@"
+}
+
+repo_has_package() {
+    local pkg="$1"
+    sudo dnf -q list --available "$pkg" >/dev/null 2>&1 || sudo dnf -q repoquery "$pkg" >/dev/null 2>&1
+}
+
+install_required_from_candidates() {
+    local logical_name="$1"
+    local candidates_csv="$2"
+    local candidate
+
+    IFS=',' read -r -a candidates <<< "$candidates_csv"
+    for candidate in "${candidates[@]}"; do
+        if repo_has_package "$candidate"; then
+            echo "[OK] ${logical_name}: using package '${candidate}'"
+            dnf_install "$candidate"
+            return 0
+        fi
+    done
+
+    echo "[ERROR] Required package '${logical_name}' not found in enabled repositories."
+    echo "[ERROR] Tried candidates: ${candidates_csv}"
+    sudo dnf repolist --enabled || true
+    exit 1
 }
 
 VERSION="10.8.4"
@@ -58,11 +83,19 @@ if [[ "$CURRENT_PHP_VERSION" != "8.1" ]]; then
         fi
 
         echo "Installing PHP 8.1 packages..."
-        # Note: php-json is not needed on PHP 8.0+ (JSON is bundled in core)
-        dnf_install php-cli php-xml php-gd php-curl unzip
+        install_required_from_candidates "php-cli" "php-cli"
+        install_required_from_candidates "php-xml" "php-xml"
+        install_required_from_candidates "php-gd" "php-gd"
+        install_required_from_candidates "php-curl" "php-curl"
+        install_required_from_candidates "unzip" "unzip"
     else
-        echo "[INFO] Oracle Linux ${EL_VER}: using distro PHP packages (skip Remi PHP 8.1)."
-        dnf_install php php-cli php-xml php-gd php-curl unzip
+        echo "[INFO] EL${EL_VER}: using distro PHP packages (skip Remi PHP 8.1)."
+        install_required_from_candidates "php" "php"
+        install_required_from_candidates "php-cli" "php-cli"
+        install_required_from_candidates "php-xml" "php-xml"
+        install_required_from_candidates "php-gd" "php-gd"
+        install_required_from_candidates "php-curl" "php-curl"
+        install_required_from_candidates "unzip" "unzip"
     fi
 else
     echo "[OK] PHP 8.1 is already installed"
@@ -85,7 +118,9 @@ sudo dnf -y groupinstall "Development Tools"
 LIB_DEPS="flex bison bc elfutils-libelf-devel openssl-devel zlib-devel bzip2-devel readline-devel sqlite-devel ncurses-devel libffi-devel xz-devel"
 
 echo "Installing: $BUILD_DEPS $LIB_DEPS"
-dnf_install $BUILD_DEPS $LIB_DEPS
+for pkg in $BUILD_DEPS $LIB_DEPS; do
+    install_required_from_candidates "$pkg" "$pkg"
+done
 
 # 2. Install PTS
 echo "=== Step 2: Installing Phoronix Test Suite ${VERSION} ==="
