@@ -74,6 +74,7 @@ try_enable_codeready_autodetect() {
         sudo dnf repolist all 2>/dev/null |
             awk 'NR > 1 {print $1}' |
             grep -Ei 'codeready|code-ready|crb' |
+            grep -Evi 'debug|source' |
             sort -u
     )
 
@@ -111,7 +112,9 @@ try_enable_crb() {
         if enable_repo_candidates \
             "codeready-builder-for-rhel-${EL_VER}-${arch}-rhui-rpms" \
             "codeready-builder-for-rhel-${EL_VER}-${arch}-eus-rhui-rpms" \
+            "codeready-builder-for-rhel-${EL_VER}-rhui-rpms" \
             "codeready-builder-for-rhel-${EL_VER}-${arch}-rpms" \
+            "codeready-builder-for-rhel-${EL_VER}-rpms" \
             "rhel-${EL_VER}-for-${arch}-codeready-builder-rhui-rpms" \
             "rhel-${EL_VER}-codeready-builder-rhui-rpms" \
             crb; then
