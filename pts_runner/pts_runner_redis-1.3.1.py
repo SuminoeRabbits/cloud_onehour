@@ -11,11 +11,11 @@ System Dependencies (from phoronix-test-suite info):
 - Supported Platforms: Linux
 
 Test Characteristics:
-- Multi-threaded: Yes (redis-benchmark client supports threading)
+- Multi-threaded: No (run as single-thread benchmark per test_suite policy)
 - Honors CFLAGS/CXXFLAGS: Yes
 - Notable Instructions: N/A
 - THFix_in_compile: false - Thread count NOT fixed at compile time
-- THChange_at_runtime: true - Runtime thread configuration via redis-benchmark --threads option
+- THChange_at_runtime: false - Run in single-thread mode
 """
 
 import argparse
@@ -188,7 +188,7 @@ class RedisRunner:
         Initialize Redis benchmark runner.
 
         Args:
-            threads_arg: If set, run only that thread count (capped to vCPU count)
+            threads_arg: Optional legacy argument. Redis is forced to single-thread mode.
             quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
         self.benchmark = "redis-1.3.1"
@@ -202,11 +202,17 @@ class RedisRunner:
         self.os_name = self.get_os_name()
 
         # Thread list setup
+        # Redis benchmark is defined as single-thread in test_suite policy.
         if threads_arg is None:
-            self.thread_list = list(range(2, self.vcpu_count + 1, 2))
+            n = 1
         else:
             n = min(threads_arg, self.vcpu_count)
-            self.thread_list = [n]
+
+        if n != 1:
+            print(f"[WARN] Redis benchmark is single-thread only. Ignoring requested threads={n} and using 1.")
+            n = 1
+
+        self.thread_list = [n]
 
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
@@ -1048,7 +1054,7 @@ class RedisRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Redis 6.0.9 Benchmark Runner (Multi-thread scaling)",
+        description="Redis 6.0.9 Benchmark Runner (Single-thread mode)",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -1056,13 +1062,13 @@ def main():
         'threads_pos',
         nargs='?',
         type=int,
-        help='Number of threads (optional, omit for scaling mode)'
+        help='Legacy positional argument (ignored unless 1; benchmark runs single-thread only)'
     )
 
     parser.add_argument(
         '--threads',
         type=int,
-        help='Run benchmark with specified number of threads only (1 to CPU count)'
+        help='Legacy option (ignored unless 1; benchmark runs single-thread only)'
     )
 
     parser.add_argument(
