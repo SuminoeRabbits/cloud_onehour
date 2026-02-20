@@ -112,7 +112,9 @@ echo "Installing core tools and libraries..."
 
 repo_has_package() {
     local pkg="$1"
-    sudo dnf -q list --available "$pkg" >/dev/null 2>&1 || sudo dnf -q repoquery "$pkg" >/dev/null 2>&1
+    # dnf list/repoquery can return confusing statuses on some EL10 images.
+    # Use a test transaction to verify the package is actually installable.
+    sudo dnf -y install --setopt=tsflags=test "$pkg" >/dev/null 2>&1
 }
 
 install_required_from_candidates() {
