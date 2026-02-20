@@ -115,6 +115,119 @@ sudo dnf -y install \
     tar \
     gzip
 
+# FFmpeg (PTS) requires libx264/libx265 via pkg-config when
+# FFMPEG_CONFIGURE_EXTRA_OPTS enables those encoders.
+# On some EL/OL variants, package names differ or are unavailable.
+echo "Installing FFmpeg codec development dependencies (x264/x265)..."
+
+# Toggle for third-party repo attempts (default: enabled)
+ENABLE_THIRD_PARTY_CODEC_REPOS="${ENABLE_THIRD_PARTY_CODEC_REPOS:-1}"
+
+codec_pkgconfig_ready() {
+    command -v pkg-config >/dev/null 2>&1 && pkg-config --exists x264 && pkg-config --exists x265
+}
+
+try_install_codec_packages() {
+    sudo dnf -y install x264 x264-devel x265 x265-devel 2>/dev/null
+}
+
+try_enable_additional_codec_repos() {
+    echo "[INFO] Trying additional repositories for x264/x265 packages..."
+
+    # Oracle Linux specific optional repos (may or may not exist by release)
+    if [[ "$OS_ID" == "ol" || "$OS_ID" == "oracle" ]]; then
+        sudo dnf config-manager --set-enabled "ol${EL_VER}_developer_EPEL" 2>/dev/null || true
+        sudo dnf config-manager --set-enabled "ol${EL_VER}_addons" 2>/dev/null || true
+        sudo dnf config-manager --set-enabled "ol${EL_VER}_appstream" 2>/dev/null || true
+    fi
+
+    # Try RPM Fusion (often provides x264/x265 on EL family)
+    if [ "$ENABLE_THIRD_PARTY_CODEC_REPOS" = "1" ]; then
+        echo "[INFO] Trying RPM Fusion repositories..."
+        sudo dnf -y install \
+            "https://mirrors.rpmfusion.org/free/el/rpmfusion-free-release-${EL_VER}.noarch.rpm" \
+            "https://mirrors.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-${EL_VER}.noarch.rpm" \
+            2>/dev/null || true
+    else
+        echo "[INFO] Skipping third-party codec repositories (ENABLE_THIRD_PARTY_CODEC_REPOS=0)"
+    fi
+}
+
+if ! try_install_codec_packages; then
+    echo "[WARN] x264/x265 devel packages not available via currently-enabled repos."
+    try_enable_additional_codec_repos
+    if ! try_install_codec_packages; then
+        echo "[WARN] x264/x265 packages are still unavailable from package repositories."
+    fi
+fi
+
+# Ensure pkg-config can find /usr/local installs as well.
+export PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}"
+
+ensure_codec_pc_visibility() {
+    local pc
+    local src
+    local dst_dir="/usr/lib64/pkgconfig"
+    for pc in x264.pc x265.pc; do
+        if [ -f "/usr/local/lib64/pkgconfig/${pc}" ]; then
+            src="/usr/local/lib64/pkgconfig/${pc}"
+        elif [ -f "/usr/local/lib/pkgconfig/${pc}" ]; then
+            src="/usr/local/lib/pkgconfig/${pc}"
+        else
+            continue
+        fi
+
+        if [ -d "${dst_dir}" ]; then
+            sudo ln -sf "${src}" "${dst_dir}/${pc}" || true
+        fi
+    done
+}
+
+build_x264_from_source() {
+    echo "[INFO] Building x264 from source..."
+    sudo dnf -y install git gcc gcc-c++ make nasm yasm pkgconf-pkg-config 2>/dev/null || true
+    rm -rf /tmp/cloud_onehour-x264
+    git clone --depth 1 https://code.videolan.org/videolan/x264.git /tmp/cloud_onehour-x264
+    pushd /tmp/cloud_onehour-x264 >/dev/null
+    ./configure --prefix=/usr/local --enable-shared --enable-pic
+    make -j"$(nproc)"
+    sudo make install
+    popd >/dev/null
+}
+
+build_x265_from_source() {
+    echo "[INFO] Building x265 from source..."
+    sudo dnf -y install git gcc gcc-c++ make cmake pkgconf-pkg-config 2>/dev/null || true
+    rm -rf /tmp/cloud_onehour-x265
+    git clone --depth 1 https://github.com/videolan/x265.git /tmp/cloud_onehour-x265
+    pushd /tmp/cloud_onehour-x265 >/dev/null
+    cmake -S source -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_SHARED=ON
+    cmake --build build -j"$(nproc)"
+    sudo cmake --install build
+    popd >/dev/null
+}
+
+ensure_codec_pkgconfig_ready() {
+    if codec_pkgconfig_ready; then
+        return
+    fi
+
+    echo "[WARN] x264/x265 are still missing from pkg-config. Falling back to source builds..."
+
+    if ! (command -v pkg-config >/dev/null 2>&1 && pkg-config --exists x264); then
+        build_x264_from_source || echo "[WARN] x264 source build failed"
+    fi
+
+    if ! (command -v pkg-config >/dev/null 2>&1 && pkg-config --exists x265); then
+        build_x265_from_source || echo "[WARN] x265 source build failed"
+    fi
+
+    ensure_codec_pc_visibility
+    sudo ldconfig 2>/dev/null || true
+}
+
+ensure_codec_pkgconfig_ready
+
 # Some EL10 variants do not provide pcre-devel (PCRE1). Install only when available.
 if ! sudo dnf -y install pcre-devel 2>/dev/null; then
     echo "[INFO] pcre-devel is not available on this system. Continuing with pcre2-devel only."
@@ -129,6 +242,26 @@ echo "--- System Check ---"
 echo "Architecture: $ARCH"
 echo "OS: $OS_NAME"
 echo "--------------------"
+
+echo ""
+echo "--- FFmpeg Codec Dependency Check ---"
+if command -v pkg-config >/dev/null 2>&1; then
+    ensure_codec_pc_visibility
+    if pkg-config --exists x264; then
+        echo "[OK] x264 detected via pkg-config"
+    else
+        echo "[WARN] x264 NOT detected via pkg-config (ffmpeg PTS install may fail)"
+    fi
+
+    if pkg-config --exists x265; then
+        echo "[OK] x265 detected via pkg-config"
+    else
+        echo "[WARN] x265 NOT detected via pkg-config (ffmpeg PTS install may fail)"
+    fi
+else
+    echo "[WARN] pkg-config command not found"
+fi
+echo "--------------------------------------"
 
 # 5. NASM/YASM tools (required by ffmpeg/x264 build path in PTS)
 echo "[Target: $ARCH] Installing NASM and YASM..."
