@@ -361,10 +361,27 @@ fi
 # Ensure pkg-config can find /usr/local installs as well.
 export PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}"
 
+persist_pkg_config_path_profile() {
+    local profile_file="/etc/profile.d/cloud_onehour-pkgconfig.sh"
+    local profile_content
+
+    profile_content='export PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}"'
+
+    if sudo test -f "$profile_file" && sudo grep -Fq "/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig" "$profile_file"; then
+        echo "[OK] PKG_CONFIG_PATH profile already configured: ${profile_file}"
+        return 0
+    fi
+
+    echo "[INFO] Persisting PKG_CONFIG_PATH for login shells: ${profile_file}"
+    echo "$profile_content" | sudo tee "$profile_file" >/dev/null
+    sudo chmod 0644 "$profile_file"
+}
+
 ensure_codec_pc_visibility() {
     local pc
     local src
-    local dst_dir="/usr/lib64/pkgconfig"
+    local dst_dirs=("/usr/lib64/pkgconfig" "/usr/lib/pkgconfig")
+    local dst_dir
     for pc in x264.pc x265.pc; do
         if [ -f "/usr/local/lib64/pkgconfig/${pc}" ]; then
             src="/usr/local/lib64/pkgconfig/${pc}"
@@ -374,9 +391,11 @@ ensure_codec_pc_visibility() {
             continue
         fi
 
-        if [ -d "${dst_dir}" ]; then
-            sudo ln -sf "${src}" "${dst_dir}/${pc}" || true
-        fi
+        for dst_dir in "${dst_dirs[@]}"; do
+            if [ -d "${dst_dir}" ]; then
+                sudo ln -sf "${src}" "${dst_dir}/${pc}" || true
+            fi
+        done
     done
 }
 
@@ -449,6 +468,8 @@ if ! codec_pkgconfig_ready; then
     echo "[ERROR] x264/x265 are still unavailable via pkg-config after repository/source attempts."
     exit 1
 fi
+
+persist_pkg_config_path_profile
 
 # Some EL10 variants do not provide pcre-devel (PCRE1). Install only when available.
 if ! sudo dnf -y install pcre-devel 2>/dev/null; then
