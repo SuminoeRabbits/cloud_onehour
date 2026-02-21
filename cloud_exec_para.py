@@ -3784,6 +3784,18 @@ def validate_instance_definitions(instances_def: Dict[str, Any], csp_filter: Opt
         if not isinstance(csp_config, dict):
             continue
 
+        regions_cfg = csp_config.get('regions', {})
+        if isinstance(regions_cfg, dict):
+            for region_name, region_cfg in regions_cfg.items():
+                if not isinstance(region_cfg, dict):
+                    continue
+                vcpux16_only = is_true_flag(region_cfg.get('vcpux16_only', 'false'))
+                vcpux8_only = is_true_flag(region_cfg.get('vcpux8_only', 'false'))
+                if vcpux16_only and vcpux8_only:
+                    errors.append(
+                        f"[{csp.upper()}] Region '{region_name}': 'vcpux16_only' and 'vcpux8_only' cannot both be true."
+                    )
+
         instances, enabled_regions = collect_instances_for_csp(csp_config)
         if csp_config.get('enable', False) and not enabled_regions:
             warnings.append(
@@ -3873,6 +3885,11 @@ def validate_instance_definitions(instances_def: Dict[str, Any], csp_filter: Opt
         raise ValueError(error_msg)
 
 
+def is_true_flag(value: Any) -> bool:
+    """Return True when a flag value is explicitly set to true (case-insensitive string/bool)."""
+    return str(value).strip().lower() == 'true'
+
+
 def collect_instances_for_csp(csp_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Collect instances for a CSP with region expansion.
@@ -3890,13 +3907,30 @@ def collect_instances_for_csp(csp_config: Dict[str, Any]) -> Tuple[List[Dict[str
                 continue
             if not region_cfg.get('enable', False):
                 continue
+
+            vcpux16_only = is_true_flag(region_cfg.get('vcpux16_only', 'false'))
+            vcpux8_only = is_true_flag(region_cfg.get('vcpux8_only', 'false'))
+            if vcpux16_only and vcpux8_only:
+                raise ValueError(
+                    f"Region '{region_name}': 'vcpux16_only' and 'vcpux8_only' cannot both be true."
+                )
+
             enabled_regions.append(region_name)
+
             for inst in region_cfg.get('instances', []):
                 if not isinstance(inst, dict):
                     continue
-                if not inst.get('region'):
-                    inst['region'] = region_name
-                instances.append(inst)
+
+                inst_expanded = dict(inst)
+                if not inst_expanded.get('region'):
+                    inst_expanded['region'] = region_name
+
+                if vcpux16_only and inst_expanded.get('vcpus') != 16:
+                    inst_expanded['enable'] = False
+                if vcpux8_only and inst_expanded.get('vcpus') != 8:
+                    inst_expanded['enable'] = False
+
+                instances.append(inst_expanded)
     else:
         default_region = csp_config.get('region') or csp_config.get('zone')
         if default_region:
@@ -3904,9 +3938,10 @@ def collect_instances_for_csp(csp_config: Dict[str, Any]) -> Tuple[List[Dict[str
         for inst in csp_config.get('instances', []):
             if not isinstance(inst, dict):
                 continue
-            if default_region and not inst.get('region'):
-                inst['region'] = default_region
-            instances.append(inst)
+            inst_expanded = dict(inst)
+            if default_region and not inst_expanded.get('region'):
+                inst_expanded['region'] = default_region
+            instances.append(inst_expanded)
 
     return instances, enabled_regions
 
