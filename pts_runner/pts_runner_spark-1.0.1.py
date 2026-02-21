@@ -171,7 +171,7 @@ class PreSeedDownloader:
             print(f"  [OK] Download completed: {filename}")
             return True
         except subprocess.CalledProcessError:
-            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            print("  [WARN] aria2c download failed, falling back to PTS default")
             if target_path.exists():
                 target_path.unlink()
             return False
@@ -487,7 +487,7 @@ class SparkRunner:
             # If too restrictive, try to adjust
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
-                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -496,11 +496,11 @@ class SparkRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print("  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode")
+                    print("  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print("  [WARN] Running in LIMITED mode")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
@@ -508,7 +508,7 @@ class SparkRunner:
 
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
-            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print("  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
             return 2
 
 
@@ -583,12 +583,12 @@ class SparkRunner:
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Pre-download large files with aria2c for speed
-        print(f"\n>>> Checking for large files to pre-seed...")
+        print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
@@ -603,10 +603,10 @@ class SparkRunner:
 
         # Print install command for debugging
         print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
+        print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")        # Execute install command with real-time output streaming
-        print(f"  Running installation...")
+        print("  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -653,7 +653,7 @@ class SparkRunner:
 
         if install_failed:
             print(f"  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -663,9 +663,9 @@ class SparkRunner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
@@ -678,13 +678,13 @@ class SparkRunner:
         )
 
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
         # Patch spark execution script to handle missing $LOG_FILE and bad paths
-        print(f"\n  [INFO] Patching spark execution script...")
+        print("\n  [INFO] Patching spark execution script...")
         spark_script = installed_dir / 'spark'
         if spark_script.exists():
             with open(spark_script, 'r') as f:
@@ -762,7 +762,7 @@ class SparkRunner:
                 f.write(patched_content)
 
             spark_script.chmod(0o755)
-            print(f"  [OK] spark script patched for stdout and local paths")
+            print("  [OK] spark script patched for stdout and local paths")
 
 
         
@@ -779,7 +779,7 @@ class SparkRunner:
         - ACTIVELY SANITIZES install.sh to remove legacy flags.
         """
         pts_dir = Path.home() / ".phoronix-test-suite"
-        install_sh = pts_dir / "installed-tests" / "pts" / f"spark-1.0.1" / "install.sh"
+        install_sh = pts_dir / "installed-tests" / "pts" / "spark-1.0.1" / "install.sh"
         if not install_sh.exists():
             return False
             
@@ -794,12 +794,12 @@ class SparkRunner:
             # 1. Fix data paths ($HOME -> ../..)
             # The install.sh uses $HOME/pyspark-benchmark which fails in PTS environment.
             if '\\$HOME/pyspark-benchmark' in content:
-                print(f"  [FIX] Patching install.sh paths (\\$HOME -> ../..)...")
+                print("  [FIX] Patching install.sh paths (\\$HOME -> ../..)...")
                 content = content.replace('\\$HOME/pyspark-benchmark', '../../pyspark-benchmark')
                 content = content.replace('\\$HOME/test-data', '../../test-data')
                 modified = True
             elif '$HOME/pyspark-benchmark' in content:
-                print(f"  [FIX] Patching install.sh paths ($HOME -> ../..)...")
+                print("  [FIX] Patching install.sh paths ($HOME -> ../..)...")
                 content = content.replace('$HOME/pyspark-benchmark', '../../pyspark-benchmark')
                 content = content.replace('$HOME/test-data', '../../test-data')
                 modified = True
@@ -823,7 +823,7 @@ class SparkRunner:
             gen_cmd_clean = "./spark-3.3.0-bin-hadoop3/bin/spark-submit --driver-memory 4g pyspark-benchmark/generate-data.py test-data"
 
             if 'generate-data.py' not in content:
-                 print(f"  [FIX] Injecting data generation step into install.sh...")
+                 print("  [FIX] Injecting data generation step into install.sh...")
                  content += f"\n# Generate test data (added by pts_runner clean)\n{gen_cmd_clean}\n"
                  modified = True
             
@@ -832,7 +832,7 @@ class SparkRunner:
             
             # A. Remove export SPARK_JAVA_OPTS / JDK_JAVA_OPTIONS
             if "export SPARK_JAVA_OPTS=" in content or "export JDK_JAVA_OPTIONS=" in content:
-                  print(f"  [FIX] Sanitizing install.sh: Removing toxic env exports...")
+                  print("  [FIX] Sanitizing install.sh: Removing toxic env exports...")
                   content = re.sub(r"export SPARK_JAVA_OPTS=.*\n", "", content)
                   content = re.sub(r"export JDK_JAVA_OPTIONS=.*\n", "", content)
                   # Cleanup bare exports without newlines just in case
@@ -841,7 +841,7 @@ class SparkRunner:
             
             # B. Remove --driver-java-options from 'spark' launcher script
             if "./spark-submit --driver-java-options" in content:
-                  print(f"  [FIX] Sanitizing install.sh: Removing --driver-java-options from launcher...")
+                  print("  [FIX] Sanitizing install.sh: Removing --driver-java-options from launcher...")
                   # Replace with clean version
                   # Pattern: ./spark-submit --driver-java-options '...' --name
                   # We simply remove the flag and its argument.
@@ -855,7 +855,7 @@ class SparkRunner:
             new_lines = []
             for line in lines:
                 if "generate-data.py" in line and "--driver-java-options" in line:
-                    print(f"  [FIX] Sanitizing install.sh: Reverting data gen to clean command...")
+                    print("  [FIX] Sanitizing install.sh: Reverting data gen to clean command...")
                     new_lines.append(gen_cmd_clean)
                     modified = True
                 else:
@@ -886,7 +886,7 @@ class SparkRunner:
 
             # 6. Python 3.12+ compatibility (typing.io / typing.re / pipes removal)
             if self.py_version >= (3, 12):
-                print(f"  [FIX] Python 3.12+ detected. Starting robust compatibility patches...")
+                print("  [FIX] Python 3.12+ detected. Starting robust compatibility patches...")
 
                 # Ensure all files are writable before patching
                 subprocess.run(['chmod', '-R', '+w', str(install_sh.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1008,7 +1008,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
                     print(f"  [WARN] No 'spark-3.3.0*' directory found in {install_sh.parent}")
 
                 # 6c. Patch Python source files with accurate import replacements
-                print(f"  [FIX] Running import replacements for typing.io, typing.re, and pipes...")
+                print("  [FIX] Running import replacements for typing.io, typing.re, and pipes...")
 
                 # More accurate sed patterns for Python imports
                 # Note: Using word boundaries and flexible whitespace to handle indented code
@@ -1044,26 +1044,26 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
                     subprocess.run(['bash', '-c', f"LC_ALL=C {cmd}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                 # 6d. Verification step with detailed output
-                print(f"  [FIX] Verifying patches...")
+                print("  [FIX] Verifying patches...")
                 check = subprocess.run(
                     ['bash', '-c', f"grep -r 'typing\\.io' {install_sh.parent} --include='*.py' 2>/dev/null || true"],
                     capture_output=True, text=True
                 )
                 if not check.stdout.strip():
-                    print(f"  [OK] No 'typing.io' found in Python files. Patch verified.")
+                    print("  [OK] No 'typing.io' found in Python files. Patch verified.")
                 else:
-                    print(f"  [WARN] 'typing.io' still exists in the following files:")
+                    print("  [WARN] 'typing.io' still exists in the following files:")
                     for line in check.stdout.strip().splitlines()[:5]:
                         print(f"    [REMAIN] {line}")
 
                 # Final check for any remaining typing.py shadowing files
                 final_shadow = list(install_sh.parent.rglob("typing.py"))
                 if final_shadow:
-                    print(f"  [CRITICAL] Shadowing typing.py files still exist:")
+                    print("  [CRITICAL] Shadowing typing.py files still exist:")
                     for sf in final_shadow:
                         print(f"    [SHADOW] {sf}")
                 else:
-                    print(f"  [OK] No shadowing typing.py files found.")
+                    print("  [OK] No shadowing typing.py files found.")
 
                 sys.stdout.flush()
 
@@ -1081,7 +1081,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -1112,7 +1112,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"Spark Benchmark Summary\n")
+            f.write("Spark Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -1128,7 +1128,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
                 if raw_values:
                     f.write(f"  Raw values: {', '.join([f'{v:.2f}' for v in raw_values])}\n")
                 else:
-                    f.write(f"  Raw values: N/A\n")
+                    f.write("  Raw values: N/A\n")
                 f.write("\n")
 
             f.write("="*80 + "\n")
@@ -1144,7 +1144,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
-        print(f"\n>>> Parsing perf stats and frequency data")
+        print("\n>>> Parsing perf stats and frequency data")
 
         cpu_ids = [int(c.strip()) for c in cpu_list.split(',')]
         per_cpu_metrics = {}
@@ -1282,7 +1282,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
             utilization = (total_task_clock / max_task_clock / len(cpu_ids)) * 100.0
             perf_summary['cpu_utilization_percent'] = round(utilization, 1)
 
-        print(f"  [OK] Performance metrics calculated")
+        print("  [OK] Performance metrics calculated")
         return perf_summary
 
     def run_benchmark(self, num_threads):
@@ -1369,17 +1369,17 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
 
         print(f"[INFO] {cpu_info}")
         print(f"\n{'>'*80}")
-        print(f"[PTS BENCHMARK COMMAND]")
+        print("[PTS BENCHMARK COMMAND]")
         print(f"  {pts_cmd}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute PTS command
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -1411,18 +1411,18 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
 
         if returncode == 0:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
 
             try:
                 perf_summary = self.parse_perf_stats_and_freq(
@@ -1453,7 +1453,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -1496,14 +1496,14 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
 
 
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"Spark 1.0.1 Benchmark Runner")
+        print("Spark 1.0.1 Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
@@ -1569,7 +1569,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f"Benchmark Summary")
+        print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")

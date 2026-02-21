@@ -60,7 +60,7 @@ class PreSeedDownloader:
             threshold_mb: Size threshold in MB to trigger aria2c (default: 256MB)
         """
         if not self.aria2_available:
-            print(f"  [INFO] aria2c not found, skipping pre-seed (will rely on PTS default)")
+            print("  [INFO] aria2c not found, skipping pre-seed (will rely on PTS default)")
             return False
 
         # Locate downloads.xml
@@ -194,7 +194,7 @@ class PreSeedDownloader:
             print(f"  [aria2c] Download completed: {filename}")
             return True
         except subprocess.CalledProcessError:
-            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            print("  [WARN] aria2c download failed, falling back to PTS default")
             # Clean up partial download
             if target_path.exists():
                 target_path.unlink()
@@ -504,7 +504,7 @@ class X265Runner:
             # If too restrictive, try to adjust
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
-                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -513,11 +513,11 @@ class X265Runner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print("  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode")
+                    print("  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print("  [WARN] Running in LIMITED mode")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
@@ -525,7 +525,7 @@ class X265Runner:
 
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
-            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print("  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
             return 2
 
     def dump_error_diagnostics(self, num_threads, log_file):
@@ -543,7 +543,7 @@ class X265Runner:
             log_file: Path to the benchmark log file
         """
         print(f"\n{'='*80}")
-        print(f">>> Dumping error diagnostics")
+        print(">>> Dumping error diagnostics")
         print(f"{'='*80}")
 
         diag_file = self.results_dir / f"{num_threads}-thread_error_diag.txt"
@@ -575,7 +575,7 @@ class X265Runner:
                                     # Limit to last 100 lines per log
                                     lines = content.split('\n')
                                     if len(lines) > 100:
-                                        f.write(f"[...truncated, showing last 100 lines...]\n")
+                                        f.write("[...truncated, showing last 100 lines...]\n")
                                         f.write('\n'.join(lines[-100:]))
                                     else:
                                         f.write(content)
@@ -606,7 +606,7 @@ class X265Runner:
                         content = log.read_text(errors='ignore')
                         lines = content.split('\n')
                         if len(lines) > 50:
-                            f.write(f"[...truncated, showing last 50 lines...]\n")
+                            f.write("[...truncated, showing last 50 lines...]\n")
                             f.write('\n'.join(lines[-50:]))
                         else:
                             f.write(content)
@@ -631,7 +631,7 @@ class X265Runner:
 
             x265_bin = installed_dir / "x265"
             if x265_bin.exists():
-                f.write(f"\n[x265 --version]\n")
+                f.write("\n[x265 --version]\n")
                 result = subprocess.run(
                     [str(x265_bin), '--version'],
                     capture_output=True, text=True
@@ -775,7 +775,7 @@ class X265Runner:
             print(f"  [WARN] install.sh not found at {install_sh_path}")
             return False
 
-        print(f"  [INFO] Patching install.sh for GCC-14 and Ubuntu 24.04 compatibility...")
+        print("  [INFO] Patching install.sh for GCC-14 and Ubuntu 24.04 compatibility...")
 
         try:
             with open(install_sh_path, 'r') as f:
@@ -804,16 +804,16 @@ class X265Runner:
                 patched = True
                 print(f"  [OK] Added CMake GCC-14 patch for arch: {arch}")
             elif 'CMAKE_C_COMPILER=gcc-14' in content:
-                print(f"  [INFO] CMake patch already applied")
+                print("  [INFO] CMake patch already applied")
             else:
-                print(f"  [WARN] Could not find cmake command to patch")
+                print("  [WARN] Could not find cmake command to patch")
 
             if patched:
                 with open(install_sh_path, 'w') as f:
                     f.write(content)
-                print(f"  [OK] install.sh patched successfully")
+                print("  [OK] install.sh patched successfully")
             else:
-                print(f"  [INFO] install.sh already fully patched or no changes needed")
+                print("  [INFO] install.sh already fully patched or no changes needed")
 
             return True
 
@@ -834,11 +834,11 @@ class X265Runner:
             sys.exit(1)
 
         # --- Pre-download large files (Pattern 5) ---
-        print(f"\\n>>> Checking for large files to pre-seed...")
+        print("\\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
 
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
-        print(f"\\n>>> Checking for large files to pre-seed...")
+        print("\\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
@@ -849,7 +849,7 @@ class X265Runner:
 
 
         # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
@@ -864,12 +864,12 @@ class X265Runner:
 
         # Print install command for debugging
         print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
+        print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
         # Execute install command with real-time output streaming
-        print(f"  Running installation...")
+        print("  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -916,7 +916,7 @@ class X265Runner:
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -926,9 +926,9 @@ class X265Runner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
@@ -941,14 +941,14 @@ class X265Runner:
         )
 
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
-        print(f"\n>>> Parsing perf stats and frequency data")
+        print("\n>>> Parsing perf stats and frequency data")
 
         cpu_ids = [int(c.strip()) for c in cpu_list.split(',')]
         per_cpu_metrics = {}
@@ -1083,7 +1083,7 @@ class X265Runner:
             utilization = (total_task_clock / max_task_clock / len(cpu_ids)) * 100.0
             perf_summary['cpu_utilization_percent'] = round(utilization, 1)
 
-        print(f"  [OK] Performance metrics calculated")
+        print("  [OK] Performance metrics calculated")
         return perf_summary
 
     def run_benchmark(self, num_threads):
@@ -1149,17 +1149,17 @@ class X265Runner:
 
         print(f"[INFO] {cpu_info}")
         print(f"\n{'>'*80}")
-        print(f"[PTS BENCHMARK COMMAND]")
+        print("[PTS BENCHMARK COMMAND]")
         print(f"  {pts_cmd}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute PTS command
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -1189,11 +1189,11 @@ class X265Runner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Check for PTS-reported test failures in the log (even if returncode is 0)
         pts_test_failed = False
@@ -1215,7 +1215,7 @@ class X265Runner:
                 print(f"  [WARN] Could not check log for failures: {e}")
 
         if returncode == 0 and not pts_test_failed:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
 
             try:
                 perf_summary = self.parse_perf_stats_and_freq(
@@ -1234,7 +1234,7 @@ class X265Runner:
 
         elif pts_test_failed:
             # PTS completed but some tests failed
-            print(f"\n[WARN] Benchmark completed with some test failures")
+            print("\n[WARN] Benchmark completed with some test failures")
             print(f"     Thread log: {log_file}")
 
             # Dump detailed error diagnostics for failed tests
@@ -1270,7 +1270,7 @@ class X265Runner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -1336,12 +1336,12 @@ class X265Runner:
                         json_output.write_text(result.stdout, encoding="utf-8")
                         print(f"  [OK] Saved stdout to: {json_output}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -1371,7 +1371,7 @@ class X265Runner:
         # Generate summary.log
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"x265 1.5.0 Benchmark Summary\n")
+            f.write("x265 1.5.0 Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -1405,11 +1405,11 @@ class X265Runner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"x265 1.5.0 Benchmark Runner")
+        print("x265 1.5.0 Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
-        print(f"[INFO] Thread mode: Auto-detect (taskset-limited)")
+        print("[INFO] Thread mode: Auto-detect (taskset-limited)")
         print(f"[INFO] Threads to test: {self.thread_list}")
         print()
 
@@ -1455,7 +1455,7 @@ class X265Runner:
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f"Benchmark Summary")
+        print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")

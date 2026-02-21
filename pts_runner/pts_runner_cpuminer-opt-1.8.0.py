@@ -353,7 +353,7 @@ class CpuminerOptRunner:
 
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive")
-                print(f"  [INFO] Attempting to adjust to 0...")
+                print("  [INFO] Attempting to adjust to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -362,11 +362,11 @@ class CpuminerOptRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0")
+                    print("  [OK] perf_event_paranoid adjusted to 0")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode")
+                    print("  [ERROR] Failed to adjust (sudo required)")
+                    print("  [WARN] Running in LIMITED mode")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
@@ -473,13 +473,13 @@ class CpuminerOptRunner:
 
     def install_benchmark(self):
         """Install benchmark with error detection and verification."""
-        print(f"\n>>> Checking for large files to pre-seed...")
+        print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -577,7 +577,7 @@ class CpuminerOptRunner:
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -586,23 +586,23 @@ class CpuminerOptRunner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         verify_result = subprocess.run(['bash', '-c', verify_cmd], capture_output=True, text=True)
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
-        print(f"\n>>> Parsing perf stats and frequency data")
+        print("\n>>> Parsing perf stats and frequency data")
         cpu_ids = [int(x.strip()) for x in cpu_list.split(',')]
 
         perf_summary = {
@@ -724,15 +724,15 @@ class CpuminerOptRunner:
         print(f"[INFO] Perf monitoring mode: {perf_mode}")
         print(f"  [INFO] {cpu_info}")
         print(f"\n{'>'*80}")
-        print(f"[PTS RUN COMMAND]")
+        print("[PTS RUN COMMAND]")
         print(f"  {pts_cmd}")
         print(f"{'<'*80}\n")
 
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
             stdout_f.write(f"\n{'='*80}\n")
@@ -760,18 +760,18 @@ class CpuminerOptRunner:
             returncode = process.returncode
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
 
         if returncode == 0:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
             if self.perf_events and perf_stats_file.exists():
                 try:
                     perf_summary = self.parse_perf_stats_and_freq(
@@ -790,7 +790,7 @@ class CpuminerOptRunner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -847,12 +847,12 @@ class CpuminerOptRunner:
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"

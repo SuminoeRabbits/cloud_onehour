@@ -176,7 +176,7 @@ class PreSeedDownloader:
             print(f"  [aria2c] Download completed: {filename}")
             return True
         except subprocess.CalledProcessError:
-            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            print("  [WARN] aria2c download failed, falling back to PTS default")
             # Clean up partial download
             if target_path.exists():
                 target_path.unlink()
@@ -452,7 +452,7 @@ class StreamRunner:
 
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive")
-                print(f"  [INFO] Attempting to adjust to 0...")
+                print("  [INFO] Attempting to adjust to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -461,11 +461,11 @@ class StreamRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0")
+                    print("  [OK] perf_event_paranoid adjusted to 0")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode")
+                    print("  [ERROR] Failed to adjust (sudo required)")
+                    print("  [WARN] Running in LIMITED mode")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
@@ -528,7 +528,7 @@ class StreamRunner:
     def install_benchmark(self):
         """Install benchmark with error detection and verification."""
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
-        print(f"\n>>> Checking for large files to pre-seed...")
+        print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
@@ -537,7 +537,7 @@ class StreamRunner:
         # Patch install.sh to cap STREAM_ARRAY_SIZE on large L3 systems (e.g., m8i)
         self.patch_install_script(required=False)
 
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -545,12 +545,12 @@ class StreamRunner:
         install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
+        print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
         # Execute install command with real-time output streaming
-        print(f"  Running installation...")
+        print("  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -597,7 +597,7 @@ class StreamRunner:
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -607,9 +607,9 @@ class StreamRunner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
@@ -622,8 +622,8 @@ class StreamRunner:
         )
 
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         # Ensure patch is present after install (fail fast if not)
         if not self.patch_install_script(required=True):
@@ -714,7 +714,7 @@ class StreamRunner:
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
-        print(f"\n>>> Parsing perf stats and frequency data")
+        print("\n>>> Parsing perf stats and frequency data")
 
         cpu_ids = [int(x.strip()) for x in cpu_list.split(',')]
 
@@ -790,7 +790,7 @@ class StreamRunner:
             if elapsed_match:
                 perf_summary["elapsed_time_sec"] = float(elapsed_match.group(1).replace(',', ''))
 
-        print(f"  [OK] Perf stats parsed successfully")
+        print("  [OK] Perf stats parsed successfully")
         return perf_summary
 
     def run_benchmark(self, num_threads):
@@ -852,17 +852,17 @@ class StreamRunner:
 
         print(f"  [INFO] {cpu_info}")
         print(f"\n{'>'*80}")
-        print(f"[PTS RUN COMMAND]")
+        print("[PTS RUN COMMAND]")
         print(f"  {pts_cmd}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute PTS command
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -894,18 +894,18 @@ class StreamRunner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
 
         if returncode == 0:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
 
             # Parse perf stats
             try:
@@ -1008,7 +1008,7 @@ class StreamRunner:
         print(f"# vCPU Count: {self.vcpu_count}")
         print(f"# Thread List: {self.thread_list}")
         if self.quick_mode:
-            print(f"# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
+            print("# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
         print(f"{'#'*80}")
 
         # Clean results directory
@@ -1062,7 +1062,7 @@ class StreamRunner:
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f"Benchmark Summary")
+        print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")
@@ -1074,7 +1074,7 @@ class StreamRunner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -1135,12 +1135,12 @@ class StreamRunner:
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -1192,7 +1192,7 @@ class StreamRunner:
                     val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
                     f.write(f"  Raw values: {val_str}\\n")
                 else:
-                    f.write(f"  Raw values: N/A\\n")
+                    f.write("  Raw values: N/A\\n")
                     
                 f.write("\\n")
 

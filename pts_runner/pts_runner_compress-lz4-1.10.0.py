@@ -544,25 +544,25 @@ class CompressLZ4BenchmarkRunner:
             if self.perf_paranoid <= 0:
                 # Full monitoring mode with per-CPU metrics
                 perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
+                print("  [INFO] Running with perf monitoring (per-CPU mode)")
             else:
                 # Limited mode without per-CPU breakdown
                 perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+                print("  [INFO] Running with perf monitoring (aggregated mode)")
 
             pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
         else:
             # Perf unavailable
             pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
-            print(f"  [INFO] Running without perf")
+            print("  [INFO] Running without perf")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute benchmark with real-time output streaming
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -598,18 +598,18 @@ class CompressLZ4BenchmarkRunner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
 
         if returncode == 0:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
             # Parse perf stats if available
             if self.perf_events and perf_stats_file.exists():
                 try:
@@ -675,12 +675,12 @@ class CompressLZ4BenchmarkRunner:
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -718,7 +718,7 @@ class CompressLZ4BenchmarkRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"Benchmark Summary\n")
+            f.write("Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -753,13 +753,13 @@ class CompressLZ4BenchmarkRunner:
         print(f"{'='*80}")
 
         # Pre-seed large files (202.5MB download - silesia archive)
-        print(f"\n>>> Pre-seeding large files (if needed)")
+        print("\n>>> Pre-seeding large files (if needed)")
         downloader = PreSeedDownloader()
         if downloader.is_aria2_available():
-            print(f"  [OK] aria2c is available for accelerated downloads")
+            print("  [OK] aria2c is available for accelerated downloads")
             downloader.download_from_xml(self.benchmark_full, threshold_mb=100)
         else:
-            print(f"  [INFO] aria2c not available, using PTS default downloader")
+            print("  [INFO] aria2c not available, using PTS default downloader")
 
         # Remove existing installation
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
@@ -770,7 +770,7 @@ class CompressLZ4BenchmarkRunner:
         install_cmd = f'MAKEFLAGS="-j{nproc}" CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Execute with real-time output streaming
-        print(f"  Running installation...")
+        print("  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -822,7 +822,7 @@ class CompressLZ4BenchmarkRunner:
 
         if not install_dir.exists():
             print(f"  [ERROR] Installation failed: {install_dir} does not exist")
-            print(f"  [ERROR] Check output above for details")
+            print("  [ERROR] Check output above for details")
             sys.exit(1)
 
         # Secondary check: PTS recognition
@@ -831,7 +831,7 @@ class CompressLZ4BenchmarkRunner:
         if self.benchmark_full not in result.stdout:
             print(f"  [WARN] {self.benchmark_full} may not be fully recognized by PTS")
 
-        print(f"  [OK] Installation completed and verified")
+        print("  [OK] Installation completed and verified")
 
 
     def ensure_upload_disabled(self):
@@ -904,7 +904,7 @@ class CompressLZ4BenchmarkRunner:
 
         # Export results
         print(f"\n{'='*80}")
-        print(f">>> Exporting results")
+        print(">>> Exporting results")
         print(f"{'='*80}")
         self.export_results()
 
@@ -912,7 +912,7 @@ class CompressLZ4BenchmarkRunner:
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f"[SUCCESS] All benchmarks completed successfully")
+        print("[SUCCESS] All benchmarks completed successfully")
         print(f"{'='*80}")
 
         return True

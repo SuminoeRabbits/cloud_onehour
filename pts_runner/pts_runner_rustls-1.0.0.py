@@ -381,7 +381,7 @@ class RustlsRunner:
             # Note: -a (system-wide) requires perf_event_paranoid <= 0
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
-                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -390,27 +390,27 @@ class RustlsRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
-                    print(f"       Per-CPU metrics and hardware counters enabled")
-                    print(f"       Full monitoring mode: perf stat -A -a")
+                    print("  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print("       Per-CPU metrics and hardware counters enabled")
+                    print("       Full monitoring mode: perf stat -A -a")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode:")
-                    print(f"         - No per-CPU metrics (no -A -a flags)")
-                    print(f"         - No hardware counters (cycles, instructions)")
-                    print(f"         - Software events only (aggregated)")
-                    print(f"         - IPC calculation not available")
+                    print("  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print("  [WARN] Running in LIMITED mode:")
+                    print("         - No per-CPU metrics (no -A -a flags)")
+                    print("         - No hardware counters (cycles, instructions)")
+                    print("         - Software events only (aggregated)")
+                    print("         - IPC calculation not available")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
-                print(f"       Full monitoring mode: perf stat -A -a")
+                print("       Full monitoring mode: perf stat -A -a")
                 return current_value
 
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
-            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
-            print(f"         Running in LIMITED mode without per-CPU metrics")
+            print("  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print("         Running in LIMITED mode without per-CPU metrics")
             return 2
 
 
@@ -480,7 +480,7 @@ class RustlsRunner:
 
             # Patch 1: Fix incomplete chmod line
             if content.strip().endswith('chmod +x rustls > \\'):
-                print(f"  [INFO] Patching install.sh: fixing incomplete chmod line...")
+                print("  [INFO] Patching install.sh: fixing incomplete chmod line...")
                 content = content.rstrip('> \\\n')
                 if not content.endswith('chmod +x rustls'):
                     content = content + '\nchmod +x rustls'
@@ -488,7 +488,7 @@ class RustlsRunner:
 
             # Patch 2: Fix hardcoded --threads 24
             if '--threads 24' in content:
-                print(f"  [INFO] Patching install.sh: replacing hardcoded --threads 24 with NUM_CPU_CORES...")
+                print("  [INFO] Patching install.sh: replacing hardcoded --threads 24 with NUM_CPU_CORES...")
                 content = content.replace('--threads 24', '--threads ${NUM_CPU_CORES:-24}')
                 patched = True
 
@@ -499,14 +499,14 @@ class RustlsRunner:
                     if not content.endswith('\n'):
                         f.write('\n')
 
-                print(f"  [OK] install.sh patched successfully")
+                print("  [OK] install.sh patched successfully")
                 chmod_check = original_content.strip().endswith('chmod +x rustls > \\\\')
                 threads_check = '--threads 24' in original_content
                 print(f"       - chmod line fixed: {chmod_check}")
                 print(f"       - threads parameter fixed: {threads_check}")
                 return True
             else:
-                print(f"  [OK] install.sh already patched or correct")
+                print("  [OK] install.sh already patched or correct")
                 return True
 
         except Exception as e:
@@ -523,7 +523,7 @@ class RustlsRunner:
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
@@ -556,12 +556,12 @@ class RustlsRunner:
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
+        print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
         # Execute install command with real-time output
-        print(f"[INFO] Starting installation (this may take a few minutes)...")
+        print("[INFO] Starting installation (this may take a few minutes)...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -609,7 +609,7 @@ class RustlsRunner:
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -619,9 +619,9 @@ class RustlsRunner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
         
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
@@ -635,8 +635,8 @@ class RustlsRunner:
         )
 
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
@@ -724,25 +724,25 @@ class RustlsRunner:
             if self.perf_paranoid <= 0:
                 # Full monitoring mode with per-CPU metrics
                 perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
+                print("  [INFO] Running with perf monitoring (per-CPU mode)")
             else:
                 # Limited mode without per-CPU breakdown
                 perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+                print("  [INFO] Running with perf monitoring (aggregated mode)")
 
             pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
         else:
             # Perf unavailable
             pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
-            print(f"  [INFO] Running without perf")
+            print("  [INFO] Running without perf")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute benchmark with real-time output streaming
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -775,18 +775,18 @@ class RustlsRunner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
 
         if returncode == 0:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
             # Parse perf stats if available
             if self.perf_events and perf_stats_file.exists():
                 try:
@@ -805,7 +805,7 @@ class RustlsRunner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -858,12 +858,12 @@ class RustlsRunner:
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -894,7 +894,7 @@ class RustlsRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"Rustls Benchmark Summary\n")
+            f.write("Rustls Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -925,12 +925,12 @@ class RustlsRunner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"Rustls Benchmark Runner")
+        print("Rustls Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
         print(f"[INFO] Test category: {self.test_category}")
-        print(f"[INFO] Thread mode: Runtime configurable (THChange_at_runtime=true)")
+        print("[INFO] Thread mode: Runtime configurable (THChange_at_runtime=true)")
         print(f"[INFO] Threads to test: {self.thread_list}")
         print(f"[INFO] Results directory: {self.results_dir}")
         print()
@@ -985,7 +985,7 @@ class RustlsRunner:
 
         # Summary
         print(f"\n{'='*80}")
-        print(f"Benchmark Summary")
+        print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")

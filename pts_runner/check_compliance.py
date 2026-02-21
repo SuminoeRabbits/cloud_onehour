@@ -1402,7 +1402,7 @@ class ComplianceChecker:
             )
         elif has_log_file_usage and has_patch_implementation:
             self.passed.append(
-                f"✅ $LOG_FILE handling: Scripts use $LOG_FILE, Runner patches it correctly"
+                "✅ $LOG_FILE handling: Scripts use $LOG_FILE, Runner patches it correctly"
             )
         elif has_log_file_usage and not has_patch_implementation:
             self.errors.append(
@@ -1626,7 +1626,7 @@ class ComplianceChecker:
 
         else:
 
-            print(f"✅ PASSED: All checks successful")
+            print("✅ PASSED: All checks successful")
 
         print(f"{'='*80}")
 
@@ -1835,7 +1835,7 @@ Warning Checks:
 
                         print(f"⚠️  WARNING: Failed to install {benchmark_name}")
 
-                        print(f"   Continuing with compliance check anyway...")
+                        print("   Continuing with compliance check anyway...")
 
                 else:
 

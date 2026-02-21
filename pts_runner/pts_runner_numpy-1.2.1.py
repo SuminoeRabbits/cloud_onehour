@@ -580,25 +580,25 @@ class NumpyBenchmarkRunner:
             if self.perf_paranoid <= 0:
                 # Full monitoring mode with per-CPU metrics
                 perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
+                print("  [INFO] Running with perf monitoring (per-CPU mode)")
             else:
                 # Limited mode without per-CPU breakdown
                 perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+                print("  [INFO] Running with perf monitoring (aggregated mode)")
 
             pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}'
         else:
             # Perf unavailable
             pts_cmd = f'NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}'
-            print(f"  [INFO] Running without perf")
+            print("  [INFO] Running without perf")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute benchmark with real-time output streaming
         pts_env = self.build_pts_env()
@@ -636,18 +636,18 @@ class NumpyBenchmarkRunner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
 
         if returncode == 0:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
             # Parse perf stats if available
             if self.perf_events and perf_stats_file.exists():
                 try:
@@ -713,12 +713,12 @@ class NumpyBenchmarkRunner:
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -749,7 +749,7 @@ class NumpyBenchmarkRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"Benchmark Summary\n")
+            f.write("Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -792,7 +792,7 @@ class NumpyBenchmarkRunner:
         install_cmd = f'MAKEFLAGS="-j{nproc}" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Execute with real-time output streaming
-        print(f"  Running installation...")
+        print("  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -837,11 +837,11 @@ class NumpyBenchmarkRunner:
 
         if not install_dir.exists():
             print(f"  [ERROR] Installation failed: {install_dir} does not exist")
-            print(f"  [ERROR] Check output above for details")
+            print("  [ERROR] Check output above for details")
             sys.exit(1)
 
         # Manual pip install with conditional --break-system-packages support
-        print(f"\n  [INFO] Manually installing Python dependencies (auto-detected pip flags)...")
+        print("\n  [INFO] Manually installing Python dependencies (auto-detected pip flags)...")
         if not self.break_system_packages_supported:
             print("  [INFO] pip version does not support --break-system-packages; using --user only")
 
@@ -850,11 +850,11 @@ class NumpyBenchmarkRunner:
         pip_result = subprocess.run(pip_cmd, capture_output=True, text=True)
         
         if pip_result.returncode != 0:
-            print(f"  [ERROR] pip install failed:")
+            print("  [ERROR] pip install failed:")
             print(pip_result.stderr)
             sys.exit(1)
         else:
-            print(f"  [OK] Python dependencies installed successfully")
+            print("  [OK] Python dependencies installed successfully")
 
         # Strengthen result parser to tolerate unsupported lines on newer Python/numpy
         result_parser_path = install_dir / 'result_parser.py'
@@ -886,11 +886,11 @@ class NumpyBenchmarkRunner:
             "        print(\"[WARN] Skipped %d non-numeric lines\" % skipped)\n"
             "    print(\"Geometric mean score: %.2f\" % score)\n"
         )
-        print(f"  [OK] result_parser.py patched for robust parsing")
+        print("  [OK] result_parser.py patched for robust parsing")
 
         # Note: Do NOT patch numpy script - PTS requires $LOG_FILE output for result parsing
         # The original script writes to $LOG_FILE which PTS uses to extract benchmark results
-        print(f"\n  [INFO] Keeping original numpy script (PTS requires $LOG_FILE output)")
+        print("\n  [INFO] Keeping original numpy script (PTS requires $LOG_FILE output)")
 
         # Secondary check: PTS recognition
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
@@ -898,7 +898,7 @@ class NumpyBenchmarkRunner:
         if self.benchmark_full not in result.stdout:
             print(f"  [WARN] {self.benchmark_full} may not be fully recognized by PTS")
 
-        print(f"  [OK] Installation completed and verified")
+        print("  [OK] Installation completed and verified")
 
     def patch_install_script(self):
         """
@@ -916,7 +916,7 @@ class NumpyBenchmarkRunner:
             return True
         
         print(f"\n{'='*80}")
-        print(f">>> Patching install.sh for Ubuntu 24.04 PEP 668 compliance")
+        print(">>> Patching install.sh for Ubuntu 24.04 PEP 668 compliance")
         print(f"{'='*80}")
         
         try:
@@ -926,7 +926,7 @@ class NumpyBenchmarkRunner:
             
             # Check if already patched
             if '--break-system-packages' in original_content:
-                print(f"  [INFO] Install script already patched")
+                print("  [INFO] Install script already patched")
                 return True
             
             # Patch: pip3 install --user scipy numpy
@@ -937,15 +937,15 @@ class NumpyBenchmarkRunner:
             )
             
             if patched_content == original_content:
-                print(f"  [WARN] No pip3 install command found to patch")
+                print("  [WARN] No pip3 install command found to patch")
                 return False
             
             # Write patched script
             with open(install_script, 'w') as f:
                 f.write(patched_content)
             
-            print(f"  [OK] Install script patched successfully")
-            print(f"  [INFO] Added --break-system-packages to pip3 install command")
+            print("  [OK] Install script patched successfully")
+            print("  [INFO] Added --break-system-packages to pip3 install command")
             return True
             
         except Exception as e:
@@ -1046,7 +1046,7 @@ class NumpyBenchmarkRunner:
 
         # Export results
         print(f"\n{'='*80}")
-        print(f">>> Exporting results")
+        print(">>> Exporting results")
         print(f"{'='*80}")
         self.export_results()
 
@@ -1054,7 +1054,7 @@ class NumpyBenchmarkRunner:
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f"[SUCCESS] All benchmarks completed successfully")
+        print("[SUCCESS] All benchmarks completed successfully")
         print(f"{'='*80}")
 
         return True

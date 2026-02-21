@@ -149,7 +149,7 @@ class PreSeedDownloader:
             print(f"  [aria2c] Download completed: {filename}")
             return True
         except subprocess.CalledProcessError:
-            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            print("  [WARN] aria2c download failed, falling back to PTS default")
             if target_path.exists(): target_path.unlink()
             return False
 
@@ -443,7 +443,7 @@ class ApacheRunner:
             # Note: -a (system-wide) requires perf_event_paranoid <= 0
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
-                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -452,27 +452,27 @@ class ApacheRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
-                    print(f"       Per-CPU metrics and hardware counters enabled")
-                    print(f"       Full monitoring mode: perf stat -A -a")
+                    print("  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print("       Per-CPU metrics and hardware counters enabled")
+                    print("       Full monitoring mode: perf stat -A -a")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode:")
-                    print(f"         - No per-CPU metrics (no -A -a flags)")
-                    print(f"         - No hardware counters (cycles, instructions)")
-                    print(f"         - Software events only (aggregated)")
-                    print(f"         - IPC calculation not available")
+                    print("  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print("  [WARN] Running in LIMITED mode:")
+                    print("         - No per-CPU metrics (no -A -a flags)")
+                    print("         - No hardware counters (cycles, instructions)")
+                    print("         - Software events only (aggregated)")
+                    print("         - IPC calculation not available")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
-                print(f"       Full monitoring mode: perf stat -A -a")
+                print("       Full monitoring mode: perf stat -A -a")
                 return current_value
 
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
-            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
-            print(f"         Running in LIMITED mode without per-CPU metrics")
+            print("  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print("         Running in LIMITED mode without per-CPU metrics")
             return 2
 
     def dump_error_diagnostics(self, num_threads, log_file):
@@ -491,7 +491,7 @@ class ApacheRunner:
             log_file: Path to the benchmark log file
         """
         print(f"\n{'='*80}")
-        print(f">>> Dumping error diagnostics")
+        print(">>> Dumping error diagnostics")
         print(f"{'='*80}")
 
         diag_file = self.results_dir / f"{num_threads}-thread_error_diag.txt"
@@ -523,7 +523,7 @@ class ApacheRunner:
                                     # Limit to last 100 lines per log
                                     lines = content.split('\n')
                                     if len(lines) > 100:
-                                        f.write(f"[...truncated, showing last 100 lines...]\n")
+                                        f.write("[...truncated, showing last 100 lines...]\n")
                                         f.write('\n'.join(lines[-100:]))
                                     else:
                                         f.write(content)
@@ -554,7 +554,7 @@ class ApacheRunner:
                         content = log.read_text(errors='ignore')
                         lines = content.split('\n')
                         if len(lines) > 50:
-                            f.write(f"[...truncated, showing last 50 lines...]\n")
+                            f.write("[...truncated, showing last 50 lines...]\n")
                             f.write('\n'.join(lines[-50:]))
                         else:
                             f.write(content)
@@ -741,7 +741,7 @@ class ApacheRunner:
             print(f"  [WARN] install.sh not found at {install_sh_path}")
             return False
 
-        print(f"  [INFO] Patching install.sh for GCC-14 and Ubuntu 24.04 compatibility...")
+        print("  [INFO] Patching install.sh for GCC-14 and Ubuntu 24.04 compatibility...")
 
         try:
             with open(install_sh_path, 'r') as f:
@@ -760,9 +760,9 @@ class ApacheRunner:
                     f"# Clean up existing httpd_ directory to prevent APR build failures\n{cleanup_cmd}\nmkdir $HOME/httpd_"
                 )
                 patched = True
-                print(f"  [OK] Added httpd_ cleanup patch (fixes libapr-1.so symlink error)")
+                print("  [OK] Added httpd_ cleanup patch (fixes libapr-1.so symlink error)")
             else:
-                print(f"  [INFO] httpd_ cleanup patch already applied")
+                print("  [INFO] httpd_ cleanup patch already applied")
 
             # Patch 1: Add 'no-asm' to OpenSSL build options (for GCC-14 compatibility)
             # This prevents inline assembly errors in OpenSSL 1.1.1i
@@ -774,9 +774,9 @@ class ApacheRunner:
                     f"cd wrk-4.2.0\n# GCC-14 compatibility: Add no-asm to OpenSSL build options\n{openssl_sed}\n"
                 )
                 patched = True
-                print(f"  [OK] Added OpenSSL no-asm patch")
+                print("  [OK] Added OpenSSL no-asm patch")
             else:
-                print(f"  [INFO] OpenSSL no-asm patch already applied")
+                print("  [INFO] OpenSSL no-asm patch already applied")
 
             # Patch 2: Add XCFLAGS to wrk make command to suppress implicit-function-declaration errors
             # This is needed for LuaJIT on ARM64 with Ubuntu 24.04 where __clear_cache is implicitly declared
@@ -811,7 +811,7 @@ class ApacheRunner:
                             indent = line[:len(line) - len(line.lstrip())]
                             line = f'{indent}make -j $NUM_CPU_CORES XCFLAGS="-Wno-error=implicit-function-declaration"'
                             xcflags_patched = True
-                            print(f"  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility")
+                            print("  [OK] Added XCFLAGS patch for LuaJIT ARM64 compatibility")
 
                     new_lines.append(line)
 
@@ -819,16 +819,16 @@ class ApacheRunner:
                     content = '\n'.join(new_lines)
                     patched = True
                 else:
-                    print(f"  [WARN] Could not find wrk make command to patch for XCFLAGS")
+                    print("  [WARN] Could not find wrk make command to patch for XCFLAGS")
             else:
-                print(f"  [INFO] XCFLAGS patch already applied")
+                print("  [INFO] XCFLAGS patch already applied")
 
             if patched:
                 with open(install_sh_path, 'w') as f:
                     f.write(content)
-                print(f"  [OK] install.sh patched successfully")
+                print("  [OK] install.sh patched successfully")
             else:
-                print(f"  [INFO] install.sh already fully patched")
+                print("  [INFO] install.sh already fully patched")
 
             return True
 
@@ -860,7 +860,7 @@ class ApacheRunner:
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
@@ -888,12 +888,12 @@ class ApacheRunner:
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
+        print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
         print(f"{'<'*80}\n")
 
         # Execute install command with real-time output streaming
-        print(f"[INFO] Starting installation (this may take a few minutes)...")
+        print("[INFO] Starting installation (this may take a few minutes)...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -940,7 +940,7 @@ class ApacheRunner:
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -950,9 +950,9 @@ class ApacheRunner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
@@ -962,25 +962,25 @@ class ApacheRunner:
         httpd_dir = installed_dir / 'httpd_'
 
         if not httpd_dir.exists() or not any(httpd_dir.iterdir()):
-            print(f"  [ERROR] Apache httpd build failed!")
+            print("  [ERROR] Apache httpd build failed!")
             print(f"  [ERROR] httpd_ directory is empty or missing: {httpd_dir}")
-            print(f"  [INFO] This is usually caused by APR library build failure")
-            print(f"  [INFO] Check install.log for 'ln: failed to create symbolic link' errors")
-            print(f"  [INFO] Possible fixes:")
+            print("  [INFO] This is usually caused by APR library build failure")
+            print("  [INFO] Check install.log for 'ln: failed to create symbolic link' errors")
+            print("  [INFO] Possible fixes:")
             print(f"         1. Clean cache: rm -rf ~/.phoronix-test-suite/installed-tests/pts/{self.benchmark}")
             print(f"         2. Reinstall: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
         if not httpd_binary.exists():
             print(f"  [ERROR] Apache httpd binary not found: {httpd_binary}")
-            print(f"  [INFO] httpd compilation may have failed silently")
+            print("  [INFO] httpd compilation may have failed silently")
             # List what's in httpd_ for debugging
             print(f"  [DEBUG] Contents of {httpd_dir}:")
             try:
                 for item in httpd_dir.iterdir():
                     print(f"           {item.name}")
             except Exception:
-                print(f"           (could not list directory)")
+                print("           (could not list directory)")
             sys.exit(1)
 
         # Check if test is recognized by PTS
@@ -992,8 +992,8 @@ class ApacheRunner:
         )
 
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
         print(f"  [OK] Apache httpd binary found: {httpd_binary}")
@@ -1039,16 +1039,16 @@ class ApacheRunner:
                     f.write(content)
                     
                 print(f"  [OK] Patched apache script: wrk will use {num_threads} thread(s)")
-                print(f"  [INFO] This ensures wrk threads <= concurrent connections")
+                print("  [INFO] This ensures wrk threads <= concurrent connections")
                 return True
             else:
                 # Already patched or different format
-                print(f"  [WARN] Apache script has unexpected format, checking if already patched...")
+                print("  [WARN] Apache script has unexpected format, checking if already patched...")
                 if f'-t {num_threads}' in content:
                     print(f"  [INFO] Script already patched for {num_threads} thread(s)")
                     return True
                 else:
-                    print(f"  [ERROR] Could not patch apache script - unexpected format")
+                    print("  [ERROR] Could not patch apache script - unexpected format")
                     print(f"  [DEBUG] Content: {content}")
                     return False
                     
@@ -1069,7 +1069,7 @@ class ApacheRunner:
         Returns:
             dict: Performance summary containing per-CPU metrics
         """
-        print(f"\n>>> Parsing perf stats and frequency data")
+        print("\n>>> Parsing perf stats and frequency data")
         print(f"  [INFO] perf stats file: {perf_stats_file}")
         print(f"  [INFO] freq start file: {freq_start_file}")
         print(f"  [INFO] freq end file: {freq_end_file}")
@@ -1092,7 +1092,7 @@ class ApacheRunner:
             }
 
         # Parse perf stat output file
-        print(f"  [INFO] Parsing perf stat output...")
+        print("  [INFO] Parsing perf stat output...")
         try:
             with open(perf_stats_file, 'r') as f:
                 perf_content = f.read()
@@ -1151,7 +1151,7 @@ class ApacheRunner:
             raise
 
         # Parse frequency files
-        print(f"  [INFO] Parsing frequency files...")
+        print("  [INFO] Parsing frequency files...")
         freq_start = {}
         freq_end = {}
 
@@ -1177,7 +1177,7 @@ class ApacheRunner:
             raise
 
         # Calculate metrics
-        print(f"  [INFO] Calculating performance metrics...")
+        print("  [INFO] Calculating performance metrics...")
         perf_summary = {
             'avg_frequency_ghz': {},
             'start_frequency_ghz': {},
@@ -1241,7 +1241,7 @@ class ApacheRunner:
             utilization = (total_task_clock / max_task_clock / len(cpu_ids)) * 100.0
             perf_summary['cpu_utilization_percent'] = round(utilization, 1)
 
-        print(f"  [OK] Performance metrics calculated")
+        print("  [OK] Performance metrics calculated")
         print(f"  [DEBUG] Elapsed time: {perf_summary['elapsed_time_sec']} sec")
         print(f"  [DEBUG] CPU utilization: {perf_summary['cpu_utilization_percent']}%")
 
@@ -1295,7 +1295,7 @@ class ApacheRunner:
         # Patch apache script to use correct number of wrk threads
         # This prevents "number of connections must be >= threads" errors
         if not self.patch_apache_script(num_threads):
-            print(f"  [ERROR] Failed to patch apache script")
+            print("  [ERROR] Failed to patch apache script")
             return False
 
         # Single-threaded: use CPU 0 only with taskset
@@ -1325,10 +1325,10 @@ class ApacheRunner:
 
         # Print PTS command to stdout for debugging (as per README requirement)
         print(f"\n{'>'*80}")
-        print(f"[PTS BENCHMARK COMMAND]")
+        print("[PTS BENCHMARK COMMAND]")
         print(f"  {pts_cmd}")
         print(f"  {cpu_info}")
-        print(f"  Output:")
+        print("  Output:")
         print(f"    Thread log: {log_file}")
         print(f"    Stdout log: {stdout_log}")
         print(f"    Perf stats: {perf_stats_file}")
@@ -1339,11 +1339,11 @@ class ApacheRunner:
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute with tee-like behavior: output to both terminal and log files
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -1377,11 +1377,11 @@ class ApacheRunner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Check for PTS-reported test failures in the log (even if returncode is 0)
         pts_test_failed = False
@@ -1403,7 +1403,7 @@ class ApacheRunner:
                 print(f"  [WARN] Could not check log for failures: {e}")
 
         if returncode == 0 and not pts_test_failed:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
             print(f"     Thread log: {log_file}")
             print(f"     Stdout log: {stdout_log}")
 
@@ -1423,11 +1423,11 @@ class ApacheRunner:
 
             except Exception as e:
                 print(f"  [ERROR] Failed to parse perf stats: {e}")
-                print(f"  [INFO] Benchmark results are still valid, continuing...")
+                print("  [INFO] Benchmark results are still valid, continuing...")
 
         elif pts_test_failed:
             # PTS completed but some tests failed
-            print(f"\n[WARN] Benchmark completed with some test failures")
+            print("\n[WARN] Benchmark completed with some test failures")
             print(f"     Thread log: {log_file}")
             print(f"     Stdout log: {stdout_log}")
 
@@ -1464,7 +1464,7 @@ class ApacheRunner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -1526,12 +1526,12 @@ class ApacheRunner:
             else:
                 print(f"  [WARN] JSON export failed: {result.stderr}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -1563,10 +1563,10 @@ class ApacheRunner:
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"Apache Web Server Benchmark Summary\n")
+            f.write("Apache Web Server Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
-            f.write(f"Note: Single-threaded benchmark\n")
+            f.write("Note: Single-threaded benchmark\n")
             f.write("="*80 + "\n\n")
 
             for result in all_results:
@@ -1584,7 +1584,7 @@ class ApacheRunner:
                     val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
                     f.write(f"  Raw values: {val_str}\n")
                 else:
-                    f.write(f"  Raw values: N/A\n")
+                    f.write("  Raw values: N/A\n")
 
                 f.write("\n")
 
@@ -1617,15 +1617,15 @@ class ApacheRunner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"Apache Web Server Benchmark Runner")
+        print("Apache Web Server Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
         print(f"[INFO] Test category: {self.test_category}")
-        print(f"[INFO] Thread mode: Single-threaded (THChange_at_runtime=false)")
+        print("[INFO] Thread mode: Single-threaded (THChange_at_runtime=false)")
         print(f"[INFO] Threads to test: {self.thread_list}")
         print(f"[INFO] Results directory: {self.results_dir}")
-        print(f"[INFO] Note: Apache is single-threaded; uses wrk for load testing")
+        print("[INFO] Note: Apache is single-threaded; uses wrk for load testing")
         print()
 
         # Clean existing results directory before starting
@@ -1678,7 +1678,7 @@ class ApacheRunner:
 
         # Summary
         print(f"\n{'='*80}")
-        print(f"Benchmark Summary")
+        print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")

@@ -144,7 +144,7 @@ class CachebenchRunner:
 
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive")
-                print(f"  [INFO] Attempting to adjust to 0...")
+                print("  [INFO] Attempting to adjust to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -153,10 +153,10 @@ class CachebenchRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0")
+                    print("  [OK] perf_event_paranoid adjusted to 0")
                     return 0
-                print(f"  [ERROR] Failed to adjust (sudo required)")
-                print(f"  [WARN] Running in LIMITED mode")
+                print("  [ERROR] Failed to adjust (sudo required)")
+                print("  [WARN] Running in LIMITED mode")
                 return current_value
             print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
             return current_value
@@ -350,16 +350,16 @@ class CachebenchRunner:
             install_failed = True
 
         if install_failed:
-            print(f"  [ERROR] Installation failed")
+            print("  [ERROR] Installation failed")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
 
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         if subprocess.run(['bash', '-c', verify_cmd], capture_output=True).returncode == 0:
-            print(f"  [OK] Installation verified")
+            print("  [OK] Installation verified")
         else:
-            print(f"  [WARN] Installation verification skipped/failed")
+            print("  [WARN] Installation verification skipped/failed")
 
     def run_benchmark(self, num_threads):
         """Run benchmark with specified threads."""
@@ -397,11 +397,11 @@ class CachebenchRunner:
         else:
             pts_cmd = f'{batch_env} {pts_base_cmd}'
 
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
             process = subprocess.Popen(
@@ -417,11 +417,11 @@ class CachebenchRunner:
                 stdout_f.write(line)
             process.wait()
 
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         returncode = process.returncode
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)

@@ -175,7 +175,7 @@ class PreSeedDownloader:
             print(f"  [OK] Download completed: {filename}")
             return True
         except subprocess.CalledProcessError:
-            print(f"  [WARN] aria2c download failed, falling back to PTS default")
+            print("  [WARN] aria2c download failed, falling back to PTS default")
             if target_path.exists():
                 target_path.unlink()
             return False
@@ -471,7 +471,7 @@ class FFmpegRunner:
             # If too restrictive, try to adjust
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
-                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
 
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
@@ -480,11 +480,11 @@ class FFmpegRunner:
                 )
 
                 if result.returncode == 0:
-                    print(f"  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
+                    print("  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
                     return 0
                 else:
-                    print(f"  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
-                    print(f"  [WARN] Running in LIMITED mode")
+                    print("  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
+                    print("  [WARN] Running in LIMITED mode")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
@@ -492,7 +492,7 @@ class FFmpegRunner:
 
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
-            print(f"  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
+            print("  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
             return 2
 
 
@@ -601,8 +601,8 @@ class FFmpegRunner:
         # Enable bsf (bitstream filters) that might be needed
         opts.append('--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb')
 
-        print(f"  [OPTIMIZATION] Minimal FFmpeg build - only x264/x265 encoders")
-        print(f"  [INFO] Skipping 100+ unnecessary codecs and protocols")
+        print("  [OPTIMIZATION] Minimal FFmpeg build - only x264/x265 encoders")
+        print("  [INFO] Skipping 100+ unnecessary codecs and protocols")
 
         return ' '.join(opts)
 
@@ -616,7 +616,7 @@ class FFmpegRunner:
         downloads_xml = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'downloads.xml'
 
         if not downloads_xml.exists():
-            print(f"  [WARN] downloads.xml not found, skipping checksum fix")
+            print("  [WARN] downloads.xml not found, skipping checksum fix")
             return
 
         try:
@@ -647,19 +647,19 @@ class FFmpegRunner:
                     pkg = re.sub(r'<FileSize>\d+</FileSize>', f'<FileSize>{new_size}</FileSize>', pkg)
                     
                     modified = True
-                    print(f"  [DEBUG] Fixed checksums in x264 package block")
+                    print("  [DEBUG] Fixed checksums in x264 package block")
                 
                 output_packages.append(pkg)
 
             if modified:
-                print(f"  [FIX] Updating x264 checksums in downloads.xml (Safe Split)")
+                print("  [FIX] Updating x264 checksums in downloads.xml (Safe Split)")
                 modified_content = '</Package>'.join(output_packages)
                 
                 with open(downloads_xml, 'w') as f:
                     f.write(modified_content)
-                print(f"  [OK] x264 checksums updated")
+                print("  [OK] x264 checksums updated")
             else:
-                print(f"  [INFO] x264 package not found or already correct (no changes needed)") 
+                print("  [INFO] x264 package not found or already correct (no changes needed)") 
             
         except Exception as e:
             print(f"  [WARN] Failed to fix checksums: {e}")
@@ -672,7 +672,7 @@ class FFmpegRunner:
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         """
         # Ensure test profile exists (download if needed) so we can patch it
-        print(f"  [INFO] Ensuring test profile exists...")
+        print("  [INFO] Ensuring test profile exists...")
         subprocess.run(
             ['phoronix-test-suite', 'info', self.benchmark_full],
             stdout=subprocess.DEVNULL,
@@ -683,14 +683,14 @@ class FFmpegRunner:
         self.fix_x264_checksum()
 
         # Pre-download large files (vbench is 875MB) with aria2c for speed
-        print(f"\n>>> Checking for large files to pre-seed...")
+        print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # Remove existing installation first
-        print(f"  [INFO] Removing existing installation...")
+        print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         print(f"  [INSTALL CMD] {remove_cmd}")
         subprocess.run(
@@ -710,12 +710,12 @@ class FFmpegRunner:
 
         # Print install command for debugging
         print(f"\n{'>'*80}")
-        print(f"[PTS INSTALL COMMAND]")
+        print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd[:200]}...")
         print(f"{'<'*80}\n")
 
         # Execute install command (attempt 1) with real-time output streaming
-        print(f"  Running installation (attempt 1)...")
+        print("  Running installation (attempt 1)...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
@@ -759,10 +759,10 @@ class FFmpegRunner:
 
         # If first attempt failed due to x264 checksum, fix and retry
         if install_failed and 'x264-7ed753b10a61d0be95f683289dfb925b800b0676.zip' in full_output:
-            print(f"\n  [WARN] x264 checksum failure detected, applying fix...")
+            print("\n  [WARN] x264 checksum failure detected, applying fix...")
             self.fix_x264_checksum()
 
-            print(f"  [INFO] Retrying installation after checksum fix...")
+            print("  [INFO] Retrying installation after checksum fix...")
             if log_f:
                 log_f.write("\n[RETRY AFTER CHECKSUM FIX]\n")
                 log_f.flush()
@@ -814,7 +814,7 @@ class FFmpegRunner:
                 print(f"  [WARN] Failed to archive install-failed.log: {archive_error}")
 
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
-            print(f"  [INFO] Check output above for details")
+            print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -824,9 +824,9 @@ class FFmpegRunner:
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
 
         if not installed_dir.exists():
-            print(f"  [ERROR] Installation verification failed")
+            print("  [ERROR] Installation verification failed")
             print(f"  [ERROR] Expected directory not found: {installed_dir}")
-            print(f"  [INFO] Installation may have failed silently")
+            print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
@@ -839,14 +839,14 @@ class FFmpegRunner:
         )
 
         if verify_result.returncode != 0:
-            print(f"  [WARN] Test may not be fully installed (test-installed check failed)")
-            print(f"  [INFO] But installation directory exists, continuing...")
+            print("  [WARN] Test may not be fully installed (test-installed check failed)")
+            print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """Parse perf stat output and CPU frequency files."""
-        print(f"\n>>> Parsing perf stats and frequency data")
+        print("\n>>> Parsing perf stats and frequency data")
 
         cpu_ids = [int(c.strip()) for c in cpu_list.split(',')]
         per_cpu_metrics = {}
@@ -984,7 +984,7 @@ class FFmpegRunner:
             utilization = (total_task_clock / max_task_clock / len(cpu_ids)) * 100.0
             perf_summary['cpu_utilization_percent'] = round(utilization, 1)
 
-        print(f"  [OK] Performance metrics calculated")
+        print("  [OK] Performance metrics calculated")
         return perf_summary
 
     def run_benchmark(self, num_threads):
@@ -1045,17 +1045,17 @@ class FFmpegRunner:
 
         print(f"[INFO] {cpu_info}")
         print(f"\n{'>'*80}")
-        print(f"[PTS BENCHMARK COMMAND]")
+        print("[PTS BENCHMARK COMMAND]")
         print(f"  {pts_cmd}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"[INFO] Recording CPU frequency before benchmark...")
+        print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
-            print(f"  [OK] Start frequency recorded")
+            print("  [OK] Start frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         # Execute PTS command
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
@@ -1085,11 +1085,11 @@ class FFmpegRunner:
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
-        print(f"\n[INFO] Recording CPU frequency after benchmark...")
+        print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
-            print(f"  [OK] End frequency recorded")
+            print("  [OK] End frequency recorded")
         else:
-            print(f"  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
+            print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
         pts_test_failed = False
         failure_reason = ""
@@ -1111,7 +1111,7 @@ class FFmpegRunner:
                 print(f"  [WARN] Could not inspect benchmark log for failure patterns: {e}")
 
         if returncode == 0 and not pts_test_failed:
-            print(f"\n[OK] Benchmark completed successfully")
+            print("\n[OK] Benchmark completed successfully")
 
             try:
                 perf_summary = self.parse_perf_stats_and_freq(
@@ -1130,7 +1130,7 @@ class FFmpegRunner:
 
         else:
             if returncode == 0 and pts_test_failed:
-                print(f"\n[ERROR] Benchmark command returned 0 but benchmark did not execute successfully")
+                print("\n[ERROR] Benchmark command returned 0 but benchmark did not execute successfully")
                 print(f"       Reason: {failure_reason or 'PTS log indicates failure'}")
             else:
                 print(f"\n[ERROR] Benchmark failed with return code {returncode}")
@@ -1153,7 +1153,7 @@ class FFmpegRunner:
     def export_results(self):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(f">>> Exporting benchmark results")
+        print(">>> Exporting benchmark results")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
@@ -1207,12 +1207,12 @@ class FFmpegRunner:
                     shutil.move(str(home_json), str(json_output))
                     print(f"  [OK] Saved: {json_output}")
 
-        print(f"\n[OK] Export completed")
+        print("\n[OK] Export completed")
 
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print(f"\n{'='*80}")
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
@@ -1242,7 +1242,7 @@ class FFmpegRunner:
         # Generate summary.log
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write(f"FFmpeg 7.0.1 Benchmark Summary\n")
+            f.write("FFmpeg 7.0.1 Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -1276,7 +1276,7 @@ class FFmpegRunner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print(f"FFmpeg 7.0.1 Benchmark Runner")
+        print("FFmpeg 7.0.1 Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
@@ -1325,7 +1325,7 @@ class FFmpegRunner:
         self.generate_summary()
 
         print(f"\n{'='*80}")
-        print(f"Benchmark Summary")
+        print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")

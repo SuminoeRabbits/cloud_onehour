@@ -273,7 +273,7 @@ class MemcachedRunner:
             current_value = int(result.stdout.strip())
             
             if current_value >= 1:
-                print(f"  [INFO] Attempting to adjust perf_event_paranoid to 0...")
+                print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
                 result = subprocess.run(
                     ['sudo', 'sysctl', '-w', 'kernel.perf_event_paranoid=0'],
                     capture_output=True, text=True
@@ -367,7 +367,7 @@ class MemcachedRunner:
             install_failed = True
 
         if install_failed:
-            print(f"  [ERROR] Installation failed")
+            print("  [ERROR] Installation failed")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
@@ -375,9 +375,9 @@ class MemcachedRunner:
         # Verify
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         if subprocess.run(['bash', '-c', verify_cmd], capture_output=True).returncode == 0:
-             print(f"  [OK] Installation verified")
+             print("  [OK] Installation verified")
         else:
-             print(f"  [WARN] Installation verification skipped/failed")
+             print("  [WARN] Installation verification skipped/failed")
 
     def parse_perf_stats_and_freq(self, perf_file, freq_start, freq_end, cpu_list):
         """Parse perf and frequency data."""
