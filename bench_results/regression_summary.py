@@ -69,12 +69,12 @@
 # "testcategory"は --inputで指定されたJSONの"testcategory": {...}のキーに対応します。
 # この際には${PWD}/global/<testcategory>ディレクトリの存在を確認し、ない場合は作成、その中で分析を行います。
 # なお、--testcategoryオプションは--analyzeが指定されている場合にのみ有効です。
-# # $> ../results/one_big_json_analytics.py \
+# $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
 #     --testcategory <testcategory> \
 #     --perf --no_arm64 \
 #     --output  ./global/<testcategory>/global_performance_analysis_x86_64.json
-# # $> ../results/one_big_json_analytics.py \
+# $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
 #     --testcategory <testcategory> \
 #     --perf --no_amd64 \
@@ -604,12 +604,18 @@ def main() -> int:
                     category_dir = global_dir / category
                     category_dir.mkdir(parents=True, exist_ok=True)
 
+                    perf_x86_output = category_dir / "global_performance_analysis_x86_64.json"
+                    perf_arm64_output = category_dir / "global_performance_analysis_arm64.json"
                     cost_x86_output = category_dir / "global_cost_analysis_x86_64.json"
                     cost_arm64_output = category_dir / "global_cost_analysis_arm64.json"
 
+                    run_analytics(analytics_script, global_results, perf_x86_output, ["--testcategory", category, "--perf", "--no_arm64"], category_dir)
+                    run_analytics(analytics_script, global_results, perf_arm64_output, ["--testcategory", category, "--perf", "--no_amd64"], category_dir)
                     run_analytics(analytics_script, global_results, cost_x86_output, ["--testcategory", category, "--cost", "--no_arm64"], category_dir)
                     run_analytics(analytics_script, global_results, cost_arm64_output, ["--testcategory", category, "--cost", "--no_amd64"], category_dir)
 
+                    print(f"Generated analysis -> {perf_x86_output}")
+                    print(f"Generated analysis -> {perf_arm64_output}")
                     print(f"Generated analysis -> {cost_x86_output}")
                     print(f"Generated analysis -> {cost_arm64_output}")
             else:
