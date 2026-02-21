@@ -1,7 +1,7 @@
 {
   "aws": {
     "enable": true,
-    "quota_vcpus_all_regions": 32,
+    "quota_vcpus_all_regions": 48,
     "regions": {
       "ap-northeast-3": {
         "enable": true,
@@ -59,6 +59,18 @@
           {
             "enable": true,
             "testloads": false,
+            "type": "m6g.4xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m6g-4xlarge-arm64",
+            "vcpus": 16,
+            "name": "aws-m6g-4xlarge-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.7936,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
             "type": "m7i.4xlarge",
             "arch": "amd64",
             "hostname": "aws-m7i-4xlarge-amd64",
@@ -68,19 +80,7 @@
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0197
           },
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "m8g.4xlarge",
-            "arch": "arm64",
-            "hostname": "aws-m8g-4xlarge-arm64",
-            "vcpus": 16,
-            "name": "aws-m8g-4xlarge-arm64-vcpu-16",
-            "cpu_cost_hour[730h-mo]": 0.92752,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.0197
-          },
-          {
+         {
             "enable": true,
             "testloads": false,
             "type": "m7g.4xlarge",
@@ -95,12 +95,12 @@
           {
             "enable": true,
             "testloads": false,
-            "type": "m6g.4xlarge",
+            "type": "m8g.4xlarge",
             "arch": "arm64",
-            "hostname": "aws-m6g-4xlarge-arm64",
+            "hostname": "aws-m8g-4xlarge-arm64",
             "vcpus": 16,
-            "name": "aws-m6g-4xlarge-arm64-vcpu-16",
-            "cpu_cost_hour[730h-mo]": 0.7936,
+            "name": "aws-m8g-4xlarge-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.92752,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0197
           }
@@ -178,7 +178,7 @@
   "gcp": {
     "enable": true,
     "project_id": "AUTO_DETECT",
-    "quota_vcpus_all_regions": 48,
+    "quota_vcpus_all_regions": 32,
     "regions": {
       "asia-northeast1-b": {
         "enable": true,
@@ -241,7 +241,7 @@
             "extra_150g_storage_cost_hour": 0.0267
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "c4d-standard-16",
             "arch": "amd64",
