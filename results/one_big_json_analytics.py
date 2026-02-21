@@ -156,6 +156,44 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return workloads
 
 
+def extract_available_testcategories(data: Dict[str, Any]) -> set[str]:
+    """Collect all available testcategory names from input JSON."""
+    categories: set[str] = set()
+    for machine_name, machine_data in data.items():
+        if machine_name in ("generation_log", "generation log"):
+            continue
+        os_data = machine_data.get("os", {})
+        for _, os_content in os_data.items():
+            testcategory_data = os_content.get("testcategory", {})
+            categories.update(testcategory_data.keys())
+    return categories
+
+
+def parse_testcategory_filters(raw_values: Optional[List[str]]) -> List[str]:
+    """Parse --testcategory values from repeated args and/or list-like strings."""
+    if not raw_values:
+        return []
+
+    parsed: List[str] = []
+    seen: set[str] = set()
+
+    for raw in raw_values:
+        text = (raw or "").strip()
+        if not text:
+            continue
+
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1].strip()
+
+        for part in text.split(","):
+            category = part.strip().strip("\"'")
+            if category and category not in seen:
+                parsed.append(category)
+                seen.add(category)
+
+    return parsed
+
+
 def infer_arch_from_text(value: str) -> str:
     """Infer architecture from a free-form string (machinename/label/cpu_isa)."""
     text = (value or "").lower()
@@ -312,6 +350,48 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
                 del csp[tc][bm]
         if not csp[tc]:
             del csp[tc]
+
+    return output
+
+
+def postprocess_output_by_testcategory(
+    output: Dict[str, Any],
+    requested_categories: List[str],
+    available_categories: set[str]
+) -> Dict[str, Any]:
+    """Apply testcategory filtering as a post-process on generated JSON."""
+    if not requested_categories:
+        return output
+
+    valid_categories: List[str] = []
+    for category in requested_categories:
+        if category in available_categories:
+            valid_categories.append(category)
+        else:
+            print(
+                f"Warning: testcategory '{category}' not found in input JSON. Skipping.",
+                file=sys.stderr
+            )
+
+    valid_set = set(valid_categories)
+
+    for section in [
+        "performance_comparison",
+        "cost_comparison",
+        "thread_scaling_comparison",
+        "csp_instance_comparison",
+    ]:
+        section_data = output.get(section)
+        if not isinstance(section_data, dict):
+            continue
+
+        workload = section_data.get("workload", {})
+        if not isinstance(workload, dict):
+            continue
+
+        for tc in list(workload.keys()):
+            if tc not in valid_set:
+                del workload[tc]
 
     return output
 
@@ -722,6 +802,8 @@ def main():
                         help='Exclude arm64 instances from output JSON (post-process stage)')
     parser.add_argument('--no_amd64', action='store_true',
                         help='Exclude amd64/x86_64 instances from output JSON (post-process stage)')
+    parser.add_argument('--testcategory', action='append',
+                        help='Filter output by testcategory list (e.g. --testcategory cpu,mem or --testcategory [cpu,mem])')
     parser.add_argument('--all', action='store_true',
                         help='Generate all comparisons')
     parser.add_argument('--output', type=str,
@@ -744,6 +826,9 @@ def main():
     if data is None:
         sys.exit(1)
 
+    requested_testcategories = parse_testcategory_filters(args.testcategory)
+    available_testcategories = extract_available_testcategories(data)
+
     # Generate outputs with generation log
     output = get_generation_log()
 
@@ -761,6 +846,13 @@ def main():
 
     # Post-process architecture filtering on generated JSON only
     output = postprocess_output_by_arch(output, args.no_arm64, args.no_amd64)
+
+    # Post-process testcategory filtering on generated JSON only
+    output = postprocess_output_by_testcategory(
+        output,
+        requested_testcategories,
+        available_testcategories
+    )
 
     selected_modes = [
         flag_name for enabled, flag_name in [
