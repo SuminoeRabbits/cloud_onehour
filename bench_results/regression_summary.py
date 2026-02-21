@@ -159,8 +159,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--testcategory",
         action="append",
+        nargs="?",
+        const="__ALL__",
         help=(
             "Run step 5 with --analyze: per-testcategory analysis. "
+            "If specified without a value, all available testcategories are targeted. "
             "Accepts comma-list or bracket-list (e.g. --testcategory Multimedia,Processor "
             "or --testcategory [Multimedia,Processor])."
         ),
@@ -184,15 +187,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_testcategory_filters(raw_values: Optional[List[str]]) -> List[str]:
-    """Parse --testcategory values from repeated args and/or list-like strings."""
+def parse_testcategory_filters(raw_values: Optional[List[str]]) -> tuple[List[str], bool]:
+    """Parse --testcategory values. Returns (requested_categories, all_categories_requested)."""
     if not raw_values:
-        return []
+        return [], False
 
     parsed: List[str] = []
     seen = set()
+    all_categories_requested = False
 
     for raw in raw_values:
+        if raw == "__ALL__":
+            all_categories_requested = True
+            continue
+
         text = (raw or "").strip()
         if not text:
             continue
@@ -206,7 +214,7 @@ def parse_testcategory_filters(raw_values: Optional[List[str]]) -> List[str]:
                 parsed.append(category)
                 seen.add(category)
 
-    return parsed
+    return parsed, all_categories_requested
 
 
 def extract_available_testcategories(global_json: Path) -> set[str]:
@@ -438,8 +446,8 @@ def main() -> int:
     if not validate_script_syntax():
         return 1
     args = parse_args()
-    requested_testcategories = parse_testcategory_filters(args.testcategory)
-    if requested_testcategories and not args.analyze:
+    requested_testcategories, all_testcategories_requested = parse_testcategory_filters(args.testcategory)
+    if (requested_testcategories or all_testcategories_requested) and not args.analyze:
         print("Error: --testcategory requires --analyze.", file=sys.stderr)
         return 1
 
@@ -561,12 +569,16 @@ def main() -> int:
 
     if run_all or args.analyze:
         try:
-            if requested_testcategories:
+            if requested_testcategories or all_testcategories_requested:
                 available_categories = extract_available_testcategories(global_results)
                 valid_categories = []
+                if all_testcategories_requested:
+                    valid_categories = sorted(available_categories)
+
                 for category in requested_testcategories:
                     if category in available_categories:
-                        valid_categories.append(category)
+                        if category not in valid_categories:
+                            valid_categories.append(category)
                     else:
                         print(
                             f"Warning: testcategory '{category}' not found in {global_results}. Skipping.",

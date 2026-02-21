@@ -969,6 +969,43 @@ class Dashboard:
         run_duration = datetime.now() - self.start_time
         run_str = str(run_duration).split('.')[0]
         lines.append(f"{self.BOLD}CLOUD BENCHMARKING EXECUTOR (Run: {run_str}){self.ENDC}")
+
+        with self.lock:
+            summary_items = []
+            summary_stat_map = {
+                'RUNNING': 'RUN', 'COMPLETED': 'DONE', 'TERMINATED': 'TERM',
+                'PENDING': 'WAIT', 'ERROR': 'ERR', 'TERM_TIMEOUT': 'T/O',
+                'TERM_FAILED': 'TFAL'
+            }
+            for name, data in sorted(
+                self.instances.items(),
+                key=lambda item: (
+                    item[1].get('cloud') or '',
+                    item[1].get('region') or '',
+                    item[0]
+                )
+            ):
+                end = data['end_time'] if data['end_time'] else datetime.now()
+                duration = end - data['start_time']
+                duration_str = str(duration).split('.')[0]
+
+                hours = duration.total_seconds() / 3600.0
+                total_rate = data['cpu_cost'] + data['storage_cost']
+                cost = hours * total_rate
+                cost_str = f"${cost:.2f}"
+                compact_stat = summary_stat_map.get(data.get('status', ''), str(data.get('status', ''))[:4])
+
+                summary_items.append((duration.total_seconds(), name, compact_stat, duration_str, cost_str))
+
+            summary_items.sort(key=lambda item: item[0])
+
+        lines.append(f"{self.BOLD}SUMMARY (Instance | Stat | Time | Cost){self.ENDC}")
+        if summary_items:
+            for _, name, compact_stat, duration_str, cost_str in summary_items:
+                lines.append(f"- {name}: {compact_stat} | {duration_str} | {cost_str}")
+        else:
+            lines.append("- (no instances registered yet)")
+
         lines.append("=" * 100)
         lines.append(f"{'INSTANCE (TYPE)':<30} | {'STAT':<4} | {'TIME':<7} | {'COST':<7}")
         lines.append("-" * 100)
