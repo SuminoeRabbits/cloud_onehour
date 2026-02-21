@@ -5,6 +5,8 @@
     "regions": {
       "ap-northeast-3": {
         "enable": true,
+        "vcpux16_only": "true",
+        "vcpux8_only": "false",
         "instances": [
           {
             "enable": false,
@@ -19,7 +21,7 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "m7i.2xlarge",
             "arch": "amd64",
@@ -31,7 +33,7 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "m8g.2xlarge",
             "arch": "arm64",
@@ -43,7 +45,7 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "m7g.2xlarge",
             "arch": "arm64",
@@ -89,14 +91,28 @@
             "cpu_cost_hour[730h-mo]": 0.8432,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.0197
+          },
+          {
+            "enable": true,
+            "testloads": false,
+            "type": "m6g.4xlarge",
+            "arch": "arm64",
+            "hostname": "aws-m6g-4xlarge-arm64",
+            "vcpus": 16,
+            "name": "aws-m6g-4xlarge-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.7936,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0197
           }
         ]
       },
       "ap-northeast-1": {
-        "enable": true,
+        "enable": false,
+        "vcpux16_only": "true",
+        "vcpux8_only": "false",
         "instances": [
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "m8a.2xlarge",
             "arch": "amd64",
@@ -108,7 +124,7 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "m8i.2xlarge",
             "arch": "amd64",
@@ -120,7 +136,7 @@
             "extra_150g_storage_cost_hour": 0.0197
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "i7ie.2xlarge",
             "arch": "amd64",
@@ -166,9 +182,11 @@
     "regions": {
       "asia-northeast1-b": {
         "enable": true,
+        "vcpux16_only": "true",
+        "vcpux8_only": "false",
         "instances": [
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "c4a-standard-8",
             "arch": "arm64",
@@ -195,6 +213,8 @@
       },
       "asia-northeast1-c": {
         "enable": true,
+        "vcpux16_only": "true",
+        "vcpux8_only": "false",
         "instances": [
           {
             "enable": false,
@@ -209,7 +229,7 @@
             "extra_150g_storage_cost_hour": 0.0267
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "c4d-standard-8",
             "arch": "amd64",
@@ -221,7 +241,7 @@
             "extra_150g_storage_cost_hour": 0.0267
           },
           {
-            "enable": true,
+            "enable": false,
             "testloads": false,
             "type": "c4d-standard-16",
             "arch": "amd64",
@@ -233,7 +253,7 @@
             "extra_150g_storage_cost_hour": 0.0267
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "c4-standard-8",
             "arch": "amd64",
@@ -245,7 +265,7 @@
             "extra_150g_storage_cost_hour": 0.0267
           },
           {
-            "enable": true,
+            "enable": false,
             "testloads": false,
             "type": "c4-standard-16",
             "arch": "amd64",
@@ -260,9 +280,11 @@
       },
       "asia-southeast1-b": {
         "enable": true,
+        "vcpux16_only": "true",
+        "vcpux8_only": "false",
         "instances": [
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "t2a-standard-8",
             "arch": "arm64",
@@ -295,9 +317,11 @@
     "regions": {
       "us-ashburn-1": {
         "enable": true,
+        "vcpux16_only": "true",
+        "vcpux8_only": "false",
         "instances": [
           {
-            "enable": false,
+            "enable": true,
             "testloads": true,
             "type": "VM.Standard.E5.Flex",
             "arch": "amd64",
@@ -311,7 +335,7 @@
             "extra_150g_storage_cost_hour": 0.0087
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "VM.Standard.E6.Flex",
             "arch": "amd64",
@@ -339,7 +363,7 @@
             "extra_150g_storage_cost_hour": 0.0087
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "VM.Standard.A1.Flex",
             "arch": "arm64",
@@ -353,7 +377,7 @@
             "extra_150g_storage_cost_hour": 0.0087
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "VM.Standard.A2.Flex",
             "arch": "arm64",
@@ -367,7 +391,7 @@
             "extra_150g_storage_cost_hour": 0.0087
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "VM.Standard.A4.Flex",
             "arch": "arm64",
@@ -409,7 +433,7 @@
             "extra_150g_storage_cost_hour": 0.0087
           },
           {
-            "enable": false,
+            "enable": true,
             "testloads": false,
             "type": "VM.Standard.A4.Flex",
             "arch": "arm64",
