@@ -17,8 +17,6 @@ import os
 import sys
 import subprocess
 import argparse
-import re
-import json
 import shutil
 import time
 from pathlib import Path
@@ -334,6 +332,7 @@ class MemcachedRunner:
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_file = install_log
         log_f = open(install_log, 'w') if use_install_log else None
         if log_f:
             log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
@@ -357,8 +356,17 @@ class MemcachedRunner:
         if log_f:
             log_f.close()
         
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+        install_failed = False
         full_output = ''.join(output)
-        if process.returncode != 0 or 'FAILED' in full_output:
+        if process.returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
+            install_failed = True
+        elif 'FAILED' in full_output:
+            install_failed = True
+
+        if install_failed:
             print(f"  [ERROR] Installation failed")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
@@ -386,7 +394,6 @@ class MemcachedRunner:
         perf_stats_file = self.results_dir / f"{num_threads}-thread_perf_stats.txt"
         freq_start_file = self.results_dir / f"{num_threads}-thread_freq_start.txt"
         freq_end_file = self.results_dir / f"{num_threads}-thread_freq_end.txt"
-        perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         quick_thread_timeout = int(os.environ.get('MEMCACHED_QUICK_THREAD_TIMEOUT', '1800'))
@@ -473,7 +480,6 @@ class MemcachedRunner:
 
     def export_results(self):
         """Export results to CSV/JSON."""
-        pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
         for num_threads in self.thread_list:
             result_name = f"{self.benchmark}-{num_threads}threads"
             result_dir_name = result_name.replace('.', '')

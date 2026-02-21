@@ -17,10 +17,7 @@ import os
 import sys
 import subprocess
 import argparse
-import re
-import json
 import shutil
-import time
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status
 
@@ -308,6 +305,7 @@ class SimdJsonRunner:
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_file = install_log
         log_f = open(install_log, 'w') if use_install_log else None
         if log_f:
             log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
@@ -326,10 +324,13 @@ class SimdJsonRunner:
 
         # Check for installation failure
         returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         install_failed = False
         full_output = ''.join(out)
 
         if returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
             install_failed = True
         elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
             install_failed = True
@@ -360,7 +361,6 @@ class SimdJsonRunner:
         perf_stats_file = self.results_dir / f"{num_threads}-thread_perf_stats.txt"
         freq_start_file = self.results_dir / f"{num_threads}-thread_freq_start.txt"
         freq_end_file = self.results_dir / f"{num_threads}-thread_freq_end.txt"
-        perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         
@@ -401,7 +401,6 @@ class SimdJsonRunner:
         return returncode == 0
 
     def export_results(self):
-        pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
         for num_threads in self.thread_list:
             result_name = f"{self.benchmark}-{num_threads}threads"
             result_dir_name = result_name.replace('.', '')

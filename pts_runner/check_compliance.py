@@ -25,6 +25,8 @@ import ast
 
 import re
 
+import subprocess
+
 import sys
 
 from pathlib import Path
@@ -81,6 +83,7 @@ class ComplianceChecker:
             return (False, len(self.errors), len(self.warnings))
 
         self.check_python310_syntax_compatibility()
+        self.check_pyflakes_issues()
 
 
 
@@ -97,6 +100,7 @@ class ComplianceChecker:
 
         self.check_run_method_return()
         self.check_common_failure_detection()
+        self.check_install_failure_detection_contract()
         self.check_install_status_policy()
 
         self.check_dot_removal()
@@ -1085,6 +1089,99 @@ class ComplianceChecker:
                 "   Required by CODE_TEMPLATE common policy"
             )
 
+    def check_install_failure_detection_contract(self):
+        """Check install_benchmark contract for log_file alias and pts_test_failed handling."""
+        has_install_method = re.search(r'def\s+install_benchmark\s*\(', self.content)
+        if not has_install_method:
+            self.warnings.append("⚠️  WARNING: install_benchmark() method not found")
+            return
+
+        install_match = re.search(
+            r'def\s+install_benchmark\s*\(self[^)]*\)\s*:(.+?)(?=\n    def |\nclass |\Z)',
+            self.content,
+            re.DOTALL
+        )
+        if not install_match:
+            self.warnings.append("⚠️  WARNING: Could not inspect install_benchmark() body")
+            return
+
+        install_body = install_match.group(1)
+
+        alias_match = re.search(r'^\s*log_file\s*=\s*install_log\s*$', install_body, re.MULTILINE)
+        detect_match = re.search(r'detect_pts_failure_from_log\s*\(\s*log_file\s*\)', install_body)
+
+        has_log_alias = alias_match is not None
+        has_detect_call = detect_match is not None
+        has_alias_before_detect = has_log_alias and has_detect_call and alias_match.start() < detect_match.start()
+
+        has_pts_failed_in_install_failure = bool(
+            re.search(r'if\s+returncode\s*==\s*0\s+and\s+pts_test_failed', install_body)
+            or re.search(r'elif\s+pts_test_failed', install_body)
+            or re.search(r'install_failed\s*=\s*.*pts_test_failed', install_body)
+            or re.search(r'if\s+pts_test_failed\s*:\s*[\s\S]{0,120}?install_failed\s*=\s*True', install_body)
+        )
+
+        if has_log_alias and has_detect_call and has_alias_before_detect and has_pts_failed_in_install_failure:
+            self.passed.append("✅ install_benchmark contract: log_file alias + pre-define + pts_test_failed failure handling")
+            return
+
+        missing = []
+        if not has_log_alias:
+            missing.append("log_file = install_log alias")
+        if not has_detect_call:
+            missing.append("detect_pts_failure_from_log(log_file) call")
+        elif not has_alias_before_detect:
+            missing.append("log_file definition before detect call")
+        if not has_pts_failed_in_install_failure:
+            missing.append("pts_test_failed included in install failure decision")
+
+        self.errors.append(
+            "❌ CRITICAL: install_benchmark failure-detection contract incomplete\n"
+            f"   Missing: {', '.join(missing)}\n"
+            "   Required: log_file = install_log, define before detect_pts_failure_from_log(log_file), and include pts_test_failed in install_failed logic"
+        )
+
+    def check_pyflakes_issues(self):
+        """Run pyflakes for each runner to catch undefined names and similar static issues."""
+        cmd = [sys.executable, '-m', 'pyflakes', str(self.filepath)]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except Exception as e:
+            self.warnings.append(
+                f"⚠️  WARNING: Failed to run pyflakes check: {str(e)}"
+            )
+            return
+
+        combined = (result.stdout or '') + (result.stderr or '')
+        if 'No module named pyflakes' in combined:
+            self.warnings.append(
+                "⚠️  WARNING: pyflakes is not installed in current Python environment\n"
+                "   Install with: python -m pip install pyflakes"
+            )
+            return
+
+        if result.returncode == 0:
+            self.passed.append("✅ pyflakes check passed")
+            return
+
+        all_lines = [line for line in combined.strip().splitlines() if line.strip()]
+        noisy_lines = [line for line in all_lines if 'f-string is missing placeholders' in line]
+        critical_lines = [line for line in all_lines if line not in noisy_lines]
+
+        if noisy_lines:
+            self.warnings.append(
+                "⚠️  WARNING: pyflakes style diagnostics detected (non-fatal)\n"
+                + '\n'.join(noisy_lines)
+            )
+
+        if critical_lines:
+            self.errors.append(
+                "❌ CRITICAL: pyflakes reported issues\n"
+                + '\n'.join(critical_lines)
+            )
+        else:
+            self.passed.append("✅ pyflakes check passed (critical issues none)")
+
     def check_install_status_policy(self):
         """Check install status policy from CODE_TEMPLATE common section."""
         has_import = bool(
@@ -1561,6 +1658,8 @@ Critical Checks:
 
     - Python 3.10 syntax compatible
 
+        - pyflakes static check passes
+
   - self.benchmark defined in __init__
 
   - TEST_RESULTS_NAME uses {self.benchmark} (not hardcoded)
@@ -1570,6 +1669,8 @@ Critical Checks:
   - generate_summary() method exists
 
     - Common failure detection (detect_pts_failure_from_log + guarded returncode)
+
+        - install_benchmark failure-detection contract (log_file alias + pre-define + pts_test_failed)
 
     - Install status policy (get_install_status + broken-install handling)
 

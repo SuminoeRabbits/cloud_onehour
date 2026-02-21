@@ -507,6 +507,7 @@ class CpuminerOptRunner:
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_file = install_log
         if use_install_log:
             with open(install_log, 'w') as log_f:
                 log_f.write("")
@@ -556,7 +557,8 @@ class CpuminerOptRunner:
                 return True
             return False
 
-        install_failed = install_has_failure(returncode, full_output)
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+        install_failed = install_has_failure(returncode, full_output) or pts_test_failed
 
         neon_type_error = (
             ('simd-neon.h' in full_output and 'vorrq_u32' in full_output)
@@ -568,7 +570,8 @@ class CpuminerOptRunner:
             patched = self._apply_simd_neon_gcc14_patch()
             if patched:
                 returncode, full_output = run_install_command(install_cmd, "arm64-simd-neon-patched-retry")
-                install_failed = install_has_failure(returncode, full_output)
+                pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+                install_failed = install_has_failure(returncode, full_output) or pts_test_failed
             else:
                 print("  [ERROR] Could not apply simd-neon.h patch automatically.")
 

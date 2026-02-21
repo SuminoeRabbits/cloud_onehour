@@ -633,6 +633,7 @@ class SparkRunner:
 
         process.wait()
         returncode = process.returncode
+        log_file = install_log
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if log_f:
             log_f.close()
@@ -642,6 +643,8 @@ class SparkRunner:
         full_output = ''.join(install_output)
 
         if returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
             install_failed = True
         elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
             install_failed = True
@@ -1082,7 +1085,6 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
         print(f"{'='*80}")
 
         summary_log = self.results_dir / "summary.log"
-        summary_json_file = self.results_dir / "summary.json"
 
         # Collect results from all JSON files
         all_results = []
@@ -1405,6 +1407,8 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
             process.wait()
             returncode = process.returncode
 
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
         print(f"\n[INFO] Recording CPU frequency after benchmark...")
@@ -1517,6 +1521,7 @@ export PYTHONPATH="{python_dir}:${{PYTHONPATH}}"
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
+        stdout_log = self.results_dir / "stdout.log"
         with open(stdout_log, 'a') as stdout_f:
             stdout_f.write(f"{'='*80}\n")
             stdout_f.write("[RUNNER STARTUP]\n")

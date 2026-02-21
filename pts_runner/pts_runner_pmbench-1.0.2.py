@@ -988,6 +988,7 @@ eval "$REAL_CC" $ARGS
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = True
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_file = install_log
 
         extra_log_paths = []
         if self.debug_dump:
@@ -1067,8 +1068,11 @@ eval "$REAL_CC" $ARGS
         # Check for installation failure
         install_failed = False
         full_output = ''.join(install_output)
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
         if returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
             install_failed = True
         elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
             install_failed = True

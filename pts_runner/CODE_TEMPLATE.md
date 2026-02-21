@@ -860,7 +860,37 @@ install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
 install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
 use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
 install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+log_file = install_log
 ```
+
+### install_benchmark() の必須規約（2026-02 追加）
+
+`install_benchmark()` では、以下3点を必須とします。
+
+1. **ログパス変数名を固定**: `log_file = install_log`
+2. **`detect_pts_failure_from_log(log_file)` 呼び出し前に `log_file` を必ず定義**
+3. **`pts_test_failed` を install の失敗判定に必ず含める**
+
+```python
+process.wait()
+returncode = process.returncode
+
+# MUST: define before detect call
+log_file = install_log
+pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+
+install_failed = False
+if returncode != 0:
+    install_failed = True
+elif pts_test_failed:
+    install_failed = True
+elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
+    install_failed = True
+elif 'ERROR' in full_output or 'FAILED' in full_output:
+    install_failed = True
+```
+
+上記により、`returncode == 0` でもPTS内部失敗を取りこぼしません。
 
 ---
 

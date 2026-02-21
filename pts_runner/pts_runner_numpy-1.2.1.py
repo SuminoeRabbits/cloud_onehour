@@ -797,6 +797,7 @@ class NumpyBenchmarkRunner:
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        log_file = install_log
         log_f = open(install_log, 'w') if use_install_log else None
         if log_f:
             log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
@@ -811,8 +812,24 @@ class NumpyBenchmarkRunner:
 
         for line in process.stdout:
             print(line, end='')
+            if log_f:
+                log_f.write(line)
+                log_f.flush()
 
         process.wait()
+        if log_f:
+            log_f.close()
+
+        returncode = process.returncode
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+        install_failed = False
+        if returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
+            install_failed = True
+        if install_failed:
+            print(f"\n  [ERROR] Installation failed with return code {returncode}")
+            sys.exit(1)
 
         # Verify installation directory exists
         pts_home = Path.home() / '.phoronix-test-suite'

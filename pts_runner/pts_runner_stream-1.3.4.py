@@ -577,6 +577,7 @@ class StreamRunner:
 
         process.wait()
         returncode = process.returncode
+        log_file = install_log
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if log_f:
             log_f.close()
@@ -586,6 +587,8 @@ class StreamRunner:
         full_output = ''.join(install_output)
 
         if returncode != 0:
+            install_failed = True
+        elif pts_test_failed:
             install_failed = True
         elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
             install_failed = True
@@ -886,6 +889,8 @@ class StreamRunner:
 
             process.wait()
             returncode = process.returncode
+
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
         # Record CPU frequency after benchmark
         # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
