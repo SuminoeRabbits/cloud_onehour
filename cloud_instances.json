@@ -107,7 +107,7 @@
         ]
       },
       "ap-northeast-1": {
-        "enable": false,
+        "enable": true,
         "vcpux16_only": "true",
         "vcpux8_only": "false",
         "instances": [
@@ -178,7 +178,7 @@
   "gcp": {
     "enable": true,
     "project_id": "AUTO_DETECT",
-    "quota_vcpus_all_regions": 32,
+    "quota_vcpus_all_regions": 48,
     "regions": {
       "asia-northeast1-b": {
         "enable": true,
@@ -313,7 +313,7 @@
   },
   "oci": {
     "enable": true,
-    "quota_vcpus_all_regions": 32,
+    "quota_vcpus_all_regions": 48,
     "regions": {
       "us-ashburn-1": {
         "enable": true,
