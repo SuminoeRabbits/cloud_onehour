@@ -56,6 +56,19 @@ if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
     SYSTEM_GCC_MAJOR="${SYSTEM_GCC_VER%%.*}"
     if [ "$SYSTEM_GCC_MAJOR" -ge 14 ] 2>/dev/null; then
         echo "[OK] EL${EL_VER}: System GCC ${SYSTEM_GCC_VER} >= 14, no additional setup needed."
+
+        # Compatibility links for tools/scripts expecting explicit gcc-14/g++-14 names.
+        SYSTEM_GCC_BIN="$(command -v gcc || true)"
+        SYSTEM_GXX_BIN="$(command -v g++ || true)"
+        if [ -n "$SYSTEM_GCC_BIN" ] && [ -x "$SYSTEM_GCC_BIN" ]; then
+            sudo ln -sf "$SYSTEM_GCC_BIN" /usr/local/bin/gcc-14
+            echo "[OK] Linked /usr/local/bin/gcc-14 -> $SYSTEM_GCC_BIN"
+        fi
+        if [ -n "$SYSTEM_GXX_BIN" ] && [ -x "$SYSTEM_GXX_BIN" ]; then
+            sudo ln -sf "$SYSTEM_GXX_BIN" /usr/local/bin/g++-14
+            echo "[OK] Linked /usr/local/bin/g++-14 -> $SYSTEM_GXX_BIN"
+        fi
+
         gcc --version
         exit 0
     fi
