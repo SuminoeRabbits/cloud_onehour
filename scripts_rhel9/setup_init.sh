@@ -508,14 +508,14 @@ generate_x265_pc_if_missing() {
         return 0
     fi
 
-    if compgen -G "/usr/local/lib64/libx265.so*" >/dev/null; then
+    if compgen -G "/usr/local/lib64/libx265.so*" >/dev/null || [ -f "/usr/local/lib64/libx265.a" ]; then
         libdir="/usr/local/lib64"
         pkgconfig_dir="/usr/local/lib64/pkgconfig"
-    elif compgen -G "/usr/local/lib/libx265.so*" >/dev/null; then
+    elif compgen -G "/usr/local/lib/libx265.so*" >/dev/null || [ -f "/usr/local/lib/libx265.a" ]; then
         libdir="/usr/local/lib"
         pkgconfig_dir="/usr/local/lib/pkgconfig"
     else
-        echo "[WARN] libx265 shared library not found under /usr/local/lib{,64}; skipping x265.pc generation"
+        echo "[WARN] libx265 library (.so/.a) not found under /usr/local/lib{,64}; skipping x265.pc generation"
         return 1
     fi
 
