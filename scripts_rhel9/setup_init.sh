@@ -491,6 +491,52 @@ build_x265_from_source() {
     popd >/dev/null
 }
 
+generate_x265_pc_if_missing() {
+    local existing_pc=""
+    local libdir=""
+    local pkgconfig_dir=""
+    local pc_file=""
+
+    if [ -f "/usr/local/lib64/pkgconfig/x265.pc" ]; then
+        existing_pc="/usr/local/lib64/pkgconfig/x265.pc"
+    elif [ -f "/usr/local/lib/pkgconfig/x265.pc" ]; then
+        existing_pc="/usr/local/lib/pkgconfig/x265.pc"
+    fi
+
+    if [ -n "$existing_pc" ]; then
+        echo "[INFO] x265.pc already present: ${existing_pc}"
+        return 0
+    fi
+
+    if compgen -G "/usr/local/lib64/libx265.so*" >/dev/null; then
+        libdir="/usr/local/lib64"
+        pkgconfig_dir="/usr/local/lib64/pkgconfig"
+    elif compgen -G "/usr/local/lib/libx265.so*" >/dev/null; then
+        libdir="/usr/local/lib"
+        pkgconfig_dir="/usr/local/lib/pkgconfig"
+    else
+        echo "[WARN] libx265 shared library not found under /usr/local/lib{,64}; skipping x265.pc generation"
+        return 1
+    fi
+
+    pc_file="${pkgconfig_dir}/x265.pc"
+    sudo mkdir -p "$pkgconfig_dir"
+    sudo tee "$pc_file" >/dev/null <<EOF
+prefix=/usr/local
+exec_prefix=\${prefix}
+libdir=${libdir}
+includedir=\${prefix}/include
+
+Name: x265
+Description: H.265/HEVC video encoder
+Version: unknown
+Libs: -L\${libdir} -lx265
+Cflags: -I\${includedir}
+EOF
+    sudo chmod 0644 "$pc_file"
+    echo "[INFO] Generated x265 pkg-config file: ${pc_file}"
+}
+
 ensure_codec_pkgconfig_ready() {
     if codec_pkgconfig_ready; then
         return
@@ -503,7 +549,11 @@ ensure_codec_pkgconfig_ready() {
     fi
 
     if ! (command -v pkg-config >/dev/null 2>&1 && pkg-config --exists x265); then
-        build_x265_from_source || echo "[WARN] x265 source build failed"
+        if build_x265_from_source; then
+            generate_x265_pc_if_missing || true
+        else
+            echo "[WARN] x265 source build failed"
+        fi
     fi
 
     ensure_codec_pc_visibility
