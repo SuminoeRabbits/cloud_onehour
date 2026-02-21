@@ -147,6 +147,35 @@ try_enable_epel() {
     local epel_url_candidates=()
     local epel_url
 
+    enable_epel_repo_candidates() {
+        local repo_ids=()
+        local repo_id
+
+        # Known EPEL-style repo IDs across EL variants
+        repo_ids=(
+            epel
+            epel-testing
+            epel-next
+            "ol${EL_VER}_developer_EPEL"
+            "ol${EL_VER}_developer_EPEL_aarch64"
+            "ol${EL_VER}_developer_EPEL_x86_64"
+        )
+
+        enable_repo_candidates "${repo_ids[@]}" || true
+
+        # Auto-detect any additional EPEL-like repo IDs and enable them.
+        while IFS= read -r repo_id; do
+            [ -n "$repo_id" ] || continue
+            sudo dnf config-manager --set-enabled "$repo_id" >/dev/null 2>&1 || true
+        done < <(
+            sudo dnf repolist all 2>/dev/null |
+                awk 'NR > 1 {print $1}' |
+                grep -Ei '(^|[-_])epel($|[-_])|developer_epel' |
+                grep -Evi 'debug|source' |
+                sort -u
+        )
+    }
+
     if rpm -q epel-release >/dev/null 2>&1; then
         echo "[OK] epel-release is already installed"
         return 0
@@ -155,11 +184,13 @@ try_enable_epel() {
     # 1) Package-based attempts (works on Oracle Linux and some derivatives)
     if sudo dnf install -y "oracle-epel-release-el${EL_VER}" 2>/dev/null; then
         echo "[OK] Installed oracle-epel-release-el${EL_VER}"
+        enable_epel_repo_candidates
         return 0
     fi
 
     if sudo dnf install -y epel-release 2>/dev/null; then
         echo "[OK] Installed epel-release from configured repositories"
+        enable_epel_repo_candidates
         return 0
     fi
 
@@ -173,6 +204,7 @@ try_enable_epel() {
         for epel_url in "${epel_url_candidates[@]}"; do
             if sudo dnf install -y "$epel_url" 2>/dev/null; then
                 echo "[OK] Installed epel-release from URL: $epel_url"
+                enable_epel_repo_candidates
                 return 0
             fi
         done
@@ -230,6 +262,7 @@ repo_has_package() {
 install_required_from_candidates() {
     local logical_name="$1"
     local candidates_csv="$2"
+    local required_mode="${3:-required}"
     local candidate
 
     IFS=',' read -r -a candidates <<< "$candidates_csv"
@@ -251,6 +284,12 @@ install_required_from_candidates() {
                 return 0
             fi
         done
+    fi
+
+    if [ "$required_mode" = "optional" ]; then
+        echo "[WARN] Optional package '${logical_name}' is unavailable in enabled repositories; continuing."
+        echo "[WARN] Tried candidates: ${candidates_csv}"
+        return 0
     fi
 
     echo "[ERROR] Required package '${logical_name}' is unavailable in enabled repositories."
@@ -286,7 +325,6 @@ PACKAGE_SPECS=(
     "libcurl-devel:libcurl-devel"
     "jansson-devel:jansson-devel"
     "sysstat:sysstat"
-    "htop:htop"
     "aria2:aria2"
     "flex:flex"
     "bison:bison"
@@ -306,10 +344,20 @@ PACKAGE_SPECS=(
     "gzip:gzip"
 )
 
+OPTIONAL_PACKAGE_SPECS=(
+    "htop:htop"
+)
+
 for spec in "${PACKAGE_SPECS[@]}"; do
     logical_name="${spec%%:*}"
     candidates_csv="${spec#*:}"
     install_required_from_candidates "$logical_name" "$candidates_csv"
+done
+
+for spec in "${OPTIONAL_PACKAGE_SPECS[@]}"; do
+    logical_name="${spec%%:*}"
+    candidates_csv="${spec#*:}"
+    install_required_from_candidates "$logical_name" "$candidates_csv" optional
 done
 
 # FFmpeg (PTS) requires libx264/libx265 via pkg-config when
