@@ -63,6 +63,22 @@
 #     --input ./global/global_all_results.json \
 #     --cost > ./global/global_cost_analysis.json
 #
+# 5. Globalでの回帰分析を"testcategory"毎に実行
+# オプション: --analyze --testcategory（省略可能）指定時はこのステップのみ
+# 4.の回帰分析を、"testcategory"リスト毎に実行します。
+# "testcategory"は --inputで指定されたJSONの"testcategory": {...}のキーに対応します。
+# この際には${PWD}/global/<testcategory>ディレクトリの存在を確認し、ない場合は作成、その中で分析を行います。
+# なお、--testcategoryオプションは--analyzeが指定されている場合にのみ有効です。
+# # $> ../results/one_big_json_analytics.py \
+#     --input ./global/global_all_results.json \
+#     --analyze --testcategory <testcategory> \
+#     --perf \
+#     --output  ./global/<testcategory>/global_performance_analysis.json
+# $> ../results/one_big_json_analytics.py \
+#     --input ./global/global_all_results.json \
+#     --analyze --testcategory <testcategory> \
+#     --cost \
+#     --output ./global/<testcategory>/global_cost_analysis.json
 #
 from __future__ import annotations
 
@@ -77,9 +93,48 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 
+def infer_workdir_from_argv(default: Path) -> Path:
+    """Infer --workdir from argv for dynamic help text generation."""
+    argv = sys.argv[1:]
+    for idx, arg in enumerate(argv):
+        if arg == "--workdir" and idx + 1 < len(argv):
+            return Path(argv[idx + 1])
+        if arg.startswith("--workdir="):
+            return Path(arg.split("=", 1)[1])
+    return default
+
+
+def build_testcategory_help_text(workdir: Path) -> str:
+    """Build dynamic help text for available --testcategory values."""
+    global_json = workdir / "global" / "global_all_results.json"
+    if not global_json.exists():
+        return (
+            "\nAvailable --testcategory values:\n"
+            "  (global/global_all_results.json not found; run --merge-global first)"
+        )
+
+    categories = extract_available_testcategories(global_json)
+    if not categories:
+        return (
+            "\nAvailable --testcategory values:\n"
+            f"  (no testcategory keys found in {global_json})"
+        )
+
+    lines = ["", "Available --testcategory values:"]
+    for category in sorted(categories):
+        lines.append(f"  - {category}")
+    return "\n".join(lines)
+
+
 def parse_args() -> argparse.Namespace:
+    default_workdir = Path.cwd()
+    inferred_workdir = infer_workdir_from_argv(default_workdir).resolve()
+    dynamic_epilog = build_testcategory_help_text(inferred_workdir)
+
     parser = argparse.ArgumentParser(
-        description="Extract CSP tarballs, merge results, and run global regression analysis."
+        description="Extract CSP tarballs, merge results, and run global regression analysis.",
+        epilog=dynamic_epilog,
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "--extract",
@@ -102,9 +157,18 @@ def parse_args() -> argparse.Namespace:
         help="Run step 4 only: run global performance/cost analysis.",
     )
     parser.add_argument(
+        "--testcategory",
+        action="append",
+        help=(
+            "Run step 5 with --analyze: per-testcategory analysis. "
+            "Accepts comma-list or bracket-list (e.g. --testcategory Multimedia,Processor "
+            "or --testcategory [Multimedia,Processor])."
+        ),
+    )
+    parser.add_argument(
         "--workdir",
         type=Path,
-        default=Path.cwd(),
+        default=default_workdir,
         help="Working directory that contains *tar.gz files (default: ${PWD}).",
     )
     parser.add_argument(
@@ -118,6 +182,58 @@ def parse_args() -> argparse.Namespace:
         help="Show this help message and exit.",
     )
     return parser.parse_args()
+
+
+def parse_testcategory_filters(raw_values: Optional[List[str]]) -> List[str]:
+    """Parse --testcategory values from repeated args and/or list-like strings."""
+    if not raw_values:
+        return []
+
+    parsed: List[str] = []
+    seen = set()
+
+    for raw in raw_values:
+        text = (raw or "").strip()
+        if not text:
+            continue
+
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1].strip()
+
+        for part in text.split(","):
+            category = part.strip().strip("\"'")
+            if category and category not in seen:
+                parsed.append(category)
+                seen.add(category)
+
+    return parsed
+
+
+def extract_available_testcategories(global_json: Path) -> set[str]:
+    """Collect available testcategory keys from merged global JSON."""
+    categories: set[str] = set()
+    try:
+        with open(global_json, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return categories
+
+    for machine_name, machine_data in data.items():
+        if machine_name in ("generation log", "generation_log"):
+            continue
+        if not isinstance(machine_data, dict):
+            continue
+        os_data = machine_data.get("os", {})
+        if not isinstance(os_data, dict):
+            continue
+        for _, os_content in os_data.items():
+            if not isinstance(os_content, dict):
+                continue
+            tc_map = os_content.get("testcategory", {})
+            if isinstance(tc_map, dict):
+                categories.update(tc_map.keys())
+
+    return categories
 
 
 def validate_script_syntax() -> bool:
@@ -322,6 +438,11 @@ def main() -> int:
     if not validate_script_syntax():
         return 1
     args = parse_args()
+    requested_testcategories = parse_testcategory_filters(args.testcategory)
+    if requested_testcategories and not args.analyze:
+        print("Error: --testcategory requires --analyze.", file=sys.stderr)
+        return 1
+
     workdir = args.workdir.resolve()
     script_dir = Path(__file__).resolve().parent
     results_dir = (script_dir / ".." / "results").resolve()
@@ -440,33 +561,62 @@ def main() -> int:
 
     if run_all or args.analyze:
         try:
-            perf_output = global_dir / "global_performance_analysis.json"
-            cost_output = global_dir / "global_cost_analysis.json"
-            th_output = global_dir / "global_thread_scaling_analysis.json"
-            csp_output = global_dir / "global_csp_comparison_analysis.json"
-            perf_arm64_output = global_dir / "global_performance_analysis_arm64.json"
-            cost_arm64_output = global_dir / "global_cost_analysis_arm64.json"
-            th_arm64_output = global_dir / "global_thread_scaling_analysis_arm64.json"
-            csp_arm64_output = global_dir / "global_csp_comparison_analysis_arm64.json"
-            
-            run_analytics(analytics_script, global_results, perf_output, ["--perf"], global_dir)
-            run_analytics(analytics_script, global_results, cost_output, ["--cost"], global_dir)
-            run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
-            run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
+            if requested_testcategories:
+                available_categories = extract_available_testcategories(global_results)
+                valid_categories = []
+                for category in requested_testcategories:
+                    if category in available_categories:
+                        valid_categories.append(category)
+                    else:
+                        print(
+                            f"Warning: testcategory '{category}' not found in {global_results}. Skipping.",
+                            file=sys.stderr,
+                        )
 
-            run_analytics(analytics_script, global_results, perf_arm64_output, ["--perf", "--no_amd64"], global_dir)
-            run_analytics(analytics_script, global_results, cost_arm64_output, ["--cost", "--no_amd64"], global_dir)
-            run_analytics(analytics_script, global_results, th_arm64_output, ["--th", "--no_amd64"], global_dir)
-            run_analytics(analytics_script, global_results, csp_arm64_output, ["--csp", "--no_amd64"], global_dir)
-            
-            print(f"Generated analysis -> {perf_output}")
-            print(f"Generated analysis -> {cost_output}")
-            print(f"Generated analysis -> {th_output}")
-            print(f"Generated analysis -> {csp_output}")
-            print(f"Generated analysis -> {perf_arm64_output}")
-            print(f"Generated analysis -> {cost_arm64_output}")
-            print(f"Generated analysis -> {th_arm64_output}")
-            print(f"Generated analysis -> {csp_arm64_output}")
+                if not valid_categories:
+                    print("Error: No valid --testcategory values to analyze.", file=sys.stderr)
+                    return 1
+
+                for category in valid_categories:
+                    category_dir = global_dir / category
+                    category_dir.mkdir(parents=True, exist_ok=True)
+
+                    perf_output = category_dir / "global_performance_analysis.json"
+                    cost_output = category_dir / "global_cost_analysis.json"
+
+                    run_analytics(analytics_script, global_results, perf_output, ["--perf", "--testcategory", category], category_dir)
+                    run_analytics(analytics_script, global_results, cost_output, ["--cost", "--testcategory", category], category_dir)
+
+                    print(f"Generated analysis -> {perf_output}")
+                    print(f"Generated analysis -> {cost_output}")
+            else:
+                perf_output = global_dir / "global_performance_analysis.json"
+                cost_output = global_dir / "global_cost_analysis.json"
+                th_output = global_dir / "global_thread_scaling_analysis.json"
+                csp_output = global_dir / "global_csp_comparison_analysis.json"
+                perf_arm64_output = global_dir / "global_performance_analysis_arm64.json"
+                cost_arm64_output = global_dir / "global_cost_analysis_arm64.json"
+                th_arm64_output = global_dir / "global_thread_scaling_analysis_arm64.json"
+                csp_arm64_output = global_dir / "global_csp_comparison_analysis_arm64.json"
+
+                run_analytics(analytics_script, global_results, perf_output, ["--perf"], global_dir)
+                run_analytics(analytics_script, global_results, cost_output, ["--cost"], global_dir)
+                run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
+                run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
+
+                run_analytics(analytics_script, global_results, perf_arm64_output, ["--perf", "--no_amd64"], global_dir)
+                run_analytics(analytics_script, global_results, cost_arm64_output, ["--cost", "--no_amd64"], global_dir)
+                run_analytics(analytics_script, global_results, th_arm64_output, ["--th", "--no_amd64"], global_dir)
+                run_analytics(analytics_script, global_results, csp_arm64_output, ["--csp", "--no_amd64"], global_dir)
+
+                print(f"Generated analysis -> {perf_output}")
+                print(f"Generated analysis -> {cost_output}")
+                print(f"Generated analysis -> {th_output}")
+                print(f"Generated analysis -> {csp_output}")
+                print(f"Generated analysis -> {perf_arm64_output}")
+                print(f"Generated analysis -> {cost_arm64_output}")
+                print(f"Generated analysis -> {th_arm64_output}")
+                print(f"Generated analysis -> {csp_arm64_output}")
         except Exception as exc:
             print(f"Failed to run analytics: {exc}", file=sys.stderr)
             return 1
