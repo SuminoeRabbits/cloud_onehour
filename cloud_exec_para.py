@@ -29,6 +29,7 @@ import signal
 import threading
 import re
 import argparse
+import shlex
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1567,7 +1568,17 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
         if not pub_key_path.exists():
             pub_key_path = Path(str(config['common']['ssh_key_path']) + ".pub")
         if pub_key_path.exists():
-            metadata_flag = f"--metadata=ssh-keys={ssh_user}:$(cat {pub_key_path}) "
+            try:
+                pub_key = pub_key_path.read_text(encoding='utf-8').strip()
+                if pub_key:
+                    metadata_value = f"ssh-keys={ssh_user}:{pub_key}"
+                    metadata_flag = f"--metadata={shlex.quote(metadata_value)} "
+                else:
+                    if logger:
+                        logger.warn(f"Public key file is empty: {pub_key_path}")
+            except Exception as read_error:
+                if logger:
+                    logger.warn(f"Failed to read public key '{pub_key_path}': {read_error}")
         else:
             if logger:
                 logger.warn(f"Public key not found at {pub_key_path}, RHEL SSH may fail")
@@ -1928,15 +1939,25 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             logger.info(f"Testloads mode ENABLED for {instance_name}. Running ONLY testloads.")
         workloads = config['common'].get('testloads', [])
     else:
+        # Determine OS-specific setup commands (debian_setup / fedra_setup)
+        if os_info['os_family'] == 'ubuntu':
+            setup_key = 'debian_setup'
+        else:  # rhel, orcl
+            setup_key = 'fedra_setup'
+        setup_cmds = config['common'].get(setup_key, [])
+        if logger:
+            logger.info(f"OS family '{os_info['os_family']}': prepending '{setup_key}' ({len(setup_cmds)} commands)")
+
         # Standard workloads execution
         if 'workloads' in config['common']:
             # New format: array of workloads
-            workloads = config['common']['workloads']
+            workloads = setup_cmds + config['common']['workloads']
         elif 'commands' in config['common']:
             # Old format: array of commands (backward compatibility)
-            workloads = config['common']['commands']
+            workloads = setup_cmds + config['common']['commands']
         else:
             # Legacy format: fallback for backward compatibility
+            workloads = list(setup_cmds)
             for i in range(1, 10):  # Support up to 9 setup commands
                 cmd_key = f"setup_command{i}"
                 if cmd_key in config['common']:
