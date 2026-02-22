@@ -220,6 +220,18 @@ def is_higher_better_from_unit(unit: str) -> bool:
     return not is_time_unit
 
 
+def _sort_numeric_keyed_dicts(obj: Any) -> Any:
+    """Recursively re-order dicts whose keys are all numeric strings by integer value."""
+    if isinstance(obj, dict):
+        keys = list(obj.keys())
+        if keys and all(k.lstrip("-").isdigit() for k in keys):
+            return {k: _sort_numeric_keyed_dicts(obj[k]) for k in sorted(keys, key=int)}
+        return {k: _sort_numeric_keyed_dicts(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sort_numeric_keyed_dicts(item) for item in obj]
+    return obj
+
+
 def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64: bool) -> Dict[str, Any]:
     """Apply architecture exclusion as a post-process on generated JSON."""
     if not no_arm64 and not no_amd64:
@@ -304,19 +316,33 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
         if not cost[tc]:
             del cost[tc]
 
-    # thread_scaling_comparison: curves filtering by machine label
+    # thread_scaling_comparison: curves and ranking filtering by architecture
     th_cmp = output.get("thread_scaling_comparison", {}).get("workload", {})
     for tc in list(th_cmp.keys()):
         for bm in list(th_cmp[tc].keys()):
             for tn in list(th_cmp[tc][bm].keys()):
-                curves = th_cmp[tc][bm][tn].get("curves", {})
+                node = th_cmp[tc][bm][tn]
+                curves = node.get("curves", {})
                 kept_curves = {}
                 for machine_label, points in curves.items():
                     arch = infer_arch_from_text(machine_label)
                     if not should_exclude_arch(arch, no_arm64, no_amd64):
                         kept_curves[machine_label] = points
                 if kept_curves:
-                    th_cmp[tc][bm][tn]["curves"] = kept_curves
+                    node["curves"] = kept_curves
+                    if "ranking" in node:
+                        kept_ranking = [
+                            ent for ent in node["ranking"]
+                            if not should_exclude_arch(
+                                infer_arch_from_text(
+                                    ent.get("cpu_isa", "") + " " + ent.get("machinename", "")
+                                ),
+                                no_arm64, no_amd64,
+                            )
+                        ]
+                        for idx, ent in enumerate(kept_ranking, start=1):
+                            ent["rank"] = idx
+                        node["ranking"] = kept_ranking
                 else:
                     del th_cmp[tc][bm][tn]
             if not th_cmp[tc][bm]:
@@ -554,15 +580,18 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Section 3: Thread scaling comparison (Workload-centric curves across machines)
     """
+    FLAT_THRESHOLD = 80.0  # score(N_min) > this → non-scaling curve → exclude
+
     result = {
         "description": "Thread scaling comparison by workload",
         "workload": {}
     }
 
     workloads = extract_workloads(data)
-    
+
     # Target structure: Workload -> Machine -> Thread -> Score/HIB
     curves_data: Dict[tuple, Dict[str, Dict[str, float]]] = {}
+    machine_meta: Dict[tuple, Dict[str, Dict[str, str]]] = {}
     hib_map: Dict[tuple, bool] = {}
     unit_map: Dict[tuple, str] = {}
 
@@ -571,14 +600,19 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         score, hib = get_performance_score(w["test_data"])
         if score is None:
             continue
-            
+
         try:
             th_num = int(w["thread"])
         except (ValueError, TypeError):
             continue
-            
+
         machine_label = f"{w['machinename']} ({w['cpu_isa']})"
         curves_data.setdefault(key, {}).setdefault(machine_label, {})[str(th_num)] = score
+        machine_meta.setdefault(key, {})[machine_label] = {
+            "machinename": w["machinename"],
+            "cpu_name": w["cpu_name"],
+            "cpu_isa": w["cpu_isa"],
+        }
         hib_map[key] = hib
         unit_map[key] = w["test_data"].get("unit", "N/A")
 
@@ -586,18 +620,18 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         tc, bm, tn = key
         hib = hib_map[key]
         final_curves = {}
-        
+
         for m_label, th_scores in machine_curves.items():
             if len(th_scores) < 2:
                 continue
-            
+
             # Find max thread baseline
             max_th = str(max(int(t) for t in th_scores.keys()))
             max_val = th_scores[max_th]
-            
+
             if max_val == 0:
                 continue
-                
+
             sorted_th = sorted(th_scores.keys(), key=lambda x: int(x))
             normalized = {}
             for t in sorted_th:
@@ -611,13 +645,57 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                     normalized[t] = round((val / max_val) * 100, 2)
                 else:
                     normalized[t] = round((max_val / val) * 100, 2)
-            
+
+            # Non-scaling detection: score(N_min) > FLAT_THRESHOLD → exclude
+            non_max_threads = [t for t in sorted_th if t != max_th]
+            if non_max_threads:
+                min_non_max_th = non_max_threads[0]
+                if normalized.get(min_non_max_th, 0.0) > FLAT_THRESHOLD:
+                    print(
+                        f"Warning: [{tc}/{bm}/{tn}] {m_label} excluded from thread scaling "
+                        f"(non-scaling curve: score({min_non_max_th})="
+                        f"{normalized[min_non_max_th]:.1f} > {FLAT_THRESHOLD})",
+                        file=sys.stderr,
+                    )
+                    continue
+
             final_curves[m_label] = normalized
 
         if final_curves:
+            # Build ranking by linear_deviation_total (lower = better)
+            n_max = max(
+                max(int(t) for t in norm_scores.keys())
+                for norm_scores in final_curves.values()
+            )
+            ranking = []
+            for m_label, norm_scores in final_curves.items():
+                non_max_ths = sorted(
+                    [t for t in norm_scores if int(t) != n_max],
+                    key=lambda x: int(x),
+                )
+                dev_per_thread: Dict[str, float] = {}
+                total_dev = 0.0
+                for t in non_max_ths:
+                    ideal = (int(t) / n_max) * 100.0
+                    dev = round(norm_scores[t] - ideal, 2)
+                    dev_per_thread[t] = dev
+                    total_dev += dev
+                meta = machine_meta.get(key, {}).get(m_label, {})
+                ranking.append({
+                    "machinename": meta.get("machinename", m_label),
+                    "cpu_name": meta.get("cpu_name", "unknown"),
+                    "cpu_isa": meta.get("cpu_isa", "unknown"),
+                    "linear_deviation_total": round(total_dev, 2),
+                    "linear_deviation_per_thread": dev_per_thread,
+                })
+            ranking.sort(key=lambda x: x["linear_deviation_total"])
+            for i, entry in enumerate(ranking):
+                entry["rank"] = i + 1
+
             result["workload"].setdefault(tc, {}).setdefault(bm, {})[tn] = {
                 "unit": unit_map[key],
-                "curves": final_curves
+                "curves": final_curves,
+                "ranking": ranking,
             }
 
     return result
@@ -880,6 +958,7 @@ def main():
 
     default_output = Path.cwd() / f"one_big_json_analytics_{output_type}{arch_suffix}.json"
     output_path = Path(args.output) if args.output else default_output
+    output = _sort_numeric_keyed_dicts(output)
     output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding='utf-8')
 
     # Keep stdout output for CLI compatibility.

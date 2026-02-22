@@ -132,6 +132,14 @@
   - 例：8スレッドで100の時、1スレッドのスコアが12.5なら理想的な線形スケール。25ならスケーリング効率が悪い（並列化の恩恵が少ない）ことを示します。
 - **制約**: スレッド数 `<N>` が 1 種類しか存在しない Workload は解析対象外とします。
 
+## ランキング
+- **指標**: 理想線形スケーリング曲線からの乖離合計（`linear_deviation_total`）が小さいほど良好。
+  - **理想スコア**: `ideal_score(N) = (N / N_max) × 100`
+  - **乖離**: `dev(N) = actual_score(N) - ideal_score(N)`（サブリニアでは常に ≥ 0）
+  - **合計乖離**: `D_total = Σ dev(N)` （N_max を除く全スレッド数に対して合計）
+- **ランキング**: `D_total` が小さい順（昇順）に rank 付けします。
+- **補助情報**: `linear_deviation_per_thread` として各スレッド数での乖離値も出力します。突出して大きい値を持つスレッド数が飽和点の目安となります。
+
 ## Output JSON 構造
 ```json
 {
@@ -142,23 +150,45 @@
         "<test_name>": {
           "unit": "<unit>",
           "curves": {
-            "<machinename_1> (<arch>)": {
+            "<machinename_1> (<cpu_isa>)": {
               "1": 15.5,
               "2": 31.0,
               "4": 62.1,
               "8": 100.0
             },
-            "<machinename_2> (<arch>)": {
+            "<machinename_2> (<cpu_isa>)": {
               "1": 25.0,
               "2": 48.2,
               "4": 82.5,
               "8": 100.0
             }
           },
-          "insight": {
-            "scaling_efficiency": "Higher on <machinename_1>",
-            "saturation_point": "Observed on <machinename_2> above 4 threads"
-          }
+          "ranking": [
+            {
+              "rank": 1,
+              "machinename": "<machinename_1>",
+              "cpu_name": "<cpu_name>",
+              "cpu_isa": "<cpu_isa>",
+              "linear_deviation_total": 21.1,
+              "linear_deviation_per_thread": {
+                "1": 3.0,
+                "2": 6.0,
+                "4": 12.1
+              }
+            },
+            {
+              "rank": 2,
+              "machinename": "<machinename_2>",
+              "cpu_name": "<cpu_name>",
+              "cpu_isa": "<cpu_isa>",
+              "linear_deviation_total": 68.2,
+              "linear_deviation_per_thread": {
+                "1": 12.5,
+                "2": 23.2,
+                "4": 32.5
+              }
+            }
+          ]
         }
       }
     }
@@ -169,6 +199,9 @@
 ## 例外処理
 - 基準となる最大スレッド数の性能値が取得できない場合、そのマシンの解析はスキップし Warning を出力します。
 - 全てのマシンでデータが不十分な Workload 自体は出力に含めません。
+- **非スケーリング検出**: 最小スレッド数 `N_min`（`N_max` を除く最小の `N`）での正規化スコアが `flat_threshold`（デフォルト: **80**）を超えるマシンは、スケーリング特性を持たないとみなし `curves` および `ranking` から除外し Warning を出力します。
+  - 除外条件: `score(N_min) > 80`
+  - 除外後に `curves` 内の全エントリが空になった `test_name` は出力から削除します。
 
 ---
 

@@ -674,7 +674,7 @@ def _discover_threads(benchmark_dir: Path) -> List[str]:
             pfx = f.stem.split("-", 1)[0]
             if pfx and pfx.isdigit():
                 threads.add(pfx)
-    return sorted(threads)
+    return sorted(threads, key=int)
 
 
 def _fallback_collect_thread_payload(
