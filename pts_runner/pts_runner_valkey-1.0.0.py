@@ -29,7 +29,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 class PreSeedDownloader:
     """
@@ -1186,6 +1186,7 @@ class ValkeyRunner:
 
         # Generate summary
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
 
         print(f"\n{'='*80}")
         print("Benchmark Summary")

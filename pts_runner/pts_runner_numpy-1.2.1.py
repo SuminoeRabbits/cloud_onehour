@@ -28,7 +28,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 MIN_PYTHON_VERSION = (3, 7, 0)
 PREFERRED_PYTHON_VERSIONS = ("3.11", "3.10")
@@ -1060,6 +1060,7 @@ class NumpyBenchmarkRunner:
 
         # Generate summary
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
 
         print(f"\n{'='*80}")
         print("[SUCCESS] All benchmarks completed successfully")

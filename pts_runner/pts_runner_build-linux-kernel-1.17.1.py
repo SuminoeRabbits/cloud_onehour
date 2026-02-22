@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 
 class PreSeedDownloader:
@@ -1053,6 +1053,7 @@ class BuildLinuxKernelRunner:
 
         # Generate summary
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
 
         # Summary
         print(f"\n{'='*80}")

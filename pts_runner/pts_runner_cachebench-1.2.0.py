@@ -19,7 +19,7 @@ import subprocess
 import argparse
 import shutil
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 
 class CachebenchRunner:
@@ -507,6 +507,7 @@ class CachebenchRunner:
 
         self.export_results()
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
         return True
 
 

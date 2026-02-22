@@ -20,7 +20,7 @@ import argparse
 import shutil
 import time
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 class MemcachedRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
@@ -551,6 +551,7 @@ class MemcachedRunner:
             
         self.export_results()
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
         return True
 
 def main():

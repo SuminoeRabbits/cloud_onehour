@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 
 class PreSeedDownloader:
@@ -953,6 +953,7 @@ class CpuminerOptRunner:
                 return False
         self.export_results()
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
         return True
 
 

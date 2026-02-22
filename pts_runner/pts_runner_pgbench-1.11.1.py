@@ -27,7 +27,7 @@ import sys
 import signal
 import atexit
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 
 class PreSeedDownloader:
@@ -1356,6 +1356,7 @@ fi
 
         # Generate summary
         self.generate_summary()
+        cleanup_pts_artifacts(self.benchmark)
 
         if failed:
             print(f"\n[WARN] Some tests failed: {failed}")
