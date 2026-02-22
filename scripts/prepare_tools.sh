@@ -176,4 +176,7 @@ fi
 log_step "Enable unattended upgrades"
 enable_unattended_upgrades
 
+log_step "Disk usage before workloads"
+df -h /
+
 echo "=== prepare_tools.sh end: $(date -Is) ==="

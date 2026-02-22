@@ -136,4 +136,8 @@ fi
 
 enable_dnf_automatic
 DNF_AUTOMATIC_DISABLED=0
+
+log_step "Disk usage before workloads"
+df -h /
+
 echo "=== prepare_tools.sh (EL${EL_VER}) end: $(date -Is) ==="
