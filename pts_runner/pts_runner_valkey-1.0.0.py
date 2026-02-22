@@ -832,6 +832,16 @@ class ValkeyRunner:
         direct_results = []
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
             for index, case in enumerate(cases, start=1):
+                # Clean up any existing RDB file to prevent long loading times
+                # that exceed the hardcoded 6-second sleep in the PTS launcher script
+                valkey_rdb = Path.home() / "valkey-8.0.0" / "dump.rdb"
+                if valkey_rdb.exists():
+                    try:
+                        valkey_rdb.unlink()
+                        print(f"  [INFO] Removed stale cache: {valkey_rdb}")
+                    except Exception as e:
+                        print(f"  [WARN] Failed to remove {valkey_rdb}: {e}")
+
                 case_log = self.results_dir / f"{num_threads}-thread-benchmark-{index:03d}.log"
                 params_text = ', '.join([f"{k}: {v}" for k, v in case['parameters'].items()]) if case['parameters'] else 'default'
                 case_cmd = (
