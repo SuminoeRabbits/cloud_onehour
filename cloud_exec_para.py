@@ -3576,7 +3576,7 @@ def process_instance(
     config: Dict[str, Any],
     key_path: str,
     log_dir: Path
-) -> None:
+) -> bool:
     """
     Process a single instance: launch, run workloads, collect results, terminate.
 
@@ -3586,6 +3586,9 @@ def process_instance(
         config: Full cloud_config.json
         key_path: SSH private key path
         log_dir: Log directory
+
+    Returns:
+        True if instance completed successfully (commands succeeded), False on any error.
     """
     # Sanitize instance name
     original_name = inst['name']
@@ -3606,7 +3609,7 @@ def process_instance(
     if check_instance_name_conflict(provider, sanitized_name, inst, logger):
         logger.error(f"Instance name conflict detected. Skipping {sanitized_name}")
         DASHBOARD.update(instance_name, status="ERROR", step="Name conflict", color=DASHBOARD.FAIL)
-        return
+        return False
 
     if isinstance(provider, AWSProvider):
         inst['region'] = provider._get_region_for_instance(inst)
@@ -3647,7 +3650,7 @@ def process_instance(
             logger.error(f"Failed to get IP for {sanitized_name}")
             if not instance_id:
                 DASHBOARD.remove(instance_name)
-            return
+            return False
 
         inst['instance_id'] = instance_id
 
@@ -3754,6 +3757,8 @@ def process_instance(
             progress(instance_name, "Terminating instance", logger)
             cleanup_instance_safely(provider, instance_id, inst, logger)
 
+    return commands_success
+
 
 def execute_instances_parallel(
     provider: CloudProvider,
@@ -3774,11 +3779,21 @@ def execute_instances_parallel(
         log_dir: Log directory
         max_workers: Number of parallel workers
     """
+    stop_after_error = config['common'].get('stop_after_error', False)
+    stop_event = threading.Event()
     launch_delay = provider.get_launch_delay_between_instances()
 
     def process_with_delay(inst):
         """Process instance with rate limiting delay."""
+        if stop_event.is_set():
+            csp_name = provider.csp_config.get('name', 'unknown').upper()
+            print(f"[SKIP] {csp_name}:{inst['name']} skipped (stop_after_error)", flush=True)
+            return True
         time.sleep(launch_delay)
+        if stop_event.is_set():
+            csp_name = provider.csp_config.get('name', 'unknown').upper()
+            print(f"[SKIP] {csp_name}:{inst['name']} skipped (stop_after_error)", flush=True)
+            return True
         return process_instance(provider, inst, config, key_path, log_dir)
 
     executor = None
@@ -3794,7 +3809,14 @@ def execute_instances_parallel(
         for future in as_completed(futures):
             inst = futures[future]
             try:
-                future.result()
+                result = future.result()
+                if stop_after_error and result is False and not stop_event.is_set():
+                    stop_event.set()
+                    print(
+                        f"[STOP] Instance '{inst['name']}' ended with error. "
+                        f"Skipping remaining instances (stop_after_error=true).",
+                        flush=True
+                    )
             except Exception as exc:
                 # Log to general errors file
                 error_log = log_dir / "general_errors.log"
@@ -3806,6 +3828,13 @@ def execute_instances_parallel(
                         f.write(traceback.format_exc() + "\n")
                 except Exception:
                     print(f"[WARN] Failed to write general error log for {inst['name']}: {exc}", flush=True)
+                if stop_after_error and not stop_event.is_set():
+                    stop_event.set()
+                    print(
+                        f"[STOP] Instance '{inst['name']}' raised exception. "
+                        f"Skipping remaining instances (stop_after_error=true).",
+                        flush=True
+                    )
 
     except KeyboardInterrupt:
         print("\n[INTERRUPT] KeyboardInterrupt detected in main thread")

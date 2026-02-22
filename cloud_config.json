@@ -51,6 +51,7 @@
     "ssh_timeout": 20,
     "workload_timeout": 9000,
     "workload_timeout_limit": 1,
+    "stop_after_error": true,
     "ssh_strict_host_key_checking": false,
     "debug_stdout": true,
     "long_running_indicators": [
