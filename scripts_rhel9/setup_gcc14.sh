@@ -21,6 +21,20 @@ if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
         echo "[OK] EL${EL_VER}: System GCC ${SYSTEM_GCC_VER} >= 14, creating compatibility symlinks."
         SYSTEM_GCC_BIN="$(command -v gcc || true)"
         SYSTEM_GXX_BIN="$(command -v g++ || true)"
+        if [ -z "$SYSTEM_GXX_BIN" ] || [ ! -x "$SYSTEM_GXX_BIN" ]; then
+            echo "[INFO] g++ not found. Installing gcc-c++ for g++-14 compatibility link..."
+            wait_for_dnf_lock
+            sudo dnf -y install gcc-c++
+            SYSTEM_GXX_BIN="$(command -v g++ || true)"
+        fi
+        if [ -z "$SYSTEM_GCC_BIN" ] || [ ! -x "$SYSTEM_GCC_BIN" ]; then
+            echo "[ERROR] gcc not found even though GCC version check passed."
+            exit 1
+        fi
+        if [ -z "$SYSTEM_GXX_BIN" ] || [ ! -x "$SYSTEM_GXX_BIN" ]; then
+            echo "[ERROR] g++ not found after installing gcc-c++."
+            exit 1
+        fi
         if [ -n "$SYSTEM_GCC_BIN" ] && [ -x "$SYSTEM_GCC_BIN" ]; then
             sudo ln -sf "$SYSTEM_GCC_BIN" /usr/bin/gcc-14
             echo "[OK] Linked /usr/bin/gcc-14 -> $SYSTEM_GCC_BIN"
@@ -28,6 +42,10 @@ if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
         if [ -n "$SYSTEM_GXX_BIN" ] && [ -x "$SYSTEM_GXX_BIN" ]; then
             sudo ln -sf "$SYSTEM_GXX_BIN" /usr/bin/g++-14
             echo "[OK] Linked /usr/bin/g++-14 -> $SYSTEM_GXX_BIN"
+        fi
+        if ! command -v gcc-14 >/dev/null 2>&1 || ! command -v g++-14 >/dev/null 2>&1; then
+            echo "[ERROR] gcc-14/g++-14 compatibility links are not available in PATH"
+            exit 1
         fi
         gcc --version
         exit 0
@@ -156,7 +174,7 @@ if [[ "$gcc14_installed" = false ]]; then
     # Also link in /usr/bin for non-login shell access.
     sudo ln -sf /usr/local/bin/gcc-14 /usr/bin/gcc-14
     sudo ln -sf /usr/local/bin/g++-14 /usr/bin/g++-14
-    echo "[OK] Linked /usr/bin/gcc-14 -> /usr/local/bin/gcc-14"
+    echo "[OK] Linked /usr/bin/gcc-14 and /usr/bin/g++-14 -> /usr/local/bin/*-14"
 fi
 
 # Register gcc-14 as the default compiler via alternatives

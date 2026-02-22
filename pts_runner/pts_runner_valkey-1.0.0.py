@@ -543,7 +543,9 @@ class ValkeyRunner:
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = 'gcc-14'
+        cxx = 'g++-14'
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         print(f"\n{'>'*80}")
         print("[PTS INSTALL COMMAND]")
