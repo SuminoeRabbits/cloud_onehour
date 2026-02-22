@@ -1956,6 +1956,8 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     ssh_user = get_ssh_user(os_info, inst.get('_csp', 'aws'))
     # Each workload timeout (backward compatible with command_timeout)
     workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
+    workload_timeout_limit = config['common'].get('workload_timeout_limit', 0)
+    timeout_count = 0
 
     # -----------------------------------------------------------
     # Determine Command List (Testloads vs Workloads)
@@ -2482,6 +2484,14 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
 
                 duration = time.time() - workload_start
                 DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
+
+                timeout_count += 1
+                if workload_timeout_limit > 0 and timeout_count > workload_timeout_limit:
+                    msg = f"Timeout limit ({workload_timeout_limit}) exceeded ({timeout_count} timeouts). Aborting workloads."
+                    if logger: logger.error(msg)
+                    else: print(f"  [ERROR] {msg}")
+                    return False
+
                 continue # Proceed to next workload on timeout
 
         else:
@@ -2549,7 +2559,15 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "TIMEOUT")
                     archive_failure_logs("regular-timeout", cmd)
-                    # No abort on timeout? The original code continued.
+
+                    timeout_count += 1
+                    if workload_timeout_limit > 0 and timeout_count > workload_timeout_limit:
+                        msg = f"Timeout limit ({workload_timeout_limit}) exceeded ({timeout_count} timeouts). Aborting workloads."
+                        if logger: logger.error(msg)
+                        else: print(f"  [ERROR] {msg}")
+                        return False
+
+                    # continue on timeout if limit not reached
                     continue 
 
                 except subprocess.CalledProcessError as e:
