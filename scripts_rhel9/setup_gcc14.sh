@@ -1,15 +1,49 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
-    export PATH="/usr/local/bin:$PATH"
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/dnf_utils.sh"
 
 EL_VER=$(get_el_version)
 echo "=== GCC-14 Setup (EL${EL_VER}) ==="
+
+# ---------------------------------------------------------------
+# EL10+: GCC 14 is the system default compiler.
+# No toolset or source build needed.
+# Create /usr/bin/gcc-14 symlinks so that tools calling 'gcc-14'
+# explicitly (e.g. CC=gcc-14 in pts_runner install commands) work
+# in ALL shell types: login, non-login, and 'sh -c' via SSH.
+# ---------------------------------------------------------------
+if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+    SYSTEM_GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "0")
+    SYSTEM_GCC_MAJOR="${SYSTEM_GCC_VER%%.*}"
+    if [ "$SYSTEM_GCC_MAJOR" -ge 14 ] 2>/dev/null; then
+        echo "[OK] EL${EL_VER}: System GCC ${SYSTEM_GCC_VER} >= 14, creating compatibility symlinks."
+        SYSTEM_GCC_BIN="$(command -v gcc || true)"
+        SYSTEM_GXX_BIN="$(command -v g++ || true)"
+        if [ -n "$SYSTEM_GCC_BIN" ] && [ -x "$SYSTEM_GCC_BIN" ]; then
+            sudo ln -sf "$SYSTEM_GCC_BIN" /usr/bin/gcc-14
+            echo "[OK] Linked /usr/bin/gcc-14 -> $SYSTEM_GCC_BIN"
+        fi
+        if [ -n "$SYSTEM_GXX_BIN" ] && [ -x "$SYSTEM_GXX_BIN" ]; then
+            sudo ln -sf "$SYSTEM_GXX_BIN" /usr/bin/g++-14
+            echo "[OK] Linked /usr/bin/g++-14 -> $SYSTEM_GXX_BIN"
+        fi
+        gcc --version
+        exit 0
+    fi
+    echo "[WARN] EL${EL_VER}: System GCC ${SYSTEM_GCC_VER} < 14, falling through to install..."
+fi
+
+# ---------------------------------------------------------------
+# EL9: Install GCC-14 via toolset or source build.
+# Build dependencies are only required for this path.
+# ---------------------------------------------------------------
+
+# Ensure /usr/local/bin is in PATH for this session
+if [[ ":$PATH:" != *":/usr/local/bin:"* ]]; then
+    export PATH="/usr/local/bin:$PATH"
+fi
 
 echo "Installing build dependencies for GCC..."
 wait_for_dnf_lock
@@ -47,38 +81,6 @@ for pkg in "${GCC_DEP_LIST[@]}"; do
     install_required_pkg "$pkg"
 done
 
-# ---------------------------------------------------------------
-# EL10+: GCC 14.2 is the system default compiler.
-# No toolset or source build needed — just verify version.
-# ---------------------------------------------------------------
-if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
-    SYSTEM_GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "0")
-    SYSTEM_GCC_MAJOR="${SYSTEM_GCC_VER%%.*}"
-    if [ "$SYSTEM_GCC_MAJOR" -ge 14 ] 2>/dev/null; then
-        echo "[OK] EL${EL_VER}: System GCC ${SYSTEM_GCC_VER} >= 14, no additional setup needed."
-
-        # Compatibility links for tools/scripts expecting explicit gcc-14/g++-14 names.
-        SYSTEM_GCC_BIN="$(command -v gcc || true)"
-        SYSTEM_GXX_BIN="$(command -v g++ || true)"
-        if [ -n "$SYSTEM_GCC_BIN" ] && [ -x "$SYSTEM_GCC_BIN" ]; then
-            sudo ln -sf "$SYSTEM_GCC_BIN" /usr/local/bin/gcc-14
-            echo "[OK] Linked /usr/local/bin/gcc-14 -> $SYSTEM_GCC_BIN"
-        fi
-        if [ -n "$SYSTEM_GXX_BIN" ] && [ -x "$SYSTEM_GXX_BIN" ]; then
-            sudo ln -sf "$SYSTEM_GXX_BIN" /usr/local/bin/g++-14
-            echo "[OK] Linked /usr/local/bin/g++-14 -> $SYSTEM_GXX_BIN"
-        fi
-
-        gcc --version
-        exit 0
-    fi
-    echo "[INFO] EL${EL_VER}: System GCC ${SYSTEM_GCC_VER} < 14, falling through to install..."
-fi
-
-# ---------------------------------------------------------------
-# EL9: Install GCC-14 via toolset or source build
-# ---------------------------------------------------------------
-
 # Check if GCC-14 is already installed
 gcc14_installed=false
 if [[ -f /usr/bin/gcc-14 ]] || [[ -f /usr/local/bin/gcc-14 ]]; then
@@ -92,12 +94,16 @@ if [[ "$gcc14_installed" = false ]]; then
         echo "Installing gcc-toolset-14..."
         sudo dnf -y install gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
 
-        # Link to /usr/local/bin/gcc-14 to maintain interface compatibility
         TOOLSET_GCC="/opt/rh/gcc-toolset-14/root/usr/bin/gcc"
         TOOLSET_GXX="/opt/rh/gcc-toolset-14/root/usr/bin/g++"
         if [ -f "$TOOLSET_GCC" ]; then
+            # /usr/local/bin: used by alternatives and login-shell consumers
             sudo ln -sf "$TOOLSET_GCC" /usr/local/bin/gcc-14
             sudo ln -sf "$TOOLSET_GXX" /usr/local/bin/g++-14
+            # /usr/bin: visible in ALL shell types (non-login, sh -c via SSH)
+            sudo ln -sf "$TOOLSET_GCC" /usr/bin/gcc-14
+            sudo ln -sf "$TOOLSET_GXX" /usr/bin/g++-14
+            echo "[OK] Linked /usr/bin/gcc-14 and /usr/local/bin/gcc-14 -> $TOOLSET_GCC"
 
             # Setup library/include paths for the toolset runtime.
             # Symlinks alone don't set LD_LIBRARY_PATH or include paths,
@@ -145,10 +151,16 @@ if [[ "$gcc14_installed" = false ]]; then
     make -j"$(nproc)"
     sudo make install
     rm -rf /tmp/gcc-${GCC_VERSION}* "${BUILD_DIR}"
+
+    # Source build installs directly to /usr/local/bin/gcc-14.
+    # Also link in /usr/bin for non-login shell access.
+    sudo ln -sf /usr/local/bin/gcc-14 /usr/bin/gcc-14
+    sudo ln -sf /usr/local/bin/g++-14 /usr/bin/g++-14
+    echo "[OK] Linked /usr/bin/gcc-14 -> /usr/local/bin/gcc-14"
 fi
 
-# Alternatives setup (EL9 only — EL10 uses system gcc directly)
-echo ">>> Configuring GCC-14 as default compiler..."
+# Register gcc-14 as the default compiler via alternatives
+echo ">>> Configuring GCC-14 as default compiler via alternatives..."
 if [[ -f /usr/local/bin/gcc-14 ]]; then
     sudo alternatives --install /usr/bin/gcc gcc /usr/local/bin/gcc-14 100
     sudo alternatives --install /usr/bin/g++ g++ /usr/local/bin/g++-14 100
