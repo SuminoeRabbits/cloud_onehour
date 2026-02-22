@@ -614,6 +614,18 @@ class ValkeyRunner:
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
+        # Verify that the valkey binary was actually compiled.
+        # The PTS launcher script references ~/valkey-8.0.0/src/valkey-server.
+        # If the compiler was not found (e.g. gcc-14 missing on RHEL), PTS still
+        # creates the installed-tests directory but the source is never built.
+        valkey_src_dir = Path.home() / "valkey-8.0.0"
+        valkey_server = valkey_src_dir / "src" / "valkey-server"
+        if not valkey_server.exists():
+            print(f"  [ERROR] valkey binary not found: {valkey_server}")
+            print("  [ERROR] Source compilation likely failed (compiler not found or make error)")
+            print(f"  [INFO] CC={cc} CXX={cxx} — verify that these compilers are installed")
+            sys.exit(1)
+
         # Check if test is recognized by PTS
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
         verify_result = subprocess.run(
