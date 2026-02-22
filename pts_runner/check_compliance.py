@@ -136,6 +136,9 @@ class ComplianceChecker:
         self.check_cpu_frequency_methods()
         self.check_downloads_xml_prefetch()
 
+        # Disk space management (new 2026-02)
+        self.check_pts_installed_cleanup()
+
         # Informational checks
         self.find_hardcoded_thread_lists()
 
@@ -1591,6 +1594,67 @@ class ComplianceChecker:
                 "⚠️  WARNING: downloads.xml prefetch missing\n"
                 "   Recommended: if downloads.xml is missing, run 'phoronix-test-suite info <benchmark>'\n"
                 "   This enables aria2c pre-seeding before install"
+            )
+
+    def check_pts_installed_cleanup(self):
+        """
+        Check if cleanup_pts_artifacts(self.benchmark) is called in run()
+        after generate_summary(), before return.
+
+        Background (2026-02):
+          x265 fills the 25GB root FS with installed-tests + video files (~3.4GB),
+          causing subsequent workloads (redis) to fail with 'No space left on device'.
+          Each runner must remove its installed test at the end of run().
+
+        Required pattern:
+          from runner_common import ..., cleanup_pts_artifacts
+          # in run(), after self.generate_summary():
+          cleanup_pts_artifacts(self.benchmark)
+
+        Timing guarantee:
+          cleanup_pts_artifacts() is called OUTSIDE the thread-scaling loop,
+          so it never interrupts mid-scaling.
+        """
+        # 1. Check import
+        has_import = bool(
+            re.search(r'from\s+runner_common\s+import\s+[^\n]*cleanup_pts_artifacts', self.content)
+        )
+
+        # 2. Check call exists
+        has_call = bool(
+            re.search(r'cleanup_pts_artifacts\s*\(\s*self\.benchmark\s*\)', self.content)
+        )
+
+        # 3. Check ordering: call must come after generate_summary() in run()
+        call_after_summary = False
+        if has_call:
+            gen_match = re.search(r'self\.generate_summary\(\)', self.content)
+            cleanup_match = re.search(r'cleanup_pts_artifacts\s*\(\s*self\.benchmark\s*\)', self.content)
+            if gen_match and cleanup_match:
+                call_after_summary = cleanup_match.start() > gen_match.start()
+
+        if has_import and has_call and call_after_summary:
+            self.passed.append(
+                "✅ cleanup_pts_artifacts(self.benchmark) called after generate_summary() in run()"
+            )
+        else:
+            missing = []
+            if not has_import:
+                missing.append("cleanup_pts_artifacts not imported from runner_common")
+            if not has_call:
+                missing.append("cleanup_pts_artifacts(self.benchmark) not called")
+            elif not call_after_summary:
+                missing.append("cleanup_pts_artifacts() must be called AFTER generate_summary()")
+            self.errors.append(
+                "❌ CRITICAL: Post-benchmark cleanup missing (2026-02 disk-space fix)\n"
+                f"   Missing: {', '.join(missing)}\n"
+                "   Root cause: x265 installed-tests (~3.4GB) fills 25GB root FS,\n"
+                "               subsequent workloads fail with 'No space left on device'.\n"
+                "   Fix:\n"
+                "     1. Update import: from runner_common import ..., cleanup_pts_artifacts\n"
+                "     2. Add after self.generate_summary() in run():\n"
+                "            cleanup_pts_artifacts(self.benchmark)\n"
+                "   Reference: CODE_TEMPLATE.md 'クリーンアップメソッド' section"
             )
 
     def print_results(self):

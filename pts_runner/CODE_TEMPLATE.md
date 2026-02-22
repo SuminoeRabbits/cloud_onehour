@@ -342,6 +342,12 @@ def run(self):
     # Generate summary
     self.generate_summary()
 
+    # Post-benchmark cleanup: remove installed test to free disk space.
+    # MUST be after export_results() and generate_summary() so results are
+    # collected first. download-cache is preserved (re-download is expensive).
+    # Errors are non-fatal ([WARN] only).
+    cleanup_pts_artifacts(self.benchmark)
+
     print(f"\n{'='*80}")
     print(f"[SUCCESS] All benchmarks completed successfully")
     print(f"{'='*80}")
@@ -349,6 +355,27 @@ def run(self):
     # CRITICAL: Must return True for cloud_exec.py integration
     return True
 ```
+
+### クリーンアップメソッド (`cleanup_pts_artifacts`)
+
+`runner_common` モジュールに定義された関数。`run()` 末尾から呼ぶ。
+
+**タイミングの保証**:
+- `export_results()` と `generate_summary()` の**後**、`return` の**前**に呼ぶ
+- Thread Scaling ループ (`for num_threads in self.thread_list`) の**外**なので、スレッド間での実行はない
+- download-cache は削除しない（次 workload での再インストール時に利用される）
+
+```python
+# import 行に追加
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+
+# run() 末尾で呼び出す
+self.generate_summary()
+cleanup_pts_artifacts(self.benchmark)   # ← ここ
+return len(failed) == 0
+```
+
+`cleanup_pts_artifacts(benchmark)` の実装は `runner_common.py` を参照。
 
 ### 基本メソッド
 
@@ -1341,6 +1368,9 @@ if __name__ == "__main__":
 - [ ] cloud_exec.py でベンチマーク成功と判定されるか確認
 - [ ] perf無効時もエラーなく完走
 - [ ] コンパイラパッチの冪等性確認
+- [ ] **`cleanup_pts_artifacts(self.benchmark)` が `generate_summary()` の後に呼ばれるか確認**
+- [ ] **cleanup後に `~/.phoronix-test-suite/installed-tests/pts/{benchmark}/` が削除されるか確認**
+- [ ] **`download-cache/` が残ることを確認（削除されていないこと）**
 
 ### 出力ファイル確認
 - [ ] `{n}-thread.log`
@@ -1360,7 +1390,8 @@ if __name__ == "__main__":
 3. **ベンチマーク実行** - `run_benchmark()`
 4. **結果エクスポート** - `export_results()` (ドット除去対応)
 5. **サマリ生成** - `generate_summary()`
-6. **トラブルシューティング** - `patch_install_script()` (必要な場合のみ)
+6. **後片付け** - `cleanup_pts_artifacts()` (runner_common から import、run() 末尾で呼ぶ)
+7. **トラブルシューティング** - `patch_install_script()` (必要な場合のみ)
 
 ---
 
