@@ -617,16 +617,32 @@ class ValkeyRunner:
             sys.exit(1)
 
         # Verify that the valkey binary was actually compiled.
-        # The PTS launcher script references ~/valkey-8.0.0/src/valkey-server.
-        # If the compiler was not found (e.g. gcc-14 missing on RHEL), PTS still
-        # creates the installed-tests directory but the source is never built.
-        valkey_src_dir = Path.home() / "valkey-8.0.0"
+        # In PTS installs, valkey source is placed under the installed test directory.
+        valkey_src_dir = installed_dir / "valkey-8.0.0"
         valkey_server = valkey_src_dir / "src" / "valkey-server"
         if not valkey_server.exists():
             print(f"  [ERROR] valkey binary not found: {valkey_server}")
             print("  [ERROR] Source compilation likely failed (compiler not found or make error)")
             print(f"  [INFO] CC={cc} CXX={cxx} — verify that these compilers are installed")
             sys.exit(1)
+
+        # The bundled PTS valkey launcher uses a hardcoded ~/valkey-8.0.0 path.
+        # Keep this runner-specific dependency satisfied by linking to the
+        # actual installed source tree under installed-tests.
+        launcher_expected_src = Path.home() / "valkey-8.0.0"
+        try:
+            if launcher_expected_src.is_symlink() or launcher_expected_src.exists():
+                if launcher_expected_src.resolve() != valkey_src_dir.resolve():
+                    if launcher_expected_src.is_symlink():
+                        launcher_expected_src.unlink()
+                    else:
+                        shutil.rmtree(launcher_expected_src)
+            if not launcher_expected_src.exists():
+                launcher_expected_src.symlink_to(valkey_src_dir)
+                print(f"  [INFO] Linked launcher source path: {launcher_expected_src} -> {valkey_src_dir}")
+        except Exception as e:
+            print(f"  [WARN] Failed to prepare launcher source path {launcher_expected_src}: {e}")
+            print("  [WARN] Valkey launcher may fail if it expects ~/valkey-8.0.0")
 
         # Check if test is recognized by PTS
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
