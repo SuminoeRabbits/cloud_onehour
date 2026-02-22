@@ -40,7 +40,7 @@
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-gcc-1.5.0.py 8 --quick > /tmp/pts_runner_build-gcc.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-gcc-1.5.0.py 12 --quick >> /tmp/pts_runner_build-gcc.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-gcc-1.5.0.py 16 --quick >> /tmp/pts_runner_build-gcc.log 2>&1",
-      "rm -rf ~/.phoronix-test-suite/installed-tests/pts/build-llvm* > /dev/null 2>&1",
+      "rm -rf ~/.phoronix-test-suite/installed-tests/pts/build-gcc* > /dev/null 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_renaissance-1.4.0.py 8 --quick > /tmp/pts_runner_renaissance.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_renaissance-1.4.0.py 12 --quick >> /tmp/pts_runner_renaissance.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_renaissance-1.4.0.py 16 --quick >> /tmp/pts_runner_renaissance.log 2>&1",

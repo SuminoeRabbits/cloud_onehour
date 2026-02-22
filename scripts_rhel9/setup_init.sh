@@ -506,6 +506,8 @@ build_x264_from_source() {
     make -j"$(nproc)"
     sudo make install
     popd >/dev/null
+    rm -rf /tmp/cloud_onehour-x264
+    echo "[INFO] Cleaned up /tmp/cloud_onehour-x264 build directory"
 }
 
 build_x265_from_source() {
@@ -538,6 +540,8 @@ build_x265_from_source() {
     cmake --build build
     sudo cmake --install build
     popd >/dev/null
+    rm -rf /tmp/cloud_onehour-x265
+    echo "[INFO] Cleaned up /tmp/cloud_onehour-x265 build directory"
 }
 
 generate_x265_pc_if_missing() {
