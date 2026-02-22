@@ -72,7 +72,7 @@
 #
 # 5. Globalでの回帰分析を"testcategory"毎に実行
 # オプション: --analyze --testcategory（省略可能）指定時はこのステップのみ
-# 4.の回帰分析を、"testcategory"リスト毎に実行し,さらに`--no_arm64`,`--no_amd64`を適応します。
+# 4.の回帰分析を、"testcategory"リスト毎に実行します。さらに追加で`--no_arm64`,`--no_amd64`も適応します。
 # "testcategory"は --inputで指定されたJSONの"testcategory": {...}のキーに対応します。
 # この際には${PWD}/global/<testcategory>ディレクトリの存在を確認し、ない場合は作成、その中で分析を行います。
 # 各出力ファイルが存在する場合でも上書きします。
@@ -80,23 +80,33 @@
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
 #     --testcategory <testcategory> \
+#     --perf \
+#     --output  ./global/<testcategory>/<testcategory>_performance_analysis.json
+# $> ../results/one_big_json_analytics.py \
+#     --input ./global/global_all_results.json \
+#     --testcategory <testcategory> \
 #     --perf --no_arm64 \
-#     --output  ./global/<testcategory>/global_performance_analysis_x86_64.json
+#     --output  ./global/<testcategory>/<testcategory>_performance_analysis_x86_64.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
 #     --testcategory <testcategory> \
 #     --perf --no_amd64 \
-#     --output  ./global/<testcategory>/global_performance_analysis_arm64.json
+#     --output  ./global/<testcategory>/<testcategory>_performance_analysis_arm64.json
+# $> ../results/one_big_json_analytics.py \
+#     --input ./global/global_all_results.json \
+#     --testcategory <testcategory> \
+#     --cost \
+#     --output ./global/<testcategory>/<testcategory>_cost_analysis.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
 #     --testcategory <testcategory> \
 #     --cost --no_arm64\
-#     --output ./global/<testcategory>/global_cost_analysis_x86_64.json
+#     --output ./global/<testcategory>/<testcategory>_cost_analysis_x86_64.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
 #     --testcategory <testcategory> \
 #     --cost --no_amd64\
-#     --output ./global/<testcategory>/global_cost_analysis_arm64.json
+#     --output ./global/<testcategory>/<testcategory>_cost_analysis_arm64.json
 #
 #
 from __future__ import annotations
@@ -633,22 +643,28 @@ def main() -> int:
                     category_dir = global_dir / category
                     category_dir.mkdir(parents=True, exist_ok=True)
 
-                    perf_x86_output = category_dir / "global_performance_analysis_x86_64.json"
-                    perf_arm64_output = category_dir / "global_performance_analysis_arm64.json"
-                    cost_x86_output = category_dir / "global_cost_analysis_x86_64.json"
-                    cost_arm64_output = category_dir / "global_cost_analysis_arm64.json"
+                    perf_output = category_dir / f"{category}_performance_analysis.json"
+                    perf_x86_output = category_dir / f"{category}_performance_analysis_x86_64.json"
+                    perf_arm64_output = category_dir / f"{category}_performance_analysis_arm64.json"
+                    cost_output = category_dir / f"{category}_cost_analysis.json"
+                    cost_x86_output = category_dir / f"{category}_cost_analysis_x86_64.json"
+                    cost_arm64_output = category_dir / f"{category}_cost_analysis_arm64.json"
 
-                    for out in (perf_x86_output, perf_arm64_output, cost_x86_output, cost_arm64_output):
+                    for out in (perf_output, perf_x86_output, perf_arm64_output, cost_output, cost_x86_output, cost_arm64_output):
                         if out.exists():
                             print(f"Overwriting existing analysis -> {out}")
 
+                    run_analytics(analytics_script, global_results, perf_output, ["--testcategory", category, "--perf"], category_dir)
                     run_analytics(analytics_script, global_results, perf_x86_output, ["--testcategory", category, "--perf", "--no_arm64"], category_dir)
                     run_analytics(analytics_script, global_results, perf_arm64_output, ["--testcategory", category, "--perf", "--no_amd64"], category_dir)
+                    run_analytics(analytics_script, global_results, cost_output, ["--testcategory", category, "--cost"], category_dir)
                     run_analytics(analytics_script, global_results, cost_x86_output, ["--testcategory", category, "--cost", "--no_arm64"], category_dir)
                     run_analytics(analytics_script, global_results, cost_arm64_output, ["--testcategory", category, "--cost", "--no_amd64"], category_dir)
 
+                    print(f"Generated analysis -> {perf_output}")
                     print(f"Generated analysis -> {perf_x86_output}")
                     print(f"Generated analysis -> {perf_arm64_output}")
+                    print(f"Generated analysis -> {cost_output}")
                     print(f"Generated analysis -> {cost_x86_output}")
                     print(f"Generated analysis -> {cost_arm64_output}")
         except Exception as exc:
