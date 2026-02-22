@@ -874,6 +874,8 @@ class Dashboard:
                     data['status'] = status
                     if status in ['COMPLETED', 'TERMINATED', 'ERROR', 'TERM_TIMEOUT', 'TERM_FAILED'] and data['end_time'] is None:
                         data['end_time'] = datetime.now()
+                    elif status in ['RUNNING', 'PENDING']:
+                        data['end_time'] = None
                 if step:
                     if data['step'] != step:
                         data['step'] = step
@@ -995,11 +997,12 @@ class Dashboard:
                 cost_str = f"${cost:.2f}"
                 compact_stat = summary_stat_map.get(data.get('status', ''), str(data.get('status', ''))[:4])
 
-                summary_items.append((duration.total_seconds(), name, compact_stat, duration_str, cost_str))
+                hour_str = f"{hours:.2f}h"
+                summary_items.append((duration.total_seconds(), name, compact_stat, hour_str, cost_str))
 
             summary_items.sort(key=lambda item: item[0])
 
-        lines.append(f"{self.BOLD}SUMMARY (Instance | Stat | Time | Cost){self.ENDC}")
+        lines.append(f"{self.BOLD}SUMMARY (Instance | Stat | Hour | Cost){self.ENDC}")
         if summary_items:
             for _, name, compact_stat, duration_str, cost_str in summary_items:
                 lines.append(f"- {name}: {compact_stat} | {duration_str} | {cost_str}")

@@ -56,18 +56,26 @@
 # 4. Globalでの回帰分析
 # オプション: --analyze(省略可能)　指定時はこのステップのみ
 # ${PWD}/globalディレクトリで、one_big_json_analytics.pyを使って回帰分析を行います。
+# 各出力ファイルが存在する場合でも上書きします。
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --perf > ./global/global_performance_analysis.json
+#     --perf --output ./global/global_performance_analysis.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --cost > ./global/global_cost_analysis.json
+#     --cost --output ./global/global_cost_analysis.json
+# $> ../results/one_big_json_analytics.py \
+#     --input ./global/global_all_results.json \
+#     --th --output ./global/global_thread_scaling_analysis.json
+# $> ../results/one_big_json_analytics.py \
+#     --input ./global/global_all_results.json \
+#     --csp --output ./global/global_csp_analysis.json
 #
 # 5. Globalでの回帰分析を"testcategory"毎に実行
 # オプション: --analyze --testcategory（省略可能）指定時はこのステップのみ
 # 4.の回帰分析を、"testcategory"リスト毎に実行し,さらに`--no_arm64`,`--no_amd64`を適応します。
 # "testcategory"は --inputで指定されたJSONの"testcategory": {...}のキーに対応します。
 # この際には${PWD}/global/<testcategory>ディレクトリの存在を確認し、ない場合は作成、その中で分析を行います。
+# 各出力ファイルが存在する場合でも上書きします。
 # なお、--testcategoryオプションは--analyzeが指定されている場合にのみ有効です。
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
@@ -580,6 +588,27 @@ def main() -> int:
 
     if run_all or args.analyze:
         try:
+            # Step 4: always run global flat analysis
+            perf_output = global_dir / "global_performance_analysis.json"
+            cost_output = global_dir / "global_cost_analysis.json"
+            th_output = global_dir / "global_thread_scaling_analysis.json"
+            csp_output = global_dir / "global_csp_analysis.json"
+
+            for out in (perf_output, cost_output, th_output, csp_output):
+                if out.exists():
+                    print(f"Overwriting existing analysis -> {out}")
+
+            run_analytics(analytics_script, global_results, perf_output, ["--perf"], global_dir)
+            run_analytics(analytics_script, global_results, cost_output, ["--cost"], global_dir)
+            run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
+            run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
+
+            print(f"Generated analysis -> {perf_output}")
+            print(f"Generated analysis -> {cost_output}")
+            print(f"Generated analysis -> {th_output}")
+            print(f"Generated analysis -> {csp_output}")
+
+            # Step 5: per-testcategory analysis (only when --testcategory is specified)
             if requested_testcategories or all_testcategories_requested:
                 available_categories = extract_available_testcategories(global_results)
                 valid_categories = []
@@ -609,6 +638,10 @@ def main() -> int:
                     cost_x86_output = category_dir / "global_cost_analysis_x86_64.json"
                     cost_arm64_output = category_dir / "global_cost_analysis_arm64.json"
 
+                    for out in (perf_x86_output, perf_arm64_output, cost_x86_output, cost_arm64_output):
+                        if out.exists():
+                            print(f"Overwriting existing analysis -> {out}")
+
                     run_analytics(analytics_script, global_results, perf_x86_output, ["--testcategory", category, "--perf", "--no_arm64"], category_dir)
                     run_analytics(analytics_script, global_results, perf_arm64_output, ["--testcategory", category, "--perf", "--no_amd64"], category_dir)
                     run_analytics(analytics_script, global_results, cost_x86_output, ["--testcategory", category, "--cost", "--no_arm64"], category_dir)
@@ -618,34 +651,6 @@ def main() -> int:
                     print(f"Generated analysis -> {perf_arm64_output}")
                     print(f"Generated analysis -> {cost_x86_output}")
                     print(f"Generated analysis -> {cost_arm64_output}")
-            else:
-                perf_output = global_dir / "global_performance_analysis.json"
-                cost_output = global_dir / "global_cost_analysis.json"
-                th_output = global_dir / "global_thread_scaling_analysis.json"
-                csp_output = global_dir / "global_csp_comparison_analysis.json"
-                perf_arm64_output = global_dir / "global_performance_analysis_arm64.json"
-                cost_arm64_output = global_dir / "global_cost_analysis_arm64.json"
-                th_arm64_output = global_dir / "global_thread_scaling_analysis_arm64.json"
-                csp_arm64_output = global_dir / "global_csp_comparison_analysis_arm64.json"
-
-                run_analytics(analytics_script, global_results, perf_output, ["--perf"], global_dir)
-                run_analytics(analytics_script, global_results, cost_output, ["--cost"], global_dir)
-                run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
-                run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
-
-                run_analytics(analytics_script, global_results, perf_arm64_output, ["--perf", "--no_amd64"], global_dir)
-                run_analytics(analytics_script, global_results, cost_arm64_output, ["--cost", "--no_amd64"], global_dir)
-                run_analytics(analytics_script, global_results, th_arm64_output, ["--th", "--no_amd64"], global_dir)
-                run_analytics(analytics_script, global_results, csp_arm64_output, ["--csp", "--no_amd64"], global_dir)
-
-                print(f"Generated analysis -> {perf_output}")
-                print(f"Generated analysis -> {cost_output}")
-                print(f"Generated analysis -> {th_output}")
-                print(f"Generated analysis -> {csp_output}")
-                print(f"Generated analysis -> {perf_arm64_output}")
-                print(f"Generated analysis -> {cost_arm64_output}")
-                print(f"Generated analysis -> {th_arm64_output}")
-                print(f"Generated analysis -> {csp_arm64_output}")
         except Exception as exc:
             print(f"Failed to run analytics: {exc}", file=sys.stderr)
             return 1
