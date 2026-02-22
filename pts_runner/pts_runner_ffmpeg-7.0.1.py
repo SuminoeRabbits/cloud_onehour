@@ -204,7 +204,15 @@ class FFmpegRunner:
         # Determine thread execution mode
         if threads_arg is None:
             # Even-number scaling: [2, 4, 6, ..., nproc]
-            self.thread_list = list(range(2, self.vcpu_count + 1, 2))
+            # 4-point scaling: [nproc/4, nproc/2, nproc*3/4, nproc]
+
+            n_4 = self.vcpu_count // 4
+
+            self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
+
+            # Remove any zeros and deduplicate
+
+            self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
         else:
             # Fixed mode: single thread count
             n = min(threads_arg, self.vcpu_count)

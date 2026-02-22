@@ -129,6 +129,7 @@ class ComplianceChecker:
         self.check_results_dir_structure()
         self.check_results_dir_cleanup_safety()
         self.check_thread_capping()
+        self.check_thread_scaling_4point()
 
         # Cloud/ARM64 compatibility checks (new 2026-01)
         self.check_perf_init_order()
@@ -148,6 +149,28 @@ class ComplianceChecker:
         # Return (passed, num_errors, num_warnings)
 
         return (len(self.errors) == 0, len(self.errors), len(self.warnings))
+
+    def check_thread_scaling_4point(self):
+        """Check if 4-point thread scaling is implemented"""
+        # Exclude scripts that are intentionally single-threaded or have custom hardcoded list
+        if "self.thread_list = [1]" in self.content or "self.thread_list = self.get_scaling_thread_list()" in self.content:
+            return
+
+        # Check for the 4-point scaling vars
+        has_n_4 = "n_4 = self.vcpu_count // 4" in self.content or "n_4 = max(1, self.vcpu_count // 4)" in self.content
+        has_list = "self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]" in self.content or "self.thread_list = [n_4, n_4*2, n_4*3, self.vcpu_count]" in self.content
+        has_dedup = "self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))" in self.content or "self.thread_list = sorted(list(set(t for t in self.thread_list if t > 0)))" in self.content
+
+        if has_n_4 and has_list and has_dedup:
+            self.passed.append("✅ 4-point thread scaling implemented")
+        else:
+            self.errors.append(
+                "❌ CRITICAL: 4-point thread scaling pattern not found.\n"
+                "   Fix: Replace self.thread_list = list(range(2, self.vcpu_count + 1, 2)) with:\n"
+                "       n_4 = self.vcpu_count // 4\n"
+                "       self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]\n"
+                "       self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))"
+            )
 
 
 
@@ -991,15 +1014,18 @@ class ComplianceChecker:
         # For multi-threaded benchmarks, check for proper patterns
 
         # Check 1: Scaling mode pattern (threads_arg is None)
-        # Expected: self.thread_list = list(range(2, self.vcpu_count + 1, 2))
+        # Expected: n_4 = self.vcpu_count // 4; self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
         has_correct_scaling = re.search(
-            r'self\.thread_list\s*=\s*list\(\s*range\(\s*2\s*,\s*self\.vcpu_count\s*\+\s*1\s*,\s*2\s*\)\s*\)',
+            r'n_4\s*=\s*self.vcpu_count\s*//\s*4',
+            self.content
+        ) and re.search(
+            r'self.thread_list\s*=\s*\[n_4,\s*n_4\s*\*\s*2,\s*n_4\s*\*\s*3,\s*self\.vcpu_count\]',
             self.content
         )
 
-        # Anti-pattern: Using custom scaling methods like get_scaling_thread_list()
+        # Anti-pattern: Using custom scaling methods like get_scaling_thread_list() or old scaling
         has_custom_scaling = re.search(
-            r'self\.thread_list\s*=\s*self\.get_scaling_thread_list\(\)',
+            r'self\.thread_list\s*=\s*list\(\s*range\(|self\.thread_list\s*=\s*self\.get_scaling_thread_list\(\)',
             self.content
         )
 
@@ -1023,15 +1049,18 @@ class ComplianceChecker:
         if not has_correct_scaling and not has_custom_scaling:
             issues.append(
                 "Scaling mode pattern not found\n"
-                "   Expected: self.thread_list = list(range(2, self.vcpu_count + 1, 2))"
+                "   Expected: \n"
+                "       n_4 = self.vcpu_count // 4\n"
+                "       self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]\n"
+                "       self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))"
             )
         elif has_custom_scaling:
             self.errors.append(
-                "❌ CRITICAL: Custom scaling method detected\n"
-                "   Found: self.thread_list = self.get_scaling_thread_list()\n"
-                "   Expected: self.thread_list = list(range(2, self.vcpu_count + 1, 2))\n"
-                "   Reference: CODE_TEMPLATE.md lines 247-250\n"
-                "   Issue: Should use standard even-number scaling pattern [2, 4, 6, ..., nproc]"
+                "❌ CRITICAL: Custom or old scaling method detected\n"
+                "   Found: self.thread_list = list(range(...) or self.get_scaling_thread_list()\n"
+                "   Expected: 4-point thread scaling logic\n"
+                "   Reference: CODE_TEMPLATE.md\n"
+                "   Issue: Should use standard 4-point scaling pattern [nproc/4, nproc/2, nproc*3/4, nproc]"
             )
 
         if has_min_capping and has_correct_scaling:

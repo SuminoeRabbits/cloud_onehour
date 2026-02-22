@@ -212,7 +212,7 @@ class RedisRunner:
             print(f"[WARN] Redis benchmark is single-thread only. Ignoring requested threads={n} and using 1.")
             n = 1
 
-        self.thread_list = [n]
+        self.thread_list = [1]
 
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
