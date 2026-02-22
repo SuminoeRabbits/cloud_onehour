@@ -17,6 +17,7 @@
       "cd ~/cloud_onehour/scripts_rhel9 && ./prepare_tools.sh > /tmp/prepare_tools.log 2>&1"
     ],
     "workloads": [
+      "rm -rf ~/.phoronix-test-suite/installed-tests/pts/* > /tmp/pts_cache_clean.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_coremark-1.0.1.py 16 > /tmp/pts_runner_coremark.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_simdjson-2.1.0.py 1 > /tmp/pts_runner_simdjson.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_sysbench-1.1.0.py > /tmp/pts_runner_sysbench.log 2>&1",
@@ -30,9 +31,11 @@
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-linux-kernel-1.17.1.py 8 --quick > /tmp/pts_runner_build-linux-kernel.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-linux-kernel-1.17.1.py 12 --quick >> /tmp/pts_runner_build-linux-kernel.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-linux-kernel-1.17.1.py 16 --quick >> /tmp/pts_runner_build-linux-kernel.log 2>&1",
+      "rm -rf ~/.phoronix-test-suite/installed-tests/pts/build-linux-kernel* > /dev/null 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-llvm-1.6.0.py 8 --quick > /tmp/pts_runner_build-llvm.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-llvm-1.6.0.py 12 --quick >> /tmp/pts_runner_build-llvm.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-llvm-1.6.0.py 16 --quick >> /tmp/pts_runner_build-llvm.log 2>&1",
+      "rm -rf ~/.phoronix-test-suite/installed-tests/pts/build-llvm* > /dev/null 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-gcc-1.5.0.py 8 --quick > /tmp/pts_runner_build-gcc.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-gcc-1.5.0.py 12 --quick >> /tmp/pts_runner_build-gcc.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_build-gcc-1.5.0.py 16 --quick >> /tmp/pts_runner_build-gcc.log 2>&1",
