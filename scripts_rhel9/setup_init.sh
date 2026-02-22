@@ -325,7 +325,7 @@ PACKAGE_SPECS=(
     "libcurl-devel:libcurl-devel"
     "jansson-devel:jansson-devel"
     "sysstat:sysstat"
-    "aria2:aria2"
+    "bzip2:bzip2"
     "flex:flex"
     "bison:bison"
     "openssl-devel:openssl-devel"
@@ -359,6 +359,55 @@ for spec in "${OPTIONAL_PACKAGE_SPECS[@]}"; do
     candidates_csv="${spec#*:}"
     install_required_from_candidates "$logical_name" "$candidates_csv" optional
 done
+
+echo "Installing aria2 (with static binary fallback)..."
+if ! command -v aria2c >/dev/null 2>&1; then
+    # 1. Attempt install via dnf first (from EPEL)
+    if sudo dnf -y install aria2 2>/dev/null; then
+        echo "[OK] aria2 installed via dnf"
+    else
+        echo "[WARN] dnf failed to install aria2. Attempting static binary fallback..."
+        
+        # 2. Architecture detection for static binary
+        ARCH_ARIA=$(uname -m)
+        ARIA2_VERSION="1.36.0"
+        ARIA2_URL=""
+        ARIA2_DIR=""
+        
+        if [ "$ARCH_ARIA" = "x86_64" ]; then
+            ARIA2_URL="https://github.com/q3aql/aria2-static-builds/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-linux-gnu-64bit-build1.tar.bz2"
+            ARIA2_DIR="aria2-${ARIA2_VERSION}-linux-gnu-64bit-build1"
+        elif [ "$ARCH_ARIA" = "aarch64" ]; then
+            ARIA2_URL="https://github.com/q3aql/aria2-static-builds/releases/download/v${ARIA2_VERSION}/aria2-${ARIA2_VERSION}-linux-gnu-arm-build1.tar.bz2"
+            ARIA2_DIR="aria2-${ARIA2_VERSION}-linux-gnu-arm-build1"
+        else
+            echo "[ERROR] Unsupported architecture for aria2 static binary fallback: $ARCH_ARIA"
+        fi
+        
+        # 3. Download, extract, and place binary
+        if [ -n "$ARIA2_URL" ]; then
+            echo "[INFO] Downloading static aria2c from $ARIA2_URL"
+            if wget -qO /tmp/aria2.tar.bz2 "$ARIA2_URL"; then
+                tar -xf /tmp/aria2.tar.bz2 -C /tmp
+                sudo cp "/tmp/${ARIA2_DIR}/aria2c" /usr/local/bin/aria2c
+                sudo chmod +x /usr/local/bin/aria2c
+                rm -rf /tmp/aria2.tar.bz2 "/tmp/${ARIA2_DIR}"
+                echo "[OK] aria2c static binary installed to /usr/local/bin/aria2c"
+            else
+                echo "[WARN] Failed to download aria2c static binary."
+            fi
+        fi
+    fi
+else
+    echo "[OK] aria2c is already available"
+fi
+
+if ! command -v aria2c >/dev/null 2>&1; then
+    echo "[WARN] aria2c is still unavailable. Pre-seed downloads will fall back to single-thread."
+else
+    echo "[OK] aria2c version: $(aria2c --version | head -n 1)"
+fi
+
 
 # FFmpeg (PTS) requires libx264/libx265 via pkg-config when
 # FFMPEG_CONFIGURE_EXTRA_OPTS enables those encoders.
