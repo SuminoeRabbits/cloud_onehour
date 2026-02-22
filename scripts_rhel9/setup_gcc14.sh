@@ -135,6 +135,17 @@ source /opt/rh/gcc-toolset-14/enable
 EOPROFILE
                 echo "[OK] Created $PROFILE_SCRIPT for toolset library paths"
             fi
+            
+            LDSO_CONF="/etc/ld.so.conf.d/gcc-toolset-14.conf"
+            if [ ! -f "$LDSO_CONF" ]; then
+                sudo tee "$LDSO_CONF" >/dev/null <<EOLDC
+/opt/rh/gcc-toolset-14/root/usr/lib64
+/opt/rh/gcc-toolset-14/root/usr/lib
+EOLDC
+                sudo ldconfig 2>/dev/null || true
+                echo "[OK] Configured ldconfig for toolset library paths"
+            fi
+
             # Also source it in the current session
             if [ -f "$ENABLE_SCRIPT" ]; then
                 source "$ENABLE_SCRIPT"

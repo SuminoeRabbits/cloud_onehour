@@ -142,6 +142,12 @@ if [[ "$gcc14_installed" = false ]]; then
     fi
 fi
 
+if [[ -f /usr/local/bin/gcc-14 ]] && [[ ! -f /usr/bin/gcc-14 ]]; then
+    sudo ln -sf /usr/local/bin/gcc-14 /usr/bin/gcc-14
+    sudo ln -sf /usr/local/bin/g++-14 /usr/bin/g++-14
+    echo "[OK] Created compatibility symlinks in /usr/bin for local GCC-14"
+fi
+
 # Always set/verify alternatives (even if GCC-14 was already installed)
 echo ">>> Configuring GCC-14 as default compiler..."
 
