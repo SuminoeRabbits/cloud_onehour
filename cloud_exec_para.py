@@ -3687,6 +3687,28 @@ def process_instance(
             except Exception as e:
                 logger.warn(f"Failed to set hostname: {e}")
 
+        # OCI: expand LVM root filesystem to use full boot volume
+        # OCI Oracle Linux images allocate only ~25GB to the root LV regardless of
+        # boot volume size (--boot-volume-size-in-gbs 150). AWS/GCP auto-expand via
+        # cloud-init; OCI does not. Expand here before workloads consume disk space.
+        if inst.get('_csp') == 'oci' and inst.get('extra_150g_storage', False):
+            logger.info("OCI: expanding LVM root filesystem to use full boot volume...")
+            ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
+            ssh_user = get_ssh_user(parse_os_version(config['common']['os_version']), inst['_csp'])
+            lvm_cmd = (
+                f"ssh {'-o StrictHostKeyChecking=no' if not ssh_strict else ''} "
+                f"-i {key_path} {ssh_user}@{ip} "
+                f"'sudo lvextend -r -l +100%FREE /dev/mapper/ocivolume-root'"
+            )
+            try:
+                result = run_cmd(lvm_cmd, timeout=60, ignore=True, logger=logger)
+                if result is not None:
+                    logger.info(f"LVM expansion result: {result.strip()[:200]}")
+                else:
+                    logger.info("LVM expansion completed (no output / already at full size)")
+            except Exception as e:
+                logger.warn(f"LVM expansion failed (non-fatal, continuing): {e}")
+
         # Run workloads
         try:
             ensure_log_dir_available(log_dir, logger, "before workload execution")
