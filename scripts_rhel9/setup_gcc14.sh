@@ -47,6 +47,11 @@ if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
             echo "[ERROR] gcc-14/g++-14 compatibility links are not available in PATH"
             exit 1
         fi
+        # dwarves (pahole): required by Linux kernel allmodconfig for CONFIG_DEBUG_INFO_BTF.
+        # ninja-build: required by pts/build-llvm (Ninja generator); CMake silently fails without it.
+        # Both are in AppStream on EL10+; no EPEL needed. Applies to RHEL10 and Oracle Linux 10.
+        wait_for_dnf_lock
+        sudo dnf -y install dwarves ninja-build
         gcc --version
         exit 0
     fi
