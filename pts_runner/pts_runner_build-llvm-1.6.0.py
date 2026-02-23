@@ -574,6 +574,63 @@ class BuildLLVMRunner:
         """Convert env dict to space-separated string for shell command."""
         return ' '.join([f'{k}={v}' for k, v in env_dict.items()]) + ' ' if env_dict else ''
 
+    def _restore_source_tarballs(self):
+        """
+        Restore source tarballs removed by post.sh to allow multi-variant runs.
+
+        Root cause: post.sh deletes cmake-21.1.0.src.tar.xz after each run to
+        reclaim disk space, but pre.sh re-extracts it at the start of every run
+        (both Ninja and Unix Makefiles variants).  When the Ninja variant
+        completes, post.sh deletes the cmake tarball, so the subsequent Unix
+        Makefiles variant's pre.sh fails at tar extraction → cmake configure
+        fails → no Makefile → 'gmake: Makefile: No such file or directory'.
+
+        Fix: before each run, copy any missing tarballs back from
+        ~/.phoronix-test-suite/download-cache/ (preserved by
+        cleanup_pts_artifacts).  The list of expected files is taken from
+        downloads.xml so this is version-agnostic.
+        """
+        install_dir = (
+            Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark
+        )
+        cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+
+        if not install_dir.exists() or not cache_dir.exists():
+            return
+
+        xml_path = (
+            Path.home() / ".phoronix-test-suite" / "test-profiles"
+            / "pts" / self.benchmark / "downloads.xml"
+        )
+        if not xml_path.exists():
+            return
+
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            downloads_node = root.find("Downloads")
+            if downloads_node is None:
+                return
+
+            restored = []
+            for package in downloads_node.findall("Package"):
+                filename_node = package.find("FileName")
+                if filename_node is None:
+                    continue
+                filename = filename_node.text.strip()
+                target = install_dir / filename
+                if not target.exists():
+                    cached = cache_dir / filename
+                    if cached.exists():
+                        shutil.copy2(str(cached), str(target))
+                        restored.append(filename)
+
+            if restored:
+                print(f"  [FIX] Restored from download-cache (removed by post.sh): {restored}")
+        except Exception as e:
+            print(f"  [WARN] Could not restore source tarballs: {e}")
+
     def get_llvm_cmake_opts(self):
         """
         Build LLVM cmake extra options for build-time optimization.
@@ -835,51 +892,51 @@ class BuildLLVMRunner:
         # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
         # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        
-        # [Fix] Explicitly set builder environment variables to prevent CMake errors
-        # Error observed: "Generator: execution of make failed. Make command was: -j 1"
-        builder_env_dict = self.get_builder_env()
-        builder_env_str = self._env_dict_to_str(builder_env_dict)
-            
+
+        # NOTE: builder_env (MAKE=ninja, CMAKE_MAKE_PROGRAM=ninja, CMAKE_GENERATOR=Ninja)
+        # is intentionally NOT passed to batch-run.
+        #
+        # Reason: pre.sh already uses explicit -G flags per variant:
+        #   Ninja variant:         cmake ... -G Ninja
+        #   Unix Makefiles variant: cmake ... -G "Unix Makefiles"
+        # Passing CMAKE_MAKE_PROGRAM=ninja causes cmake to write make_program=ninja
+        # into CMakeCache.txt even for the Unix Makefiles variant.  When cmake --build
+        # then calls the cached make program (ninja), it looks for build.ninja which
+        # doesn't exist (cmake generated Makefiles, not Ninja files) → build fails.
+        # Without CMAKE_MAKE_PROGRAM in the env, cmake picks the correct tool for each
+        # generator (ninja for Ninja, make for Unix Makefiles).
+        #
+        # NOTE: PTS_TEST_ARGUMENTS=Ninja is also intentionally removed.
+        # In PTS v10.8.x batch-run, this variable does NOT filter which variants are
+        # run — PTS still executes all configured options (confirmed by logs showing
+        # "Test 1 of 2" / "Test 2 of 2" even with PTS_TEST_ARGUMENTS=Ninja set).
+
+        # Restore any source tarballs removed by post.sh from the previous variant's run.
+        # post.sh deletes cmake-21.1.0.src.tar.xz after each run; pre.sh needs it to
+        # re-extract cmake utilities before calling cmake configure.  See
+        # _restore_source_tarballs() for details.
+        self._restore_source_tarballs()
+
         # Remove existing PTS result to avoid interactive prompts
-            
         # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
-            
         sanitized_benchmark = self.benchmark.replace('.', '')
-            
         remove_cmds = [
-            
             f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
-            
             f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
-            
         ]
-            
         for cmd in remove_cmds:
-            
             subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            
-        batch_env = f'{quick_env}{builder_env_str}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
 
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
-            # [Fix] Force Ninja for all runs to avoid CMake generator conflict.
-            # batch-run without PTS_TEST_ARGUMENTS runs ALL options (Ninja + Unix
-            # Makefiles) sequentially in the same build directory. The Ninja run
-            # leaves CMakeCache.txt with CMAKE_GENERATOR=Ninja, which blocks the
-            # subsequent Unix Makefiles configuration → gmake: Makefile: No such
-            # file or directory. Forcing Ninja avoids the conflict.
-            batch_env += ' PTS_TEST_ARGUMENTS=Ninja '
             pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
         else:
             # Partial vCPU mode - use taskset with affinity
             cpu_list = self.get_cpu_affinity_list(num_threads)
-            # Force Ninja using PTS environment variables
-            # PTS_TEST_ARGUMENTS often works for single-option tests
-            batch_env += ' PTS_TEST_ARGUMENTS=Ninja '
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 
