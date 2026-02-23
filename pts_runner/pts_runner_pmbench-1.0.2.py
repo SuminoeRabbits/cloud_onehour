@@ -1590,8 +1590,8 @@ eval "$REAL_CC" $ARGS
             f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\\n")
             f.write("-"*80 + "\\n")
             for result in all_results:
-                val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"
-                f.write(f"{result['threads']:<10} {val_str:<15} {result['unit']:<20}\\n")
+                val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
+                f.write(f"{result['threads']:<10} {val_str} {result['unit']:<20}\\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 

@@ -1047,6 +1047,24 @@ def generate_summary(self):
     print(f"[OK] Summary JSON saved: {summary_json_file}")
 ```
 
+> **CRITICAL: Summary Table の None ガード（必須）**
+>
+> `generate_summary()` に Summary Table セクションを追加する場合、
+> `result['value']` が `None`（テスト失敗時）でも `:.2f` format を適用しないこと。
+> これを忘れると `TypeError: unsupported format string passed to NoneType.__format__`
+> が発生し、Python が exit code 1 でクラッシュして `[ERR]` 判定になる。
+>
+> ```python
+> # NG: None に :.2f を直接適用する（クラッシュする）
+> f.write(f"{result['threads']:<10} {result['value']:<15.2f} {result['unit']:<20}\n")
+>
+> # OK: val_str に一旦変換してから書き込む（build-llvm / CODE_TEMPLATE 標準パターン）
+> val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
+> f.write(f"{result['threads']:<10} {val_str} {result['unit']:<20}\n")
+> ```
+>
+> 既知の影響: `pts_runner_build-linux-kernel-1.17.1.py` line 978 (2026-02-23 修正済み)
+
 ### コンパイラ互換性パッチ
 
 **問題**: GCC-14でOpenSSLのインラインアセンブリがコンパイルエラー

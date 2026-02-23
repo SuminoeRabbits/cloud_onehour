@@ -872,7 +872,7 @@ class BuildLLVMRunner:
             cpu_list = self.get_cpu_affinity_list(num_threads)
             # Force Ninja using PTS environment variables
             # PTS_TEST_ARGUMENTS often works for single-option tests
-            batch_env += 'PTS_TEST_ARGUMENTS=Ninja '
+            batch_env += ' PTS_TEST_ARGUMENTS=Ninja '
             pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"CPU affinity (taskset): {cpu_list}"
 

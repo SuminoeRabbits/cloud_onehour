@@ -97,6 +97,7 @@ class ComplianceChecker:
         self.check_export_results_uses_benchmark()
 
         self.check_generate_summary_method()
+        self.check_summary_table_none_guard()
 
         self.check_run_method_return()
         self.check_common_failure_detection()
@@ -345,6 +346,50 @@ class ComplianceChecker:
 
             self.errors.append("❌ CRITICAL: generate_summary() method not found")
 
+    def check_summary_table_none_guard(self):
+        """Check that Summary Table in generate_summary() guards against None values.
+
+        A bare f-string like f"{result['value']:<15.2f}" raises TypeError at runtime
+        when result['value'] is None (test failure). The correct pattern is:
+            val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
+        See CODE_TEMPLATE.md CRITICAL note. Fixed in build-linux-kernel-1.17.1 on 2026-02-23.
+        """
+        # Only check scripts that have generate_summary()
+        m = re.search(r'def\s+generate_summary\s*\(.*?\n(.*?)(?=\n    def |\Z)', self.content, re.DOTALL)
+        if not m:
+            return  # generate_summary not present; check_generate_summary_method handles that
+
+        summary_body = m.group(1)
+
+        # Pattern: f-string with :<N>.2f applied directly to result['value'] (or result["value"])
+        # WITHOUT a None guard on the same line.
+        # Safe pattern (must NOT be flagged):
+        #   val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
+        # Unsafe patterns (must be flagged):
+        #   f.write(f"...{result['value']:<15.2f}...")   <- direct in write, no guard
+        #   val_str = f"{result['value']:.2f}" if result['value'] is not None else "None"  <- narrow fallback
+        #     followed by f.write(f"...{val_str:<15}...")   <- width in write, not in format
+        pat = re.compile(r'''f["'].*?\{result\s*\[['"]value['"]\]\s*:.*?\.2f\}''')
+        unsafe_found = False
+        for m_unsafe in pat.finditer(summary_body):
+            # Get the full source line containing this match
+            line_start = summary_body.rfind('\n', 0, m_unsafe.start()) + 1
+            line_end = summary_body.find('\n', m_unsafe.end())
+            full_line = summary_body[line_start:] if line_end == -1 else summary_body[line_start:line_end]
+            # Skip lines that have a proper None guard (ternary: ... if ... is not None else ...)
+            if 'is not None' in full_line:
+                continue
+            unsafe_found = True
+            break
+
+        if unsafe_found:
+            self.errors.append(
+                "❌ CRITICAL: generate_summary() applies :.2f format directly to result['value'] "
+                "without a None guard — raises TypeError when a test fails. "
+                "Use: val_str = f\"{result['value']:<15.2f}\" if result['value'] is not None else \"FAILED         \""
+            )
+        else:
+            self.passed.append("✅ generate_summary() Summary Table has None guard for result['value']")
 
 
     def check_run_method_return(self):

@@ -1036,9 +1036,9 @@ class JavaJmhRunner:
             f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
             f.write("-"*80 + "\n")
             for result in all_results:
-                val_str = f"{result['value']:.2f}" if result['value'] is not None else "N/A"
+                val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
                 unit_str = result['unit'] if result['unit'] else ""
-                f.write(f"{result['threads']:<10} {val_str:<15} {unit_str:<20}\n")
+                f.write(f"{result['threads']:<10} {val_str} {unit_str:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 
