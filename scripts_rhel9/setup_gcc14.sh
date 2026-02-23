@@ -15,6 +15,15 @@ echo "=== GCC-14 Setup (EL${EL_VER}) ==="
 # in ALL shell types: login, non-login, and 'sh -c' via SSH.
 # ---------------------------------------------------------------
 if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
+    # dwarves (pahole): required by Linux kernel allmodconfig for CONFIG_DEBUG_INFO_BTF.
+    # ninja-build: required by pts/build-llvm (Ninja generator); CMake silently fails without it.
+    # Both are in AppStream on EL10+; no EPEL needed. Applies to RHEL10 and Oracle Linux 10.
+    # Install unconditionally here so this is guaranteed regardless of which GCC path is taken
+    # (system GCC >= 14 fast path, toolset, or source build).
+    echo "[INFO] EL${EL_VER}: Installing dwarves and ninja-build (required by kernel/llvm benchmarks)..."
+    wait_for_dnf_lock
+    sudo dnf -y install dwarves ninja-build
+
     SYSTEM_GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "0")
     SYSTEM_GCC_MAJOR="${SYSTEM_GCC_VER%%.*}"
     if [ "$SYSTEM_GCC_MAJOR" -ge 14 ] 2>/dev/null; then
@@ -47,11 +56,6 @@ if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
             echo "[ERROR] gcc-14/g++-14 compatibility links are not available in PATH"
             exit 1
         fi
-        # dwarves (pahole): required by Linux kernel allmodconfig for CONFIG_DEBUG_INFO_BTF.
-        # ninja-build: required by pts/build-llvm (Ninja generator); CMake silently fails without it.
-        # Both are in AppStream on EL10+; no EPEL needed. Applies to RHEL10 and Oracle Linux 10.
-        wait_for_dnf_lock
-        sudo dnf -y install dwarves ninja-build
         gcc --version
         exit 0
     fi
