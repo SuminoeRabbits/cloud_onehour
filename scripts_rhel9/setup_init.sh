@@ -321,6 +321,7 @@ PACKAGE_SPECS=(
     "bc:bc"
     "libuuid-devel:libuuid-devel"
     "libxml2-devel:libxml2-devel"
+    "libicu-devel:libicu-devel"
     "pkgconf-pkg-config:pkgconf-pkg-config"
     "libcurl-devel:libcurl-devel"
     "jansson-devel:jansson-devel"
