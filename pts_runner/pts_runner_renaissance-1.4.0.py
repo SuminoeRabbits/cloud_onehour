@@ -241,6 +241,21 @@ class RenaissanceRunner:
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
+        # Java availability check (required for Renaissance JVM benchmark)
+        java_path = shutil.which("java")
+        if not java_path:
+            print("[ERROR] java command not found. Please install JDK before running this benchmark.")
+            print("        RHEL9/10: run scripts_rhel9/setup_jdkxx.sh 17")
+            sys.exit(1)
+
+        result = subprocess.run(['java', '-version'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[ERROR] java -version failed: {result.stderr}")
+            sys.exit(1)
+
+        java_ver_line = result.stderr.strip().split('\n')[0]
+        print(f"  [OK] Java detected: {java_ver_line}")
+
     def get_os_name(self):
         """
         Get OS name and version formatted as <Distro>_<Version>.
