@@ -30,6 +30,7 @@ import threading
 import re
 import argparse
 import shlex
+import base64
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1286,6 +1287,50 @@ def build_storage_config(inst, cloud_type):
         return "--boot-volume-size-in-gbs 150 "
     else:
         return ""
+
+
+def build_oci_lvm_userdata():
+    """
+    Build base64-encoded cloud-init user-data that expands the root LV at first boot.
+
+    Background: Oracle Linux on OCI uses LVM (VG=ocivolume, LV=root + oled).
+    When --boot-volume-size-in-gbs enlarges the boot volume, Oracle Linux's
+    cloud-init growpart/resizefs modules run during the 'config' stage and
+    automatically allocate all free VG space to the 'oled' LV (/home), leaving
+    the 'root' LV at the original ~25 GB.  XFS cannot be shrunk, so reclaiming
+    space from oled after boot is not possible.
+
+    Fix: cloud-init 'bootcmd' runs in the 'init' stage, BEFORE the 'growpart'
+    and 'resizefs' config-stage modules.  By expanding the root LV here we
+    consume all VG free space before oled can claim it.
+
+    Steps executed in bootcmd:
+      1. growpart  -- extend the partition entry (GPT) to fill the new disk size
+      2. pvresize  -- inform LVM that the PV is now larger
+      3. lvextend -r -- extend root LV to use all free extents + resize XFS
+    """
+    # Dynamically detect the PV backing the ocivolume VG so that the script
+    # works regardless of whether the disk is /dev/sda or /dev/nvme0n1.
+    bootcmd_script = (
+        "PV=$(pvs --noheadings -o pv_name 2>/dev/null | tr -d ' ' | head -1); "
+        "[ -z \"$PV\" ] && exit 0; "
+        # NVMe devices have the form /dev/nvme0n1p3; SCSI/virtio: /dev/sda3
+        "if echo \"$PV\" | grep -q nvme; then "
+        "  DISK=$(echo \"$PV\" | sed 's/p[0-9]*$//'); "
+        "else "
+        "  DISK=$(echo \"$PV\" | sed 's/[0-9]*$//'); "
+        "fi; "
+        "PARTNUM=$(echo \"$PV\" | grep -oE '[0-9]+$'); "
+        "growpart \"$DISK\" \"$PARTNUM\" 2>/dev/null || true; "
+        "pvresize \"$PV\" 2>/dev/null || true; "
+        "lvextend -r -l +100%FREE /dev/mapper/ocivolume-root 2>/dev/null || true"
+    )
+    userdata = (
+        "#cloud-config\n"
+        "bootcmd:\n"
+        f"  - bash -c '{bootcmd_script}'\n"
+    )
+    return base64.b64encode(userdata.encode()).decode()
 
 
 def get_gcp_project(logger=None):
@@ -3280,6 +3325,17 @@ class OCIProvider(CloudProvider):
         # 6. Launch Instance
         storage_config = build_storage_config(inst, 'oci')
 
+        # When extra storage is requested, embed a cloud-init user-data that
+        # expands the root LV at first boot (bootcmd stage, before Oracle
+        # Linux cloud-init growpart/resizefs modules allocate free VG space
+        # to the oled LV instead of root).  See build_oci_lvm_userdata().
+        userdata_arg = ""
+        if inst.get('extra_150g_storage', False):
+            userdata_b64 = build_oci_lvm_userdata()
+            userdata_arg = f"--user-data {userdata_b64} "
+            if logger:
+                logger.info("OCI: injecting cloud-init bootcmd to expand root LV at first boot")
+
         if logger:
             logger.info("Launching OCI instance...")
 
@@ -3292,6 +3348,7 @@ class OCIProvider(CloudProvider):
             f"--subnet-id {subnet_id} "
             f"--image-id {image_id} "
             f"{storage_config}"
+            f"{userdata_arg}"
             f"--display-name \"{name}\" "
             f"--ssh-authorized-keys-file \"{pub_key_path}\" "
             f"--assign-public-ip true "
@@ -3524,19 +3581,30 @@ def process_instance(
             except Exception as e:
                 logger.warn(f"Failed to set hostname: {e}")
 
-        # OCI: expand LVM root filesystem to use full boot volume
-        # OCI Oracle Linux images allocate only ~25GB to the root LV regardless of
-        # boot volume size (--boot-volume-size-in-gbs 150). AWS/GCP auto-expand via
-        # cloud-init; OCI does not. Expand here before workloads consume disk space.
+        # OCI: verify root LV expansion (primary fix is via cloud-init bootcmd
+        # injected at launch time; this SSH-side check runs after boot as a
+        # fallback and also logs the final disk layout for diagnostics).
+        # Primary path: cloud-init bootcmd (build_oci_lvm_userdata) runs before
+        # Oracle Linux growpart/resizefs and expands root at first boot.
+        # Fallback: if for any reason bootcmd did not run (e.g. older image,
+        # cloud-init disabled), attempt pvresize + lvextend here.
         if inst.get('_csp') == 'oci' and inst.get('extra_150g_storage', False):
-            logger.info("OCI: expanding LVM root filesystem to use full boot volume...")
+            logger.info("OCI: checking/expanding LVM root filesystem...")
             ssh_strict = config['common'].get('ssh_strict_host_key_checking', False)
             ssh_user = get_ssh_user(parse_os_version(config['common']['os_version']), inst['_csp'])
-            lvm_cmd = (
+            ssh_prefix = (
                 f"ssh {'-o StrictHostKeyChecking=no' if not ssh_strict else ''} "
                 f"-i {key_path} {ssh_user}@{ip} "
-                f"'sudo lvextend -r -l +100%FREE /dev/mapper/ocivolume-root'"
             )
+            # Fallback LVM expansion: pvresize (re-scans PV to pick up new disk
+            # space) then lvextend.  Both are idempotent and safe to run even
+            # when the bootcmd already succeeded.
+            lvm_fallback = (
+                "PV=$(sudo pvs --noheadings -o pv_name 2>/dev/null | tr -d ' ' | head -1); "
+                "[ -n \"$PV\" ] && sudo pvresize \"$PV\" 2>/dev/null || true; "
+                "sudo lvextend -r -l +100%FREE /dev/mapper/ocivolume-root 2>/dev/null || true"
+            )
+            lvm_cmd = ssh_prefix + f"'{lvm_fallback}'"
             try:
                 result = run_cmd(lvm_cmd, timeout=60, ignore=True, logger=logger)
                 if result is not None:
@@ -3545,6 +3613,14 @@ def process_instance(
                     logger.info("LVM expansion completed (no output / already at full size)")
             except Exception as e:
                 logger.warn(f"LVM expansion failed (non-fatal, continuing): {e}")
+            # Log final root LV size for diagnostics
+            try:
+                df_cmd = ssh_prefix + "'df -h /'"
+                df_result = run_cmd(df_cmd, timeout=15, ignore=True, logger=logger)
+                if df_result:
+                    logger.info(f"OCI root disk after expansion:\n{df_result.strip()}")
+            except Exception:
+                pass
 
         # Run workloads
         try:

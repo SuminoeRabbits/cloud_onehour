@@ -865,6 +865,13 @@ class BuildLLVMRunner:
         if num_threads >= self.vcpu_count:
             # All vCPUs mode - no taskset needed
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
+            # [Fix] Force Ninja for all runs to avoid CMake generator conflict.
+            # batch-run without PTS_TEST_ARGUMENTS runs ALL options (Ninja + Unix
+            # Makefiles) sequentially in the same build directory. The Ninja run
+            # leaves CMakeCache.txt with CMAKE_GENERATOR=Ninja, which blocks the
+            # subsequent Unix Makefiles configuration → gmake: Makefile: No such
+            # file or directory. Forcing Ninja avoids the conflict.
+            batch_env += ' PTS_TEST_ARGUMENTS=Ninja '
             pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
             cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
         else:
