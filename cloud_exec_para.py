@@ -30,7 +30,7 @@ import threading
 import re
 import argparse
 import shlex
-import base64
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1253,7 +1253,9 @@ def run_cmd(cmd, capture=True, ignore=False, timeout=None, logger=None):
             raise
         return None
     except subprocess.CalledProcessError as e:
-        err_msg = e.stderr if e.stderr else 'No error message'
+        err_msg = (e.stderr.strip() if e.stderr and e.stderr.strip() else
+                   e.stdout.strip() if e.stdout and e.stdout.strip() else
+                   'No error message')
         msg = f"Command failed: {err_msg}"
         if logger:
             if ignore:
@@ -1330,7 +1332,7 @@ def build_oci_lvm_userdata():
         "bootcmd:\n"
         f"  - bash -c '{bootcmd_script}'\n"
     )
-    return base64.b64encode(userdata.encode()).decode()
+    return userdata  # raw YAML; OCI CLI --user-data-file will base64-encode on upload
 
 
 def get_gcp_project(logger=None):
@@ -3155,7 +3157,11 @@ class OCIProvider(CloudProvider):
             'InternalServerError',
             'ServiceUnavailable',
             '500',
-            '503'
+            '503',
+            # Capacity/availability errors (common for VM.Standard.A1.Flex)
+            'InsufficientServiceCapacity',
+            'Out of capacity',
+            'CapacityUnavailable',
         ])
 
     def get_recommended_max_workers(self) -> int:
@@ -3226,7 +3232,7 @@ class OCIProvider(CloudProvider):
         if logger:
             logger.info(f"Using Subnet ID: {subnet_id}")
 
-        # 2. Find Availability Domain (pick first one)
+        # 2. Find Availability Domain (AD-1 fixed; no AD rotation for cost safety)
         ad = self._get_availability_domain_for_instance(inst)
         if not ad:
             ad = run_cmd(
@@ -3322,7 +3328,6 @@ class OCIProvider(CloudProvider):
             memory_gb = inst.get('memory_gb', ocpus * 8)  # Default: 8GB per OCPU
             shape_config = f"--shape-config '{{\"ocpus\":{ocpus},\"memoryInGBs\":{memory_gb}}}' "
 
-        # 6. Launch Instance
         storage_config = build_storage_config(inst, 'oci')
 
         # When extra storage is requested, embed a cloud-init user-data that
@@ -3330,12 +3335,18 @@ class OCIProvider(CloudProvider):
         # Linux cloud-init growpart/resizefs modules allocate free VG space
         # to the oled LV instead of root).  See build_oci_lvm_userdata().
         userdata_arg = ""
+        _userdata_tmp = None
         if inst.get('extra_150g_storage', False):
-            userdata_b64 = build_oci_lvm_userdata()
-            userdata_arg = f"--user-data {userdata_b64} "
+            _fd, _userdata_tmp = tempfile.mkstemp(suffix=".yaml", prefix="oci_ud_")
+            try:
+                os.write(_fd, build_oci_lvm_userdata().encode())
+            finally:
+                os.close(_fd)
+            userdata_arg = f"--user-data-file {_userdata_tmp} "
             if logger:
                 logger.info("OCI: injecting cloud-init bootcmd to expand root LV at first boot")
 
+        # 6. Launch Instance
         if logger:
             logger.info("Launching OCI instance...")
 
@@ -3357,7 +3368,14 @@ class OCIProvider(CloudProvider):
         )
 
         # Run Launch (OCI CLI wait-for-state blocks until running)
-        instance_id = run_cmd(launch_cmd, logger=logger, timeout=600)
+        try:
+            instance_id = run_cmd(launch_cmd, logger=logger, timeout=600)
+        finally:
+            if _userdata_tmp:
+                try:
+                    os.unlink(_userdata_tmp)
+                except OSError:
+                    pass
 
         if not instance_id or "opc-request-id" in instance_id:
             if logger:
