@@ -108,6 +108,9 @@
 #     --cost --no_amd64\
 #     --output ./global/<testcategory>/<testcategory>_cost_analysis_arm64.json
 #
+# オプション省略フォーム
+# オプション: --L<n>（省略可能）<n>は２－５の数字。
+# --L<n>が指定された場合は、ステップ2,3..nをまとめて実行します。例えば、--L3ならステップ2,3をまとめて実行します。
 #
 from __future__ import annotations
 
@@ -208,6 +211,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Continue even if a CSP step fails.",
     )
+    for _n in range(2, 6):
+        parser.add_argument(
+            f"--L{_n}",
+            action="store_true",
+            help=(
+                f"Shorthand: run steps 2..{_n} together "
+                f"(e.g. --L3 runs steps 2 and 3; --L5 also targets all testcategories)."
+            ),
+        )
     parser.add_argument(
         "--h",
         action="help",
@@ -454,6 +466,43 @@ def run_analytics(
     run_script(cmd, cwd)
 
 
+def flatten_testcategory_in_json(json_path: Path, category: str) -> None:
+    """Remove redundant testcategory key from workload sections in per-testcategory analysis output.
+
+    When --testcategory is used, one_big_json_analytics.py still nests results under
+    workload[<category>][...]. Since the output file already lives in global/<category>/,
+    that extra level is redundant. This function unwraps it in-place.
+    """
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"Warning: Could not read {json_path} for testcategory flattening: {exc}", file=sys.stderr)
+        return
+
+    sections = [
+        "performance_comparison",
+        "cost_comparison",
+        "thread_scaling_comparison",
+        "csp_instance_comparison",
+    ]
+    modified = False
+    for section in sections:
+        section_data = data.get(section)
+        if not isinstance(section_data, dict):
+            continue
+        workload = section_data.get("workload", {})
+        if not isinstance(workload, dict):
+            continue
+        if list(workload.keys()) == [category]:
+            section_data["workload"] = workload[category]
+            modified = True
+
+    if modified:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def run_postmortem(
     postmortem_script: Path,
     results_path: Path,
@@ -475,6 +524,20 @@ def main() -> int:
     if not validate_script_syntax():
         return 1
     args = parse_args()
+
+    # Expand --L<n> shorthand into individual step flags.
+    # --L2 = step 2, --L3 = steps 2-3, --L4 = steps 2-4, --L5 = steps 2-5 (all testcategories).
+    _max_level = max((n for n in range(2, 6) if getattr(args, f"L{n}")), default=0)
+    if _max_level >= 2:
+        args.merge_machine = True
+    if _max_level >= 3:
+        args.merge_global = True
+    if _max_level >= 4:
+        args.analyze = True
+    if _max_level >= 5:
+        if not args.testcategory:
+            args.testcategory = ["__ALL__"]
+
     requested_testcategories, all_testcategories_requested = parse_testcategory_filters(args.testcategory)
     if (requested_testcategories or all_testcategories_requested) and not args.analyze:
         print("Error: --testcategory requires --analyze.", file=sys.stderr)
@@ -660,6 +723,9 @@ def main() -> int:
                     run_analytics(analytics_script, global_results, cost_output, ["--testcategory", category, "--cost"], category_dir)
                     run_analytics(analytics_script, global_results, cost_x86_output, ["--testcategory", category, "--cost", "--no_arm64"], category_dir)
                     run_analytics(analytics_script, global_results, cost_arm64_output, ["--testcategory", category, "--cost", "--no_amd64"], category_dir)
+
+                    for out in (perf_output, perf_x86_output, perf_arm64_output, cost_output, cost_x86_output, cost_arm64_output):
+                        flatten_testcategory_in_json(out, category)
 
                     print(f"Generated analysis -> {perf_output}")
                     print(f"Generated analysis -> {perf_x86_output}")
