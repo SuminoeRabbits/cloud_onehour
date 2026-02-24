@@ -15,14 +15,16 @@ echo "=== GCC-14 Setup (EL${EL_VER}) ==="
 # in ALL shell types: login, non-login, and 'sh -c' via SSH.
 # ---------------------------------------------------------------
 if [ "$EL_VER" -ge 10 ] 2>/dev/null; then
-    # dwarves (pahole): required by Linux kernel allmodconfig for CONFIG_DEBUG_INFO_BTF.
-    # ninja-build: required by pts/build-llvm (Ninja generator); CMake silently fails without it.
-    # Both are in AppStream on EL10+; no EPEL needed. Applies to RHEL10 and Oracle Linux 10.
     # Install unconditionally here so this is guaranteed regardless of which GCC path is taken
-    # (system GCC >= 14 fast path, toolset, or source build).
-    echo "[INFO] EL${EL_VER}: Installing dwarves and ninja-build (required by kernel/llvm benchmarks)..."
+    # (system GCC >= 14 fast path, toolset, or source build).  All packages listed are in
+    # AppStream on EL10+; no EPEL needed.  Applies to RHEL10 and Oracle Linux 10.
+    #   dwarves (pahole)           : required by Linux kernel allmodconfig for CONFIG_DEBUG_INFO_BTF
+    #   ninja-build                : required by pts/build-llvm (CMake Ninja generator)
+    #   gmp-devel / mpfr-devel /
+    #   libmpc-devel               : required by pts/build-gcc (GCC ./configure checks for headers)
+    echo "[INFO] EL${EL_VER}: Installing benchmark dependencies (dwarves ninja-build gmp-devel mpfr-devel libmpc-devel)..."
     wait_for_dnf_lock
-    sudo dnf -y install dwarves ninja-build
+    sudo dnf -y install dwarves ninja-build gmp-devel mpfr-devel libmpc-devel
 
     SYSTEM_GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "0")
     SYSTEM_GCC_MAJOR="${SYSTEM_GCC_VER%%.*}"
