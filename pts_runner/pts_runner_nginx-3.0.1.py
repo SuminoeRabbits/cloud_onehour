@@ -478,12 +478,12 @@ class NginxRunner:
             content = f.read()
 
         # Check if already patched
+        backup = install_sh.parent / 'install.sh.original'
         if 'GCC-14 compatibility patch' in content:
             print("  [INFO] install.sh already patched, skipping")
             return
 
-        # Backup original
-        backup = install_sh.parent / 'install.sh.original'
+        # Backup original (only if not already backed up)
         if not backup.exists():
             shutil.copy(install_sh, backup)
             print(f"  [INFO] Backed up original: {backup}")
@@ -538,7 +538,7 @@ echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
         # wrk requires: threads <= connections
         # Original: ./wrk-4.2.0/wrk -t \$NUM_CPU_CORES \$@ > \$LOG_FILE 2>&1
         # Problem: When connections (-c) < NUM_CPU_CORES, wrk fails
-        # Note: $ is escaped as \$ in install.sh
+        # Note: $ is escaped as \$ in install.sh (lives inside echo "..." heredoc)
         old_wrapper = './wrk-4.2.0/wrk -t \\$NUM_CPU_CORES \\$@ > \\$LOG_FILE 2>&1'
         new_wrapper = '''# Parse connection count from arguments to determine thread count
 # wrk requires: threads <= connections
@@ -574,6 +574,30 @@ fi
         print("         - Build parallelism: $(nproc) instead of $NUM_CPU_CORES")
         print("         - wrk thread count: min(NUM_CPU_CORES, connections)")
 
+    def patch_post_sh(self):
+        """
+        Patch post.sh to use fast nginx shutdown (nginx -s stop) and extended sleep
+        to prevent port collisions on high-load thread counts.
+        """
+        post_sh = Path.home() / '.phoronix-test-suite/test-profiles/pts' / self.benchmark / 'post.sh'
+
+        if not post_sh.exists():
+            print(f"  [WARN] post.sh not found: {post_sh}")
+            return
+
+        try:
+            content = post_sh.read_text()
+            if 'nginx -s quit' in content:
+                # Replace graceful shutdown (-s quit) with forced shutdown (-s stop)
+                # and increase the sleep time from 3 to 10 seconds to allow OS to release port
+                content = content.replace('-s quit', '-s stop').replace('sleep 3', 'sleep 10')
+                post_sh.write_text(content)
+                print("  [OK] Patched post.sh: changed 'quit' to 'stop' and increased sleep to 10s")
+            else:
+                print("  [INFO] post.sh already patched or pattern not found")
+        except Exception as e:
+            print(f"  [WARN] Failed to patch post.sh: {e}")
+
     def install_benchmark(self):
         """
         Install nginx-3.0.1 with GCC-14 native compilation.
@@ -599,6 +623,10 @@ fi
         # STEP 2: Patch install.sh BEFORE running batch-install
         # This allows install.sh to patch wrk's Makefile before building
         self.patch_install_sh_for_gcc14()
+
+        # STEP 2b: Patch post.sh for fast nginx shutdown + port-wait
+        # Prevents "Address already in use" race at Connections:4000 after high-load subtests
+        self.patch_post_sh()
 
         # STEP 3: Remove existing installation
         print("\n  [INFO] Removing existing installation...")
