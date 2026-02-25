@@ -108,6 +108,21 @@ class OpensslRunner:
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
+        # Perl availability check (required for OpenSSL ./Configure)
+        perl_path = shutil.which("perl")
+        if not perl_path:
+            print("[ERROR] perl command not found. OpenSSL ./Configure is a Perl script and requires perl.")
+            print("        RHEL9/10: sudo dnf install -y perl perl-IPC-Cmd perl-FindBin")
+            sys.exit(1)
+
+        result = subprocess.run(['perl', '--version'], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[ERROR] perl --version failed: {result.stderr}")
+            sys.exit(1)
+
+        perl_ver_line = result.stdout.strip().split('\n')[0]
+        print(f"  [OK] Perl detected: {perl_ver_line}")
+
     def get_os_name(self):
         """
         Get OS name and version formatted as <Distro>_<Version>.
@@ -599,6 +614,18 @@ class OpensslRunner:
             print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
+            # Attempt to read PTS install-failed.log for root cause details
+            pts_home = Path.home() / '.phoronix-test-suite'
+            pts_failed_log = pts_home / 'installed-tests' / 'pts' / self.benchmark / 'install-failed.log'
+            if pts_failed_log.exists():
+                print(f"\n  [INFO] PTS install-failed.log ({pts_failed_log}):")
+                try:
+                    with open(pts_failed_log, 'r') as flog:
+                        tail_lines = flog.readlines()[-50:]
+                    for fline in tail_lines:
+                        print(f"    {fline}", end='')
+                except Exception as fe:
+                    print(f"    [WARN] Could not read install-failed.log: {fe}")
             sys.exit(1)
 
         # Verify installation by checking if directory exists
