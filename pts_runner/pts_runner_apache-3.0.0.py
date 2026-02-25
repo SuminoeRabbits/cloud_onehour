@@ -882,9 +882,11 @@ class ApacheRunner:
         #    - Disables inline assembly in OpenSSL 1.1.1i which has issues with GCC-14
         # 2. Ubuntu 24.04/LuaJIT: Adds '-Wno-error=implicit-function-declaration' to CFLAGS
         #    - Fixes "__clear_cache implicit declaration" errors on ARM64
+        # 3. Oracle Linux 10/libxml2: Added '-Wno-error=incompatible-pointer-types' and '-Wno-error=int-conversion' below
+        #    - libxml2-2.12.x changed API signatures, causing 'incompatible pointer types' in apr-util code.
         # Performance impact is minimal for this single-threaded Apache benchmark
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
