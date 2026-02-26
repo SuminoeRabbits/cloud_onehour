@@ -68,7 +68,7 @@ if [ "$EL_VER" -lt 9 ] 2>/dev/null; then
     exit 1
 fi
 
-for required_script in setup_init.sh setup_gcc14.sh setup_binutil244.sh setup_jdkxx.sh build_zlib.sh setup_pts.sh setup_rust.sh; do
+for required_script in setup_init.sh setup_gcc14.sh setup_binutil244.sh setup_jdkxx.sh build_zlib.sh setup_pcre.sh setup_pts.sh setup_rust.sh; do
     if [ ! -f "$SCRIPT_DIR/$required_script" ]; then
         echo "[ERROR] Missing required script: $SCRIPT_DIR/$required_script"
         exit 1
@@ -119,6 +119,9 @@ log_step "Setup JDK"
 
 log_step "Build zlib"
 "$SCRIPT_DIR/build_zlib.sh"
+
+log_step "Setup PCRE v1 (for pts/apache-3.0.0 on EL10+)"
+"$SCRIPT_DIR/setup_pcre.sh"
 
 log_step "Setup PTS"
 "$SCRIPT_DIR/setup_pts.sh"

@@ -626,10 +626,9 @@ fi
 
 persist_pkg_config_path_profile
 
-# Some EL10 variants do not provide pcre-devel (PCRE1). Install only when available.
-if ! sudo dnf -y install pcre-devel 2>/dev/null; then
-    echo "[INFO] pcre-devel is not available on this system. Continuing with pcre2-devel only."
-fi
+# PCRE v1 (pcre-devel) is handled by setup_pcre.sh which is called from prepare_tools.sh.
+# On EL10+, pcre-devel is not in repos; setup_pcre.sh builds PCRE 8.45 from source.
+# On EL9, setup_pcre.sh installs pcre-devel via dnf.
 
 # 4. Architecture Detection
 ARCH=$(uname -m)
