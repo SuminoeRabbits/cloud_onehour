@@ -2011,16 +2011,31 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             wrapped_cmd = f'nohup sh -c "{escaped_cmd} && echo SUCCESS > {marker_file} || echo FAILED > {marker_file}" > {log_file} 2>&1 &'
 
             # Start the command in background
-            # Start the command in background
-            try:
-                run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=60, logger=logger)
-            except subprocess.TimeoutExpired:
-                # If starting the background command times out, it might have actually started but SSH didn't return.
-                # We will proceed to polling to verify.
-                if logger:
-                    logger.warn("Timeout while starting background command, proceeding to verification...")
-                else:
-                    print("  [Warn] Timeout while starting background command, proceeding to verification...")
+            nohup_max_retries = 3
+            for nohup_attempt in range(nohup_max_retries):
+                try:
+                    run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=60, logger=logger)
+                    break  # nohup started successfully
+                except subprocess.TimeoutExpired:
+                    # SSH connected but nohup sh ... & did not return within 60s.
+                    # The background process may have already started; proceed to polling.
+                    if logger:
+                        logger.warn("Timeout while starting background command, proceeding to verification...")
+                    else:
+                        print("  [Warn] Timeout while starting background command, proceeding to verification...")
+                    break
+                except subprocess.CalledProcessError as e:
+                    # SSH connection itself failed (exit 255 = connection refused/timeout/unreachable).
+                    # The remote nohup was never started, so retrying is safe (no double-execution risk).
+                    if nohup_attempt < nohup_max_retries - 1:
+                        msg = f"nohup start failed (exit {e.returncode}), retrying in 15s ({nohup_attempt + 1}/{nohup_max_retries})..."
+                        if logger:
+                            logger.warn(msg)
+                        else:
+                            print(f"  [Warn] {msg}")
+                        time.sleep(15)
+                    else:
+                        raise  # All retries exhausted; propagate to workload error handler
 
             if logger:
                 logger.info("Command started in background, waiting for completion...")
