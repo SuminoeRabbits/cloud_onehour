@@ -101,12 +101,20 @@ cd "pcre-${PCRE_VERSION}"
 
 # Configure: static-only, UTF-8 and Unicode properties enabled
 # (Apache httpd uses UTF-8 PCRE for URL pattern matching)
+#
+# CFLAGS="-fPIC": Required for Apache httpd DSO modules (mod_rewrite.so, etc.)
+#   Apache httpd compiles PCRE-using modules as shared objects (.so) by default.
+#   Linking a non-PIC static library into a .so fails on both x86_64 AND ARM64
+#   with modern binutils (EL10 ships binutils 2.41+). Without -fPIC, the linker
+#   aborts during mod_rewrite.so build, which also prevents the httpd binary from
+#   being compiled (parallel make with -j aborts early on link error).
 ./configure \
     --prefix="${INSTALL_PREFIX}" \
     --disable-shared \
     --enable-static \
     --enable-utf8 \
-    --enable-unicode-properties
+    --enable-unicode-properties \
+    CFLAGS="-fPIC"
 
 make -j"$(nproc)"
 sudo make install
