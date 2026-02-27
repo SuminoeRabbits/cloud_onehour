@@ -330,6 +330,7 @@ PACKAGE_SPECS=(
     "flex:flex"
     "bison:bison"
     "openssl-devel:openssl-devel"
+    "openssl:openssl"
     "elfutils-libelf-devel:elfutils-libelf-devel"
     "libevent-devel:libevent-devel"
     "perl:perl"
