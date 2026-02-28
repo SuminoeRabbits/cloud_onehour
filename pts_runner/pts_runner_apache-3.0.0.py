@@ -823,6 +823,19 @@ class ApacheRunner:
             else:
                 print("  [INFO] XCFLAGS patch already applied")
 
+            # Patch 3: Add error detection to httpd make command
+            # Without this, silent make failure (e.g. pcre-config not found -> configure
+            # fails -> incomplete Makefile -> make fails) causes install.sh to continue
+            # with 'make install', creating a partial directory without httpd binary.
+            httpd_make = '\tmake -j $NUM_CPU_CORES\n\tmake install'
+            httpd_make_fixed = '\tmake -j $NUM_CPU_CORES || exit 1\n\tmake install'
+            if httpd_make_fixed not in content and httpd_make in content:
+                content = content.replace(httpd_make, httpd_make_fixed)
+                patched = True
+                print("  [OK] Added error detection to httpd make (|| exit 1)")
+            else:
+                print("  [INFO] httpd make error detection already applied or pattern not found")
+
             if patched:
                 with open(install_sh_path, 'w') as f:
                     f.write(content)
@@ -886,7 +899,10 @@ class ApacheRunner:
         #    - libxml2-2.12.x changed API signatures, causing 'incompatible pointer types' in apr-util code.
         # Performance impact is minimal for this single-threaded Apache benchmark
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        # PATH: prepend /usr/local/bin so configure finds pcre-config on EL10
+        # (setup_pcre.sh installs PCRE 8.45 to /usr/local on EL10 where pcre-devel is dropped).
+        # On Ubuntu/EL9 pcre-config is in /usr/bin; prepending /usr/local/bin is harmless.
+        install_cmd = f'PATH="/usr/local/bin:$PATH" MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")

@@ -460,6 +460,10 @@ class NginxRunner:
         2. Adds OPENSSL_CFLAGS with -std=gnu89 for OpenSSL 1.1.1i compatibility
         3. Modifies OpenSSL build commands to use OPENSSL_CFLAGS
         4. Uses $(nproc) instead of $NUM_CPU_CORES for compilation parallelism
+        5. Increases nginx listen backlog 511->4096 (prevents SYN queue overflow
+           at C=4000 when all vCPUs are in use and no taskset CPU restriction applies)
+        6. Adds --timeout 30s to wrk command (safety net: allows nginx backlog to drain
+           instead of wrk exiting after the default 2-second connection timeout)
         """
         print("\n>>> Patching install.sh for GCC-14 compatibility...")
 
@@ -477,20 +481,31 @@ class NginxRunner:
         with open(install_sh, 'r') as f:
             content = f.read()
 
-        # Check if already patched
+        # Check if ALL patches (GCC-14 + backlog + timeout) already applied
         backup = install_sh.parent / 'install.sh.original'
-        if 'GCC-14 compatibility patch' in content:
-            print("  [INFO] install.sh already patched, skipping")
+        already_fully_patched = (
+            'GCC-14 compatibility patch' in content
+            and 'backlog=4096' in content
+            and '--timeout 30s' in content
+        )
+        if already_fully_patched:
+            print("  [INFO] install.sh already fully patched, skipping")
             return
+
+        any_patch_applied = False
 
         # Backup original (only if not already backed up)
         if not backup.exists():
             shutil.copy(install_sh, backup)
             print(f"  [INFO] Backed up original: {backup}")
 
-        # Create the patch to insert before "make -j $NUM_CPU_CORES"
-        # This will be inserted after "cd wrk-4.2.0"
-        patch_code = '''
+        # ------------------------------------------------------------------
+        # GCC-14 patches (Patches 1-4) - check if already applied
+        # ------------------------------------------------------------------
+        if 'GCC-14 compatibility patch' not in content:
+            # Create the patch to insert before "make -j $NUM_CPU_CORES"
+            # This will be inserted after "cd wrk-4.2.0"
+            patch_code = '''
 # === GCC-14 compatibility patch for wrk's bundled OpenSSL 1.1.1i ===
 # Patch wrk Makefile to use GCC-14 compatible flags for OpenSSL build
 
@@ -521,26 +536,30 @@ echo "[PATCH] wrk Makefile patched for GCC-14 compatibility"
 
 '''
 
-        # Find and replace the wrk build section
-        # Look for: "cd wrk-4.2.0\nmake -j $NUM_CPU_CORES"
-        old_pattern = 'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES'
-        new_pattern = 'cd wrk-4.2.0' + patch_code + 'make -j $(nproc)'
+            # Find and replace the wrk build section
+            # Look for: "cd wrk-4.2.0\nmake -j $NUM_CPU_CORES"
+            old_pattern = 'cd wrk-4.2.0\nmake -j $NUM_CPU_CORES'
+            new_pattern = 'cd wrk-4.2.0' + patch_code + 'make -j $(nproc)'
 
-        if old_pattern in content:
-            content = content.replace(old_pattern, new_pattern)
-            print("  [OK] Patched wrk build section")
-        else:
-            print("  [ERROR] Could not find wrk build section to patch")
-            print(f"  [INFO] Looking for pattern: {repr(old_pattern)}")
-            return
+            if old_pattern in content:
+                content = content.replace(old_pattern, new_pattern)
+                print("  [OK] Patched wrk build section (Patches 1-3)")
+                any_patch_applied = True
+            else:
+                print("  [ERROR] Could not find wrk build section to patch")
+                print(f"  [INFO] Looking for pattern: {repr(old_pattern)}")
+                return
 
-        # Patch 4: Fix nginx wrapper script to handle thread count properly
-        # wrk requires: threads <= connections
-        # Original: ./wrk-4.2.0/wrk -t \$NUM_CPU_CORES \$@ > \$LOG_FILE 2>&1
-        # Problem: When connections (-c) < NUM_CPU_CORES, wrk fails
-        # Note: $ is escaped as \$ in install.sh (lives inside echo "..." heredoc)
-        old_wrapper = './wrk-4.2.0/wrk -t \\$NUM_CPU_CORES \\$@ > \\$LOG_FILE 2>&1'
-        new_wrapper = '''# Parse connection count from arguments to determine thread count
+            # Patch 4: Fix nginx wrapper script to handle thread count properly
+            # wrk requires: threads <= connections
+            # Original: ./wrk-4.2.0/wrk -t \$NUM_CPU_CORES \$@ > \$LOG_FILE 2>&1
+            # Problem: When connections (-c) < NUM_CPU_CORES, wrk fails
+            # Note: $ is escaped as \$ in install.sh (lives inside echo "..." heredoc)
+            # Patch 6 (timeout) integrated here: --timeout 30s prevents wrk from
+            # exiting after the default 2-second connection timeout when the nginx
+            # listen backlog is temporarily full.
+            old_wrapper = './wrk-4.2.0/wrk -t \\$NUM_CPU_CORES \\$@ > \\$LOG_FILE 2>&1'
+            new_wrapper = '''# Parse connection count from arguments to determine thread count
 # wrk requires: threads <= connections
 CONNECTIONS=1
 for arg in "\\$@"; do
@@ -554,25 +573,63 @@ THREADS=\\$NUM_CPU_CORES
 if [ "\\$CONNECTIONS" -lt "\\$THREADS" ]; then
     THREADS=\\$CONNECTIONS
 fi
-./wrk-4.2.0/wrk -t \\$THREADS "\\$@" > \\$LOG_FILE 2>&1'''
+./wrk-4.2.0/wrk -t \\$THREADS --timeout 30s "\\$@" > \\$LOG_FILE 2>&1'''
 
-        if old_wrapper in content:
-            content = content.replace(old_wrapper, new_wrapper)
-            print("  [OK] Patched nginx wrapper script")
+            if old_wrapper in content:
+                content = content.replace(old_wrapper, new_wrapper)
+                print("  [OK] Patched nginx wrapper script (Patch 4 + timeout 30s)")
+            else:
+                print("  [WARN] Could not find nginx wrapper script pattern")
         else:
-            print("  [WARN] Could not find nginx wrapper script pattern")
+            print("  [INFO] GCC-14 patches (Patches 1-4) already applied")
+            # Upgrade path: add --timeout 30s to already-patched wrapper if missing
+            if '--timeout 30s' not in content:
+                old_wrk_line = './wrk-4.2.0/wrk -t \\$THREADS "\\$@" > \\$LOG_FILE 2>&1'
+                new_wrk_line = './wrk-4.2.0/wrk -t \\$THREADS --timeout 30s "\\$@" > \\$LOG_FILE 2>&1'
+                if old_wrk_line in content:
+                    content = content.replace(old_wrk_line, new_wrk_line)
+                    print("  [OK] Added --timeout 30s to wrk command (upgrade)")
+                    any_patch_applied = True
+                else:
+                    print("  [INFO] wrk timeout already set or pattern not found")
 
-        # Write patched install.sh
-        with open(install_sh, 'w') as f:
-            f.write(content)
+        # ------------------------------------------------------------------
+        # Patch 5: nginx listen backlog - independent of GCC-14 patches
+        # Increases default backlog (511) to 4096 to prevent SYN queue overflow
+        # when 16 wrk threads burst 4000 simultaneous SYN packets (C=4000, no taskset).
+        # Effective backlog = min(nginx_backlog, net.core.somaxconn); RHEL 10 default = 4096.
+        # ------------------------------------------------------------------
+        if 'backlog=4096' not in content:
+            old_listen_sed = 'sed -i "s/        listen       80;/        listen       8089;/g" nginx_/conf/nginx.conf'
+            new_listen_sed = (
+                'sed -i "s/        listen       80;/        listen       8089;/g" nginx_/conf/nginx.conf\n'
+                '# Patch 5: Increase listen backlog to prevent SYN queue overflow at C=4000\n'
+                'sed -i "s/listen       8089;/listen       8089 backlog=4096;/g" nginx_/conf/nginx.conf'
+            )
+            if old_listen_sed in content:
+                content = content.replace(old_listen_sed, new_listen_sed)
+                print("  [OK] Added nginx listen backlog=4096 (Patch 5)")
+                any_patch_applied = True
+            else:
+                print("  [WARN] Could not find listen sed pattern for backlog patch")
+        else:
+            print("  [INFO] backlog=4096 already applied")
 
-        print("  [OK] install.sh patched successfully")
-        print("  [INFO] Patches applied:")
-        print("         - wrk CFLAGS: -std=c99 -> -std=gnu99")
-        print("         - OpenSSL CFLAGS: -std=gnu89 -Wno-error -O2 -march=native")
-        print("         - OpenSSL build: Uses CC and CFLAGS from environment")
-        print("         - Build parallelism: $(nproc) instead of $NUM_CPU_CORES")
-        print("         - wrk thread count: min(NUM_CPU_CORES, connections)")
+        # Write patched install.sh only if something changed
+        if any_patch_applied:
+            with open(install_sh, 'w') as f:
+                f.write(content)
+            print("  [OK] install.sh patched successfully")
+            print("  [INFO] Patches applied:")
+            print("         - wrk CFLAGS: -std=c99 -> -std=gnu99")
+            print("         - OpenSSL CFLAGS: -std=gnu89 -Wno-error -O2 -march=native")
+            print("         - OpenSSL build: Uses CC and CFLAGS from environment")
+            print("         - Build parallelism: $(nproc) instead of $NUM_CPU_CORES")
+            print("         - wrk thread count: min(NUM_CPU_CORES, connections)")
+            print("         - nginx listen backlog: 511 -> 4096")
+            print("         - wrk timeout: --timeout 30s")
+        else:
+            print("  [INFO] install.sh already fully patched, nothing to do")
 
     def patch_post_sh(self):
         """
@@ -597,6 +654,51 @@ fi
                 print("  [INFO] post.sh already patched or pattern not found")
         except Exception as e:
             print(f"  [WARN] Failed to patch post.sh: {e}")
+
+    def patch_pre_sh(self):
+        """
+        Patch pre.sh to add an OS-agnostic TCP probe for port 8089 after nginx starts.
+
+        After nginx is started and sleep 5 finishes, attempts a bash /dev/tcp connection
+        to 127.0.0.1:8089.  If the connection fails, pre.sh exits with a clear error
+        message pointing the operator to setup_selinux_ports.sh.
+
+        This catches the "Connection refused" failure mode caused by SELinux blocking
+        nginx from binding to port 8089 (observed on RHEL/Oracle Linux when
+        setup_selinux_ports.sh was not run during instance preparation).
+
+        The probe uses 'bash -c' so it works correctly even though pre.sh itself
+        runs under /bin/sh; bash is available on Ubuntu, RHEL, and Oracle Linux.
+        """
+        pre_sh = Path.home() / '.phoronix-test-suite/test-profiles/pts' / self.benchmark / 'pre.sh'
+
+        if not pre_sh.exists():
+            print(f"  [WARN] pre.sh not found: {pre_sh}")
+            return
+
+        content = pre_sh.read_text()
+        if 'Check nginx port 8089' in content:
+            print("  [INFO] pre.sh already patched, skipping")
+            return
+
+        old_sleep = 'sleep 5'
+        new_sleep = (
+            'sleep 5\n'
+            '# Check nginx port 8089 (OS-agnostic TCP probe via bash /dev/tcp)\n'
+            "if ! bash -c 'echo > /dev/tcp/127.0.0.1/8089' 2>/dev/null; then\n"
+            '    echo "ERROR: nginx failed to bind to port 8089 (Check nginx port 8089)" >&2\n'
+            '    echo "  Possible causes: SELinux blocking port (run setup_selinux_ports.sh)," >&2\n'
+            '    echo "  port already in use, or nginx failed to start." >&2\n'
+            '    exit 1\n'
+            'fi'
+        )
+
+        if old_sleep in content:
+            content = content.replace(old_sleep, new_sleep, 1)
+            pre_sh.write_text(content)
+            print("  [OK] Patched pre.sh: added port 8089 TCP probe (Nginx P1)")
+        else:
+            print("  [WARN] Could not find 'sleep 5' in pre.sh to patch")
 
     def install_benchmark(self):
         """
@@ -627,6 +729,10 @@ fi
         # STEP 2b: Patch post.sh for fast nginx shutdown + port-wait
         # Prevents "Address already in use" race at Connections:4000 after high-load subtests
         self.patch_post_sh()
+
+        # STEP 2c: Patch pre.sh to probe port 8089 after nginx starts
+        # Catches SELinux bind failures early (before wrk runs) with a clear error message
+        self.patch_pre_sh()
 
         # STEP 3: Remove existing installation
         print("\n  [INFO] Removing existing installation...")

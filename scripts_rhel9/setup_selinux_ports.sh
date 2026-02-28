@@ -8,6 +8,8 @@
 #   nginx to fail with "bind() failed (13: Permission denied)" at startup.
 #
 # Ports configured here:
+#   8088/tcp  pts/apache-3.0.0 benchmark (httpd listens; wrk client connects)
+#             Not in default http_port_t; httpd fails to start without this entry.
 #   8089/tcp  pts/nginx-3.0.1 benchmark (nginx listens; wrk client connects)
 #             Not in default http_port_t; nginx fails to start without this entry.
 #
@@ -64,6 +66,9 @@ selinux_allow_port() {
 }
 
 echo "[INFO] Configuring SELinux port exceptions for benchmark tools..."
+
+# pts/apache-3.0.0: httpd listens on 8088 for wrk load testing
+selinux_allow_port 8088 http_port_t tcp
 
 # pts/nginx-3.0.1: nginx listens on 8089 for wrk load testing
 selinux_allow_port 8089 http_port_t tcp
