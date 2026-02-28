@@ -1384,10 +1384,31 @@ fi
                 "Treating as broken install and reinstalling."
             )
 
+        # Check whether the INSTALLED nginx.conf and wrapper have all required patches.
+        # An already-installed benchmark may predate the backlog=4096 / --timeout 30s
+        # patches that were added after the initial install.  If any marker is missing,
+        # force a reinstall so the running binary matches the current install.sh.
+        nginx_conf = Path.home() / 'nginx_' / 'conf' / 'nginx.conf'
+        nginx_wrapper = Path.home() / 'nginx'
+        installed_has_backlog = (
+            nginx_conf.exists() and 'backlog=4096' in nginx_conf.read_text()
+        )
+        installed_has_timeout = (
+            nginx_wrapper.exists() and '--timeout 30s' in nginx_wrapper.read_text()
+        )
+        patches_in_installed = installed_has_backlog and installed_has_timeout
+
         if not already_installed:
             self.install_benchmark()
+        elif not patches_in_installed:
+            print(
+                f"[WARN] Benchmark installed but missing required patches "
+                f"(backlog=4096:{installed_has_backlog}, --timeout 30s:{installed_has_timeout}). "
+                "Reinstalling to apply patches."
+            )
+            self.install_benchmark()
         else:
-            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
+            print(f"[INFO] Benchmark already installed with all patches, skipping installation: {self.benchmark_full}")
 
         # Run for each thread count
         failed = []
