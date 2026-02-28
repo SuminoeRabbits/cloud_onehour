@@ -2732,6 +2732,11 @@ class AWSProvider(CloudProvider):
     def is_rate_limit_error(self, exception: Exception) -> bool:
         """Check if exception is AWS rate limit error."""
         error_msg = str(exception)
+        if hasattr(exception, 'stderr') and exception.stderr:
+            error_msg += " " + str(exception.stderr)
+        if hasattr(exception, 'output') and exception.output:
+            error_msg += " " + str(exception.output)
+
         return any(kw in error_msg for kw in [
             'RequestLimitExceeded',
             'Throttling',
@@ -2744,11 +2749,17 @@ class AWSProvider(CloudProvider):
             return True
 
         error_msg = str(exception)
+        if hasattr(exception, 'stderr') and exception.stderr:
+            error_msg += " " + str(exception.stderr)
+        if hasattr(exception, 'output') and exception.output:
+            error_msg += " " + str(exception.output)
+
         return any(kw in error_msg for kw in [
             'InternalError',
             'ServiceUnavailable',
             'RequestTimeout',
-            'Connection reset'
+            'Connection reset',
+            'InsufficientInstanceCapacity'
         ])
 
     def get_recommended_max_workers(self) -> int:
@@ -2867,6 +2878,11 @@ class GCPProvider(CloudProvider):
     def is_rate_limit_error(self, exception: Exception) -> bool:
         """Check if exception is GCP rate limit error."""
         error_msg = str(exception)
+        if hasattr(exception, 'stderr') and exception.stderr:
+            error_msg += " " + str(exception.stderr)
+        if hasattr(exception, 'output') and exception.output:
+            error_msg += " " + str(exception.output)
+
         return any(kw in error_msg for kw in [
             'Quota exceeded',
             'Rate Limit Exceeded',
@@ -2880,10 +2896,16 @@ class GCPProvider(CloudProvider):
             return True
 
         error_msg = str(exception)
+        if hasattr(exception, 'stderr') and exception.stderr:
+            error_msg += " " + str(exception.stderr)
+        if hasattr(exception, 'output') and exception.output:
+            error_msg += " " + str(exception.output)
+
         return any(kw in error_msg for kw in [
             'INTERNAL',
             'UNAVAILABLE',
-            'backendError'
+            'backendError',
+            'ZONE_RESOURCE_POOL_EXHAUSTED'
         ])
 
     def get_recommended_max_workers(self) -> int:
@@ -3156,6 +3178,11 @@ class OCIProvider(CloudProvider):
     def is_rate_limit_error(self, exception: Exception) -> bool:
         """Check if exception is OCI rate limit error."""
         error_msg = str(exception)
+        if hasattr(exception, 'stderr') and exception.stderr:
+            error_msg += " " + str(exception.stderr)
+        if hasattr(exception, 'output') and exception.output:
+            error_msg += " " + str(exception.output)
+            
         return any(kw in error_msg for kw in [
             'TooManyRequests',
             '429',
@@ -3168,6 +3195,11 @@ class OCIProvider(CloudProvider):
             return True
 
         error_msg = str(exception)
+        if hasattr(exception, 'stderr') and exception.stderr:
+            error_msg += " " + str(exception.stderr)
+        if hasattr(exception, 'output') and exception.output:
+            error_msg += " " + str(exception.output)
+
         return any(kw in error_msg for kw in [
             'InternalServerError',
             'ServiceUnavailable',
@@ -3177,6 +3209,7 @@ class OCIProvider(CloudProvider):
             'InsufficientServiceCapacity',
             'Out of capacity',
             'CapacityUnavailable',
+            'Out of host capacity',
         ])
 
     def get_recommended_max_workers(self) -> int:
@@ -3567,7 +3600,7 @@ def process_instance(
 
         instance_id, ip = retry_with_exponential_backoff(
             lambda: provider.launch_instance(inst, logger),
-            max_retries=5,
+            max_retries=120,   # Up to ~2 hours to poll for available capacity
             base_delay=2.0,
             logger=logger,
             error_classifier=provider.is_retryable_error
