@@ -974,10 +974,12 @@ class ApacheRunner:
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
 
-        # CRITICAL: Verify httpd was actually built
-        # The Apache benchmark requires httpd binary in httpd_/bin/httpd
-        httpd_binary = installed_dir / 'httpd_' / 'bin' / 'httpd'
-        httpd_dir = installed_dir / 'httpd_'
+        # CRITICAL: Verify httpd was actually built.
+        # install.sh creates httpd_ at $HOME/httpd_ (via --prefix=$HOME/httpd_),
+        # NOT inside the PTS installed-tests directory.  Same pattern as nginx_
+        # which is created at $HOME/nginx_.
+        httpd_dir = Path.home() / 'httpd_'
+        httpd_binary = httpd_dir / 'bin' / 'httpd'
 
         if not httpd_dir.exists() or not any(httpd_dir.iterdir()):
             print("  [ERROR] Apache httpd build failed!")
@@ -1030,9 +1032,11 @@ class ApacheRunner:
         Args:
             num_threads: Number of threads specified by user (1 for single-threaded mode)
         """
-        pts_home = Path.home() / '.phoronix-test-suite'
-        apache_script = pts_home / 'installed-tests' / 'pts' / self.benchmark / 'apache'
-        
+        # install.sh creates the 'apache' wrapper at $HOME/apache (after 'cd ~'),
+        # NOT inside the PTS installed-tests directory.  Same pattern as nginx
+        # which is created at $HOME/nginx.
+        apache_script = Path.home() / 'apache'
+
         if not apache_script.exists():
             print(f"  [ERROR] Apache script not found: {apache_script}")
             return False
