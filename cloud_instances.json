@@ -1,6 +1,7 @@
 {
   "aws": {
     "enable": true,
+    "arm64_only": false,
     "quota_vcpus_all_regions": 48,
     "regions": {
       "ap-northeast-3": {
@@ -177,6 +178,7 @@
   },
   "gcp": {
     "enable": true,
+    "arm64_only": false,
     "project_id": "AUTO_DETECT",
     "quota_vcpus_all_regions": 32,
     "regions": {
@@ -313,6 +315,7 @@
   },
   "oci": {
     "enable": true,
+    "arm64_only": false,
     "quota_vcpus_all_regions": 48,
     "regions": {
       "us-ashburn-1": {
