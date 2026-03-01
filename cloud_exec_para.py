@@ -3205,11 +3205,15 @@ class OCIProvider(CloudProvider):
             'ServiceUnavailable',
             '500',
             '503',
-            # Capacity/availability errors (common for VM.Standard.A1.Flex)
+            # Capacity/availability errors (common for VM.Standard.A1.Flex / A4.Flex)
             'InsufficientServiceCapacity',
             'Out of capacity',
             'CapacityUnavailable',
             'Out of host capacity',
+            # Connection/timeout errors (OCI API overloaded during capacity contention)
+            'timed out',
+            'RequestException',
+            'ConnectionError',
         ])
 
     def get_recommended_max_workers(self) -> int:
@@ -3411,13 +3415,17 @@ class OCIProvider(CloudProvider):
             f"--display-name \"{name}\" "
             f"--ssh-authorized-keys-file \"{pub_key_path}\" "
             f"--assign-public-ip true "
-            f"--wait-for-state RUNNING "
             f"--query 'data.id' --raw-output"
         )
+        # NOTE: --wait-for-state RUNNING is intentionally NOT used here.
+        # OCI CLI's built-in wait keeps a long-lived HTTP connection that is prone
+        # to "connection to endpoint timed out" errors on slow/busy shapes (e.g. A4).
+        # Instead, we get the instance ID immediately from the launch response and
+        # then poll via _wait_for_instance_running() with short-lived API calls.
 
-        # Run Launch (OCI CLI wait-for-state blocks until running)
+        # Run Launch (returns instance ID immediately, before RUNNING)
         try:
-            instance_id = run_cmd(launch_cmd, logger=logger, timeout=600)
+            instance_id = run_cmd(launch_cmd, logger=logger, timeout=120)
         finally:
             if _userdata_tmp:
                 try:
@@ -3438,9 +3446,17 @@ class OCIProvider(CloudProvider):
                 return existing["id"], ip
             return None, None
 
-        # 7. Get Public IP
+        # 7. Wait for instance to reach RUNNING state
         if logger:
-            logger.info(f"Instance launched ({instance_id}), fetching IP...")
+            logger.info(f"Instance launched ({instance_id}), waiting for RUNNING state...")
+        if not self._wait_for_instance_running(inst, instance_id, logger=logger):
+            if logger:
+                logger.error(f"Instance {instance_id} did not reach RUNNING state")
+            return None, None
+
+        # 8. Get Public IP
+        if logger:
+            logger.info(f"Instance running ({instance_id}), fetching IP...")
 
         ip = self._get_instance_ip(inst, instance_id, logger=logger)
         if ip:
@@ -4186,6 +4202,11 @@ Examples:
 
     # Filter enabled instances
     instances = [inst for inst in instances if inst.get('enable', False)]
+
+    # Filter by arm64_only: when true, exclude amd64 instances
+    if csp_config.get('arm64_only', False):
+        instances = [inst for inst in instances if inst.get('arch') != 'amd64']
+
     instances, regions = order_instances_by_region(instances)
 
     if not instances:

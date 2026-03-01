@@ -251,6 +251,15 @@
                     "notes": "N/A - single-thread benchmark policy. Thread count is fixed to 1 by runner/test suite definition.",
                     "exe_time_v8cpu": "10.0"
                 },
+                "pts/redis-1.5.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "single-threaded",
+                    "sve2_support": false,
+                    "notes": "N/A - single-thread benchmark policy. Thread count is fixed to 1 by runner/test suite definition.",
+                    "exe_time_v8cpu": "50.0"
+                },
                 "pts/valkey-1.0.0": {
                     "enabled": true,
                     "THFix_in_compile": false,
@@ -258,6 +267,15 @@
                     "TH_scaling": "single-threaded",
                     "sve2_support": false,
                     "notes": "N/A - single-thread benchmark policy. Thread count is fixed to 1 by runner/test suite definition.",
+                    "exe_time_v8cpu": "10.0"
+                },
+                "pts/valkey-1.1.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Valkey is MT version of redis.",
                     "exe_time_v8cpu": "10.0"
                 }
             }
