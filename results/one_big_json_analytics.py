@@ -18,13 +18,30 @@ See README_analytics.md for detailed specification.
 import json
 import sys
 import argparse
+import re
+import copy
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import subprocess
 
 # Script version
-VERSION = "v1.5.0"
+VERSION = "v1.6.0"
+
+
+OS_MERGE_RULE_DEFS: Dict[str, Dict[str, Any]] = {
+    "rhel_10_family": {
+        "target": "RHEL_10",
+        "patterns": (
+            re.compile(r"^Red_10_\d+$"),
+            re.compile(r"^Oracle_10_\d+$"),
+        ),
+    },
+}
+
+OS_MERGE_OPTION_LUT: Dict[str, Tuple[str, ...]] = {
+    "rhel_os_merge": ("rhel_10_family",),
+}
 
 
 class AnalyticsError(RuntimeError):
@@ -169,6 +186,26 @@ def extract_available_testcategories(data: Dict[str, Any]) -> set[str]:
     return categories
 
 
+def filter_requested_testcategories(
+    requested_categories: List[str],
+    available_categories: set[str]
+) -> List[str]:
+    """Validate requested testcategories while preserving input order."""
+    if not requested_categories:
+        return []
+
+    valid_categories: List[str] = []
+    for category in requested_categories:
+        if category in available_categories:
+            valid_categories.append(category)
+        else:
+            print(
+                f"Warning: testcategory '{category}' not found in input JSON. Skipping.",
+                file=sys.stderr
+            )
+    return valid_categories
+
+
 def parse_testcategory_filters(raw_values: Optional[List[str]]) -> List[str]:
     """Parse --testcategory values from repeated args and/or list-like strings."""
     if not raw_values:
@@ -230,6 +267,73 @@ def _sort_numeric_keyed_dicts(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_sort_numeric_keyed_dicts(item) for item in obj]
     return obj
+
+
+def resolve_os_merge_target(os_name: str, enabled_rule_names: Tuple[str, ...]) -> str:
+    """Map an OS name to its merged target based on enabled lookup-table rules."""
+    for rule_name in enabled_rule_names:
+        rule = OS_MERGE_RULE_DEFS.get(rule_name, {})
+        for pattern in rule.get("patterns", ()):
+            if pattern.match(os_name):
+                return str(rule.get("target", os_name))
+    return os_name
+
+
+def preprocess_input_data(
+    data: Dict[str, Any],
+    requested_categories: List[str],
+    available_categories: set[str],
+    enabled_rule_names: Tuple[str, ...],
+) -> Dict[str, Any]:
+    """
+    Apply input-side filtering/OS merge before any ranking is computed.
+    This keeps rank calculation single-pass for the effective dataset.
+    """
+    processed = copy.deepcopy(data)
+    valid_categories = filter_requested_testcategories(requested_categories, available_categories)
+    valid_set = set(valid_categories)
+
+    for machine_name in list(processed.keys()):
+        if machine_name in ("generation_log", "generation log"):
+            continue
+
+        machine_data = processed.get(machine_name, {})
+        os_map = machine_data.get("os", {})
+        new_os_map: Dict[str, Any] = {}
+
+        for os_name, os_content in os_map.items():
+            target_os_name = resolve_os_merge_target(os_name, enabled_rule_names)
+            target_os_node = new_os_map.setdefault(target_os_name, {"testcategory": {}})
+            target_testcategories = target_os_node.setdefault("testcategory", {})
+
+            for testcategory, tc_content in os_content.get("testcategory", {}).items():
+                if valid_set and testcategory not in valid_set:
+                    continue
+
+                if testcategory in target_testcategories:
+                    # This should not normally happen for current merge rules because
+                    # merged OS families do not overlap on the same machine.
+                    print(
+                        f"Warning: duplicate testcategory merge detected for "
+                        f"{machine_name}/{target_os_name}/{testcategory}; keeping first entry.",
+                        file=sys.stderr
+                    )
+                    continue
+
+                target_testcategories[testcategory] = tc_content
+
+        pruned_os_map = {
+            os_name: os_node
+            for os_name, os_node in new_os_map.items()
+            if os_node.get("testcategory")
+        }
+
+        if pruned_os_map:
+            machine_data["os"] = pruned_os_map
+        else:
+            machine_data["os"] = {}
+
+    return processed
 
 
 def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64: bool) -> Dict[str, Any]:
@@ -376,48 +480,6 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
                 del csp[tc][bm]
         if not csp[tc]:
             del csp[tc]
-
-    return output
-
-
-def postprocess_output_by_testcategory(
-    output: Dict[str, Any],
-    requested_categories: List[str],
-    available_categories: set[str]
-) -> Dict[str, Any]:
-    """Apply testcategory filtering as a post-process on generated JSON."""
-    if not requested_categories:
-        return output
-
-    valid_categories: List[str] = []
-    for category in requested_categories:
-        if category in available_categories:
-            valid_categories.append(category)
-        else:
-            print(
-                f"Warning: testcategory '{category}' not found in input JSON. Skipping.",
-                file=sys.stderr
-            )
-
-    valid_set = set(valid_categories)
-
-    for section in [
-        "performance_comparison",
-        "cost_comparison",
-        "thread_scaling_comparison",
-        "csp_instance_comparison",
-    ]:
-        section_data = output.get(section)
-        if not isinstance(section_data, dict):
-            continue
-
-        workload = section_data.get("workload", {})
-        if not isinstance(workload, dict):
-            continue
-
-        for tc in list(workload.keys()):
-            if tc not in valid_set:
-                del workload[tc]
 
     return output
 
@@ -763,6 +825,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Workload -> CSP -> Machine -> Thread -> Efficiency
     comparison_data: Dict[tuple, Dict[str, Dict[str, Dict[str, float]]]] = {}
+    machine_os_map: Dict[tuple, str] = {}
 
     for w in workloads:
         key = (w["testcategory"], w["benchmark"], w["test_name"])
@@ -775,6 +838,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             
         th_label = str(w["thread"])
         comparison_data.setdefault(key, {}).setdefault(csp, {}).setdefault(w["machinename"], {})[th_label] = efficiency
+        machine_os_map[(key, w["machinename"])] = w["os"]
 
     for key, csp_machines in comparison_data.items():
         tc, bm, tn = key
@@ -853,7 +917,8 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                     "baseline": {
                         "machinename": baseline_machine,
                         "arch": "arm64",
-                        "csp": csp
+                        "csp": csp,
+                        "os": machine_os_map.get((key, baseline_machine), "unknown"),
                     },
                     "trends": trends
                 }
@@ -882,6 +947,8 @@ def main():
                         help='Exclude amd64/x86_64 instances from output JSON (post-process stage)')
     parser.add_argument('--testcategory', action='append',
                         help='Filter output by testcategory list (e.g. --testcategory cpu,mem or --testcategory [cpu,mem])')
+    parser.add_argument('--rhel-os-merge', action='store_true',
+                        help='Merge configured RHEL-family OS buckets in post-process stage (effective only with --testcategory)')
     parser.add_argument('--all', action='store_true',
                         help='Generate all comparisons')
     parser.add_argument('--output', type=str,
@@ -906,6 +973,22 @@ def main():
 
     requested_testcategories = parse_testcategory_filters(args.testcategory)
     available_testcategories = extract_available_testcategories(data)
+    enabled_os_merge_rules: Tuple[str, ...] = ()
+    if args.rhel_os_merge:
+        if requested_testcategories:
+            enabled_os_merge_rules += OS_MERGE_OPTION_LUT.get("rhel_os_merge", ())
+        else:
+            print(
+                "Warning: --rhel-os-merge is ignored unless --testcategory is also specified.",
+                file=sys.stderr
+            )
+
+    data = preprocess_input_data(
+        data,
+        requested_testcategories,
+        available_testcategories,
+        enabled_os_merge_rules,
+    )
 
     # Generate outputs with generation log
     output = get_generation_log()
@@ -924,13 +1007,6 @@ def main():
 
     # Post-process architecture filtering on generated JSON only
     output = postprocess_output_by_arch(output, args.no_arm64, args.no_amd64)
-
-    # Post-process testcategory filtering on generated JSON only
-    output = postprocess_output_by_testcategory(
-        output,
-        requested_testcategories,
-        available_testcategories
-    )
 
     selected_modes = [
         flag_name for enabled, flag_name in [
@@ -956,7 +1032,9 @@ def main():
     elif args.no_amd64:
         arch_suffix = "_no_amd64"
 
-    default_output = Path.cwd() / f"one_big_json_analytics_{output_type}{arch_suffix}.json"
+    merge_suffix = "_rhel_os_merge" if enabled_os_merge_rules else ""
+
+    default_output = Path.cwd() / f"one_big_json_analytics_{output_type}{arch_suffix}{merge_suffix}.json"
     output_path = Path(args.output) if args.output else default_output
     output = _sort_numeric_keyed_dicts(output)
     output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding='utf-8')

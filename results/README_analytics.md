@@ -290,6 +290,7 @@ JSON 出力の先頭に `generation log` を含めます。
 | `--no_arm64` | 任意 | arm64インスタンスの結果を出力から取り除く。JSON生成完了後の Post Process でのみ作用する。ランキング項目は取り除いたうえで再集計する。 |
 | `--no_amd64` | 任意 | amd64/x86_64インスタンスの結果を出力から取り除く。JSON生成完了後の Post Process でのみ作用する。ランキング項目は取り除いたうえで再集計する。 |
 | `--testcategory` | 任意 | 入力ファイル中の"testcategory"に対して`--testcategory=[<testcategory>]`とリスト指定された場合はそこに含まれるデータのみを出力。もしリスト内で存在しない`<testcategory>`を指定された場合は、そのリスト要素のみWaringを出して処理をスキップ。 |
+|`--rhel-os-merge` | 任意かつ`--testcategory`指定時にのみ有効 | RHEL系の2つの<os>を1にマージする。マージの対象は"Red_10_x"と "Oracle_10_y"のみで、マージ後の<os>は"RHEL_10"とする。 |
 | `--all` | 任意 | すべての結果を出力 |
 | `--output` | 任意 | 出力先ファイル名。デフォルトは `${PWD}/one_big_json_analytics_<type>.json` |
 | `--help` | 任意 | ヘルプメッセージを表示 |
