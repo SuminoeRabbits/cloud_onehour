@@ -79,32 +79,32 @@
 # なお、--testcategoryオプションは--analyzeが指定されている場合にのみ有効です。
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --testcategory <testcategory> \
+#     --testcategory <testcategory> --rhel-os-merge \
 #     --perf \
 #     --output  ./global/<testcategory>/<testcategory>_performance_analysis.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --testcategory <testcategory> \
+#     --testcategory <testcategory> --rhel-os-merge \
 #     --perf --no_arm64 \
 #     --output  ./global/<testcategory>/<testcategory>_performance_analysis_x86_64.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --testcategory <testcategory> \
+#     --testcategory <testcategory> --rhel-os-merge \
 #     --perf --no_amd64 \
 #     --output  ./global/<testcategory>/<testcategory>_performance_analysis_arm64.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --testcategory <testcategory> \
+#     --testcategory <testcategory> --rhel-os-merge \
 #     --cost \
 #     --output ./global/<testcategory>/<testcategory>_cost_analysis.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --testcategory <testcategory> \
+#     --testcategory <testcategory> --rhel-os-merge \
 #     --cost --no_arm64\
 #     --output ./global/<testcategory>/<testcategory>_cost_analysis_x86_64.json
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
-#     --testcategory <testcategory> \
+#     --testcategory <testcategory> --rhel-os-merge \
 #     --cost --no_amd64\
 #     --output ./global/<testcategory>/<testcategory>_cost_analysis_arm64.json
 #
@@ -705,6 +705,7 @@ def main() -> int:
                 for category in valid_categories:
                     category_dir = global_dir / category
                     category_dir.mkdir(parents=True, exist_ok=True)
+                    category_base_flags = ["--testcategory", category, "--rhel-os-merge"]
 
                     perf_output = category_dir / f"{category}_performance_analysis.json"
                     perf_x86_output = category_dir / f"{category}_performance_analysis_x86_64.json"
@@ -717,12 +718,12 @@ def main() -> int:
                         if out.exists():
                             print(f"Overwriting existing analysis -> {out}")
 
-                    run_analytics(analytics_script, global_results, perf_output, ["--testcategory", category, "--perf"], category_dir)
-                    run_analytics(analytics_script, global_results, perf_x86_output, ["--testcategory", category, "--perf", "--no_arm64"], category_dir)
-                    run_analytics(analytics_script, global_results, perf_arm64_output, ["--testcategory", category, "--perf", "--no_amd64"], category_dir)
-                    run_analytics(analytics_script, global_results, cost_output, ["--testcategory", category, "--cost"], category_dir)
-                    run_analytics(analytics_script, global_results, cost_x86_output, ["--testcategory", category, "--cost", "--no_arm64"], category_dir)
-                    run_analytics(analytics_script, global_results, cost_arm64_output, ["--testcategory", category, "--cost", "--no_amd64"], category_dir)
+                    run_analytics(analytics_script, global_results, perf_output, category_base_flags + ["--perf"], category_dir)
+                    run_analytics(analytics_script, global_results, perf_x86_output, category_base_flags + ["--perf", "--no_arm64"], category_dir)
+                    run_analytics(analytics_script, global_results, perf_arm64_output, category_base_flags + ["--perf", "--no_amd64"], category_dir)
+                    run_analytics(analytics_script, global_results, cost_output, category_base_flags + ["--cost"], category_dir)
+                    run_analytics(analytics_script, global_results, cost_x86_output, category_base_flags + ["--cost", "--no_arm64"], category_dir)
+                    run_analytics(analytics_script, global_results, cost_arm64_output, category_base_flags + ["--cost", "--no_amd64"], category_dir)
 
                     for out in (perf_output, perf_x86_output, perf_arm64_output, cost_output, cost_x86_output, cost_arm64_output):
                         flatten_testcategory_in_json(out, category)
