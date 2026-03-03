@@ -44,8 +44,26 @@
                     "sve2_support": false,
                     "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
                     "exe_time_v8cpu": "10.0"
+                },
+                "pts/glibc-bench_1.9.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "10.0"
+                },
+                "pts/perf-bench_1.1.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
+                    "exe_time_v8cpu": "10.0"
                 }
-            }
+            }   
         },
         "Build Process": {
             "enabled": true,
