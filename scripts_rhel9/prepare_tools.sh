@@ -96,12 +96,15 @@ else
         sudo dnf install -y python3.11 python3.11-pip python3.11-devel
     fi
 fi
-# Ensure unversioned 'python' command exists (required by kernel/perf build tools e.g. jevents)
-if ! command -v python >/dev/null 2>&1; then
-    if command -v python3 >/dev/null 2>&1; then
-        sudo alternatives --install /usr/bin/python python /usr/bin/python3 1
-        echo "[OK] /usr/bin/python -> $(python3 --version) via alternatives"
+# Ensure unversioned 'python' command is functional (required by kernel/perf build tools e.g. jevents)
+# Use python -c test (not command -v) to detect non-functional stubs on EL10
+if ! python -c 'import sys' >/dev/null 2>&1; then
+    _py3="$(command -v python3 2>/dev/null || true)"
+    if [ -n "$_py3" ]; then
+        sudo ln -sf "$_py3" /usr/bin/python
+        echo "[OK] /usr/bin/python -> $("$_py3" --version 2>&1) (symlink)"
     fi
+    unset _py3
 fi
 
 # setup_init.sh enables EPEL and CRB repos, which are required by
