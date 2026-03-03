@@ -96,6 +96,13 @@ else
         sudo dnf install -y python3.11 python3.11-pip python3.11-devel
     fi
 fi
+# Ensure unversioned 'python' command exists (required by kernel/perf build tools e.g. jevents)
+if ! command -v python >/dev/null 2>&1; then
+    if command -v python3 >/dev/null 2>&1; then
+        sudo alternatives --install /usr/bin/python python /usr/bin/python3 1
+        echo "[OK] /usr/bin/python -> $(python3 --version) via alternatives"
+    fi
+fi
 
 # setup_init.sh enables EPEL and CRB repos, which are required by
 # subsequent scripts (e.g. setup_gcc14.sh needs aria2 from EPEL).
