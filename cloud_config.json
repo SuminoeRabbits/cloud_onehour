@@ -69,7 +69,7 @@
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_tinymembench-1.0.2.py 1 --quick > /tmp/pts_runner_tinymembench.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_memcached-1.2.0.py --quick > /tmp/pts_runner_memcached.log 2>&1",
       "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_cachebench-1.2.0.py --quick > /tmp/pts_runner_cachebench.log 2>&1",
-  "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
+      "cd ~/cloud_onehour && git pull && ./pts_runner/pts_runner_tensorflow-lite-1.1.0.py --quick > /tmp/pts_runner_tensorflow-lite.log 2>&1",
       "cd ~/cloud_onehour/results && ./pts_runner_postmortem.py > /tmp/pts_runner_postmortem.log 2>&1",
       "cd ~/cloud_onehour/results && ./make_one_big_json.py > /tmp/make_one_big_json.log 2>&1"
     ],
