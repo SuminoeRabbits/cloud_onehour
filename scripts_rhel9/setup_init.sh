@@ -329,6 +329,7 @@ PACKAGE_SPECS=(
     "bzip2:bzip2"
     "flex:flex"
     "bison:bison"
+    "gawk:gawk"
     "openssl-devel:openssl-devel"
     "openssl:openssl"
     "elfutils-libelf-devel:elfutils-libelf-devel"
