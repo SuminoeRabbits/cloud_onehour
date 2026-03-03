@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text or "")
+
+
 def detect_pts_failure_from_log(log_file: Path) -> tuple[bool, str]:
     patterns = {
         "multiple tests are not installed": "PTS test profile is not installed",
+        "is not installed": "PTS test profile is not installed",
+        "[problem]": "PTS reported a problem",
         "the following tests failed": "PTS reported test execution failure",
         "quit with a non-zero exit status": "PTS benchmark subprocess failed",
+        "installer exited with a non-zero exit status": "PTS installer failed",
         "failed to properly run": "PTS benchmark did not run properly",
     }
 
@@ -38,7 +46,11 @@ def get_install_status(benchmark_full: str, benchmark: str) -> dict:
             text=True,
             check=False,
         )
-        info_installed = verify_result.returncode == 0 and "Test Installed: Yes" in verify_result.stdout
+        info_output = _strip_ansi(verify_result.stdout)
+        info_installed = (
+            verify_result.returncode == 0
+            and re.search(r"test\s+installed\s*:\s*yes", info_output, flags=re.IGNORECASE) is not None
+        )
     except Exception:
         info_installed = False
 
@@ -49,7 +61,7 @@ def get_install_status(benchmark_full: str, benchmark: str) -> dict:
             text=True,
             check=False,
         )
-        combined_output = (
+        combined_output = _strip_ansi(
             f"{test_installed_result.stdout}\n{test_installed_result.stderr}"
         ).lower()
         indicates_not_installed = "not installed" in combined_output
