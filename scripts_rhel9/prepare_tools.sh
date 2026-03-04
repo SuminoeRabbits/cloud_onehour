@@ -96,16 +96,25 @@ else
         sudo dnf install -y python3.11 python3.11-pip python3.11-devel
     fi
 fi
-# Ensure unversioned 'python' command is functional (required by kernel/perf build tools e.g. jevents)
-# Use python -c test (not command -v) to detect non-functional stubs on EL10
-if ! python -c 'import sys' >/dev/null 2>&1; then
+# Ensure /usr/bin/python FILE exists (required by kernel/perf build tools e.g. jevents).
+# IMPORTANT: Do NOT use 'python -c' to test existence.
+# EL10 exposes 'python' as a shell function via /etc/profile.d (passes 'python -c' in bash),
+# but make's $(shell which python) cannot see shell functions → jevents build fails.
+# Check for the actual file on disk instead.
+if [ ! -e /usr/bin/python ] && [ ! -e /usr/local/bin/python ]; then
     _py3="$(command -v python3 2>/dev/null || true)"
     if [ -n "$_py3" ]; then
         sudo ln -sf "$_py3" /usr/bin/python
-        echo "[OK] /usr/bin/python -> $("$_py3" --version 2>&1) (symlink)"
+        echo "[OK] /usr/bin/python -> $_py3 ($("$_py3" --version 2>&1)) (symlink created)"
+    else
+        echo "[WARN] No python3 found, cannot create /usr/bin/python symlink"
     fi
     unset _py3
 fi
+echo "[DEBUG] Python file status:"
+echo "  /usr/bin/python  : $(ls -la /usr/bin/python  2>/dev/null || echo 'NOT FOUND')"
+echo "  /usr/bin/python3 : $(ls -la /usr/bin/python3  2>/dev/null || echo 'NOT FOUND')"
+echo "  which python3    : $(command -v python3 2>/dev/null || echo 'NOT FOUND')"
 
 # setup_init.sh enables EPEL and CRB repos, which are required by
 # subsequent scripts (e.g. setup_gcc14.sh needs aria2 from EPEL).
