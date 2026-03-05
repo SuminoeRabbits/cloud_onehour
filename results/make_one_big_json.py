@@ -773,7 +773,7 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
 # JSON structure builder
 # ---------------------------------------------------------------------------
 
-def build_json_structure(project_root: Path) -> Dict[str, Any]:
+def build_json_structure(project_root: Path) -> tuple:
     """
     Build the complete JSON structure by traversing the directory tree.
     Structure per README_results.md:
@@ -801,10 +801,13 @@ def build_json_structure(project_root: Path) -> Dict[str, Any]:
             }
         }
     }
+
+    Returns: (result_dict, missing_parsers_set)
     """
     SKIP_DIRS = {'__pycache__', '.pytest_cache', 'node_modules', '.git', '.venv', 'venv', 'json_parser'}
 
     result = {}
+    missing_parsers: set = set()
 
     for machine_dir in sorted(project_root.iterdir()):
         if not machine_dir.is_dir() or machine_dir.name.startswith('.') or machine_dir.name in SKIP_DIRS:
@@ -845,6 +848,10 @@ def build_json_structure(project_root: Path) -> Dict[str, Any]:
 
                     if benchmark_data:
                         testcategory_data["benchmark"][benchmark] = {"thread": benchmark_data}
+                    else:
+                        parser_file = Path(__file__).resolve().parent / "json_parser" / f"json_parser_{benchmark}.py"
+                        if not parser_file.exists():
+                            missing_parsers.add(benchmark)
 
                 if testcategory_data["benchmark"]:
                     os_data["testcategory"][testcategory] = testcategory_data
@@ -854,7 +861,7 @@ def build_json_structure(project_root: Path) -> Dict[str, Any]:
 
         result[machinename] = machine_data
 
-    return result
+    return result, missing_parsers
 
 
 # ---------------------------------------------------------------------------
@@ -1046,6 +1053,7 @@ def main():
             sys.exit(0)
 
     merged_data = {}
+    all_missing_parsers: set = set()
     for project_root_str in project_roots:
         project_root = Path(project_root_str).resolve()
 
@@ -1055,7 +1063,8 @@ def main():
 
         print(f"Processing results from: {project_root}")
 
-        json_data = build_json_structure(project_root)
+        json_data, missing_parsers = build_json_structure(project_root)
+        all_missing_parsers.update(missing_parsers)
 
         merged_data = merge_json_data(merged_data, json_data)
 
@@ -1071,6 +1080,14 @@ def main():
     print(f"Successfully generated {output_file}")
     print(f"Output version: {current_version}")
     print(f"Total machines processed: {len(merged_data)}")
+
+    if all_missing_parsers:
+        sorted_missing = sorted(all_missing_parsers)
+        print(f"\n[MISSING PARSERS] {len(sorted_missing)} benchmark(s) were skipped (no output in JSON):", file=sys.stderr)
+        for idx, name in enumerate(sorted_missing, 1):
+            print(f"  [{idx}] {name}", file=sys.stderr)
+            print(f"        -> json_parser/json_parser_{name}.py", file=sys.stderr)
+        print("Create the above file(s) to include these benchmarks.", file=sys.stderr)
 
     print("\nChecking output JSON syntax...")
     if not check_json_syntax(output_file):
