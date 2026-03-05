@@ -55,7 +55,7 @@
                     "exe_time_v8cpu": "10.0"
                 },
                 "pts/perf-bench-1.1.0": {
-                    "enabled": true,
+                    "enabled": false,
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
@@ -251,6 +251,15 @@
         "Database": {
             "enabled": true,
             "items": {
+                "pts/pgbench-1.17.0": {
+                    "enabled": false,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "PostgreSQL 18.1. Clients: 1,50,100,250,500,800,1000,5000 (3 new vs 1.11.1). Results: 'excluding connections establishing' format. No install.sh patches needed.",
+                    "exe_time_v8cpu": "300.0"
+                },
                 "pts/pgbench-1.11.1": {
                     "enabled": true,
                     "THFix_in_compile": false,

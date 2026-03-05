@@ -178,12 +178,12 @@
   },
   "gcp": {
     "enable": true,
-    "arm64_only": false,
+    "arm64_only": true,
     "project_id": "AUTO_DETECT",
     "quota_vcpus_all_regions": 32,
     "regions": {
       "asia-northeast1-b": {
-        "enable": true,
+        "enable": false,
         "vcpux16_only": "true",
         "vcpux8_only": "false",
         "instances": [
@@ -214,7 +214,7 @@
         ]
       },
       "asia-northeast1-c": {
-        "enable": true,
+        "enable": false,
         "vcpux16_only": "true",
         "vcpux8_only": "false",
         "instances": [
@@ -287,6 +287,18 @@
         "instances": [
           {
             "enable": true,
+            "testloads": false,
+            "type": "n4a-standard-16",
+            "arch": "arm64",
+            "hostname": "gcp-n4a-standard-16-arm64",
+            "vcpus": 16,
+            "name": "gcp-n4a-standard-16-arm64-vcpu-16",
+            "cpu_cost_hour[730h-mo]": 0.932,
+            "extra_150g_storage": true,
+            "extra_150g_storage_cost_hour": 0.0201
+          },
+          {
+            "enable": false,
             "testloads": false,
             "type": "t2a-standard-8",
             "arch": "arm64",
