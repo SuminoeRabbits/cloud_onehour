@@ -149,7 +149,7 @@ class CpuminerOptRunner:
         """
         self.benchmark = "cpuminer-opt-1.8.0"
         self.benchmark_full = f"pts/{self.benchmark}"
-        self.test_category = "Cryptography"
+        self.test_category = "Processor"
         self.test_category_dir = self.test_category.replace(" ", "_").replace("/", "_")
 
         # System info
