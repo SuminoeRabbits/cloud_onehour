@@ -459,6 +459,8 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 |"c4-standard-16"|	GCP|	16|	Intel Xeon Platinum 8581C (5th Emerald Rapids)|	x86-64 (AMX + AVX-512)| 0.7928 |
 |"c4a-standard-8"|	GCP|	8|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.3869 |
 |"c4a-standard-16"|	GCP|	16|	Neoverse-V2 (Google Axion)|	Armv9.0-A (SVE2-128) | 0.7712 |
+|"n4a-standard-8"|	GCP|	8|	Neoverse-N3 (Google Axion)|	Armv9.2-A (SVE2-128) | 0.466 |
+|"n4a-standard-16"|	GCP|	16|	Neoverse-N3 (Google Axion)|	Armv9.2-A (SVE2-128) | 0.932 |
 |"t2a-standard-8"|	GCP|	8|	Neoverse-N1(Ampere Altra)|	Armv8.2-A (NEON-128)| 0.40654 |
 |"t2a-standard-16"|	GCP|	16|	Neoverse-N1(Ampere Altra)|	Armv8.2-A (NEON-128)| 0.75968 |
 |"E5" and "Flex"|	OCI|	8|	AMD EPYC 9J14 (Zen 4 "Genoa")|	x86-64 (AMX + AVX-512)| 0.1727 |

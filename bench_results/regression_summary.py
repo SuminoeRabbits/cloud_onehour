@@ -370,17 +370,25 @@ def is_valid_one_big_json(json_path: Path, machinename: str, target_major: Optio
             print(f"Version mismatch in {json_path}: expected {target_major}, found {file_version}", file=sys.stderr)
             return False
 
+    actual_machine = machinename
     if machinename not in data:
-        print(
-            f"Invalid one_big_json: missing machinename '{machinename}' in {json_path}",
-            file=sys.stderr,
-        )
-        return False
-    machine_data = data.get(machinename, {})
+        # Fallback to check if any key starts with machinename (e.g. -vcpu-16 suffix)
+        for k in data.keys():
+            if k.startswith(machinename) and k not in ("generation log", "generation_log"):
+                actual_machine = k
+                break
+        else:
+            print(
+                f"Invalid one_big_json: missing machinename '{machinename}' in {json_path}",
+                file=sys.stderr,
+            )
+            return False
+            
+    machine_data = data.get(actual_machine, {})
     os_data = machine_data.get("os", {})
     if not isinstance(os_data, dict) or not os_data:
         print(
-            f"Invalid one_big_json: empty os data for '{machinename}' in {json_path}",
+            f"Invalid one_big_json: empty os data for '{actual_machine}' in {json_path}",
             file=sys.stderr,
         )
         return False

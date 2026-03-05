@@ -773,7 +773,7 @@ def get_arch_from_machinename(machinename: str, machine_data: Dict[str, Any]) ->
     
     # Fallback to name patterns
     name = machinename.lower()
-    if any(p in name for p in ["m8g", "m7g", "c4a", "t2a", "a1.flex", "a2.flex"]):
+    if any(p in name for p in ["m8g", "m7g", "c4a", "n4a", "t2a", "a1.flex", "a2.flex"]):
         return "arm64"
     return "x86_64"
 
@@ -781,8 +781,8 @@ def get_arch_from_machinename(machinename: str, machine_data: Dict[str, Any]) ->
 def is_arm64_baseline(machinename: str) -> bool:
     """Check if machinename is an arm64 reference instance."""
     name = machinename.lower()
-    # AWS: m8g, GCP: c4a, OCI: a1.flex (partial matches)
-    return any(p in name for p in ["m8g", "c4a", "a1.flex"])
+    # AWS: m8g, GCP: c4a/n4a, OCI: a1.flex (partial matches)
+    return any(p in name for p in ["m8g", "c4a", "n4a", "a1.flex"])
 
 
 def get_economic_efficiency(w: Dict[str, Any]) -> Optional[float]:
