@@ -53,11 +53,11 @@ echo "--- Post-Switch Java Version Check ---"
 java -version
 
 echo ""
-echo "--- Apache Maven Setup (Ensuring 3.9.12) ---"
+echo "--- Apache Maven Setup (Ensuring 3.9.13) ---"
 # Maven setup logic remains useful for benchmarks
 
 CURRENT_MVN_VERSION=$(mvn -version 2>&1 | head -n 1 | awk '{print $3}') || CURRENT_MVN_VERSION=""
-TARGET_MVN_VERSION="3.9.12"
+TARGET_MVN_VERSION="3.9.13"
 
 if [ "$CURRENT_MVN_VERSION" = "$TARGET_MVN_VERSION" ]; then
     echo "Apache Maven $TARGET_MVN_VERSION is already installed."

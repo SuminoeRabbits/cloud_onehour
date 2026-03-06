@@ -71,7 +71,7 @@ fi
 
 echo "--- Maven Setup ---"
 # Maven is platform-independent tarball install, can mostly reuse
-TARGET_MVN_VERSION="3.9.12"
+TARGET_MVN_VERSION="3.9.13"
 if ! mvn -version 2>&1 | grep -q "$TARGET_MVN_VERSION"; then
     MAVEN_URL="https://dlcdn.apache.org/maven/maven-3/${TARGET_MVN_VERSION}/binaries/apache-maven-${TARGET_MVN_VERSION}-bin.tar.gz"
     sudo mkdir -p /opt/maven
