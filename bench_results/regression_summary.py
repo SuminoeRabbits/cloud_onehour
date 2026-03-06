@@ -334,8 +334,13 @@ def generate_one_big_json_if_missing(
         str(output_json),
         "--force",
     ]
-    run_script(cmd, results_path)
+    result = run_script(cmd, results_path)
     print(f"Generated missing JSON -> {output_json}")
+    if result.stderr:
+        relevant = [line for line in result.stderr.splitlines()
+                    if "[MISSING PARSERS]" in line or line.startswith("  [") or line.startswith("Create")]
+        if relevant:
+            print('\n'.join(relevant), file=sys.stderr)
 
 
 def get_script_major_version(script_path: Path) -> Optional[str]:
