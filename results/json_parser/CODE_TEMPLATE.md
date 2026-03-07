@@ -533,7 +533,7 @@ def _collect_thread_payload(benchmark_dir, thread_num, cost_hour):
     value = float(match.group(1))
 
     test_payload = {
-        "<test_name_key>": {
+        "<test_name_key> [<unit>]": {
             "description": "<description>",
             "values": value,
             "raw_values": [value],
@@ -575,7 +575,8 @@ def _collect_thread_payload(benchmark_dir, thread_num, cost_hour):
     for section_id, value_str in TEST_SECTION_RE.findall(content):
         value = float(value_str)
         description = f"<セクションから生成>"
-        key = f"<テスト名> - {description}"
+        unit = "<unit>"
+        key = f"<テスト名> - {description} [{unit}]"
 
         test_payload[key] = {
             "description": description,
@@ -663,8 +664,8 @@ def _collect_thread_payload(benchmark_dir, thread_num, cost_hour):
 
         cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
 
-        # キー: "<title> - <description>"
-        key = f"{title} - {description}"
+        # キー: "<title> - <description> [<unit>]" (単位を含めて一意にする)
+        key = f"{title} - {description} [{unit}]" if description else f"{title} [{unit}]"
 
         test_payload[key] = {
             "description": description,
@@ -714,7 +715,7 @@ def _collect_thread_payload(benchmark_dir, thread_num, cost_hour):
     cost = round(cost_hour * value / 3600, 6) if value else 0.0
 
     test_payload = {
-        "<test_name_key>": {
+        "<test_name_key> [Seconds]": {
             "description": "<description>",
             "values": value,
             "raw_values": [value],

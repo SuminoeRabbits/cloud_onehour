@@ -186,8 +186,8 @@ def _collect_thread_payload(
 
         cost = round(cost_hour * time_val / 3600, 6) if time_val > 0 else 0.0
 
-        # キー: "<title> - <description>"
-        key = f"{title} - {description}" if description else title
+        # キー: "<title> - <description> [<unit>]"
+        key = f"{title} - {description} [{unit}]" if description else f"{title} [{unit}]"
 
         test_payload[key] = {
             "description": description,

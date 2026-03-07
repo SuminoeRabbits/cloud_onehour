@@ -16,7 +16,8 @@
 9. cost計算式（round(cost_hour * time / 3600, 6)）
 10. パターン別データソース（log vs JSON）
 11. 旧式固定階層ロジックの検出
-12. wrapper-style実装の検出と警告
+12. test_payloadのキーに単位([unit]等)を含めているかの警告
+13. wrapper-style実装の検出と警告
 """
 
 from __future__ import annotations
@@ -71,6 +72,7 @@ class JsonParserComplianceChecker:
         self.check_cost_formula()
         self.check_collect_thread_payload()
         self.check_pattern_alignment()
+        self.check_unit_in_key()
         self.check_common_wrapper_warning()
         self.check_deprecated_hierarchy_logic()
 
@@ -330,6 +332,27 @@ class JsonParserComplianceChecker:
         else:
             self.warnings.append(
                 "⚠️  WARNING: Non-Case5 parser does not appear to use <N>-thread.json"
+            )
+
+    def check_unit_in_key(self) -> None:
+        """Check if unit is included in the test_payload key to prevent overwriting."""
+        if "run_main(" in self.content:
+            return  # Skip for wrapper-style
+            
+        # Common patterns used to include unit in the key name
+        has_unit_in_key = (
+            "[{unit}]" in self.content or
+            "[{scale}]" in self.content or
+            "[<unit>]" in self.content or
+            "[{}]" in self.content and "unit" in self.content
+        )
+        
+        if has_unit_in_key:
+            self.passed.append("✅ Unit included in test_payload key ([{unit}])")
+        else:
+            self.errors.append(
+                "❌ CRITICAL: Unit (e.g., [{unit}]) not found in test_payload key. "
+                "This may cause data overwrite if tests have the same title/description."
             )
 
     def check_common_wrapper_warning(self) -> None:

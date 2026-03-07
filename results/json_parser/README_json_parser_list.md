@@ -41,4 +41,26 @@
 | `json_parser_tinymembench-1.0.2.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Memcpy / Memset) |
 | `json_parser_valkey-1.0.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_valkey-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
+| `json_parser_webp-1.4.0.py` | C (JSON) | 5 | `<N>-thread.json` から取得 (Default / Quality 100 等), pts/webp-1.2.0用 |
 | `json_parser_x265-1.5.0.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Bosphorus 4K / 1080p) |
+
+## 現在実行ログがなく未検証（動作未確認）のパーサーリスト
+- `json_parser_apache-3.0.0.py`
+- `json_parser_build-gcc-1.5.0.py`
+- `json_parser_build-linux-kernel-1.17.1.py`
+- `json_parser_build-llvm-1.6.0.py`
+- `json_parser_cachebench-1.2.0.py`
+- `json_parser_compress-lz4-1.10.0.py`
+- `json_parser_compress-xz-1.1.0.py`
+- `json_parser_compress-zstd-1.6.0.py`
+- `json_parser_cpuminer-opt-1.8.0.py`
+- `json_parser_ffmpeg-7.0.1.py`
+- `json_parser_memcached-1.2.0.py`
+- `json_parser_numpy-1.2.1.py`
+- `json_parser_pgbench-1.11.1.py`
+- `json_parser_pmbench-1.0.2.py`
+- `json_parser_renaissance-1.4.0.py`
+- `json_parser_rustls-1.0.0.py`
+- `json_parser_spark-1.0.1.py`
+- `json_parser_tensorflow-lite-1.1.0.py`
+- `json_parser_tinymembench-1.0.2.py`
