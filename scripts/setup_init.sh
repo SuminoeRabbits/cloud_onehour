@@ -16,8 +16,8 @@ sudo apt-get install -y cl-ppcre libpcre3-dev
 sudo apt-get -y install p7zip-full
 sudo apt-get install -y libc6-dev numactl
 sudo apt-get install -y gawk
-# libpng (required by pts/avifenc libavif cmake build; FindPNG requires >= 1.6.32)
-sudo apt-get install -y libpng-dev
+# libpng + libjpeg (required by pts/avifenc libavif cmake build)
+sudo apt-get install -y libpng-dev libjpeg-dev
 # libsharpyuv (required by pts/avifenc; split from libwebp >= 1.3.0)
 # On Ubuntu 24.04+, libwebp-dev depends on libsharpyuv-dev automatically.
 # On Ubuntu 22.04, libwebp-dev bundles sharpyuv headers.

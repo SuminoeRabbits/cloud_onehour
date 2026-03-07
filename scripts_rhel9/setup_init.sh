@@ -350,6 +350,7 @@ PACKAGE_SPECS=(
     "gzip:gzip"
     "libwebp-devel:libwebp-devel"
     "libpng-devel:libpng-devel"
+    "libjpeg-turbo-devel:libjpeg-turbo-devel"
 )
 
 OPTIONAL_PACKAGE_SPECS=(
