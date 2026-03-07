@@ -287,15 +287,17 @@ def main():
             final_opts = []
             
             # testcategory の展開
-            if "Full" in args.testcategory:
+            # ユーザーが指定したかどうかは sys.argv を確認するか default かどうかで判定
+            if "Full" in args.testcategory and "--testcategory" not in sys.argv:
                 cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in valid_categories])
                 final_opts.append(f"--testcategory {cat_cmd}")
             else:
                 cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in args.testcategory])
-                final_opts.append(f"--testcategory {cat_cmd}")
+                if "Full" not in cat_cmd:
+                    final_opts.append(f"--testcategory {cat_cmd}")
                 
             # test_length の展開
-            if "Full" in selected_lengths and not (args.short or args.middle or args.long or args.very_long):
+            if "Full" in args.test_length and not (args.short or args.middle or args.long or args.very_long):
                 final_opts.append("--short --middle --long --very_long")
             else:
                 len_flags = []
@@ -311,12 +313,29 @@ def main():
             
             opts_str = " ".join(final_opts)
         else:
-            # 通常は入力されたコマンド引数から --regression を取り除くだけ
-            opts = [arg for arg in sys.argv[1:] if arg != "--regression"]
+            # 通常は入力されたコマンド引数から --regression と -v を取り除くだけ
+            opts = [arg for arg in sys.argv[1:] if arg not in ("--regression", "-v", "--verbose")]
             opts_str = " ".join([f'"{opt}"' if ' ' in opt else opt for opt in opts])
             
         cmd_suffix = f" {opts_str}" if opts_str else ""
-        print(f"cd {base_dir_str} && ./pts_regression.py{cmd_suffix}")
+        
+        # ログファイル名にオプションを反映させる
+        import re
+        log_name = "/tmp/pts_regression"
+        if opts_str:
+            # ハイフン(--)やクオートを削除、スペース等をアンダースコアに変換
+            safe_suffix = re.sub(r'[^a-zA-Z0-9_\-]', '_', opts_str.replace('--', '').replace('"', '').replace("'", ''))
+            safe_suffix = re.sub(r'_+', '_', safe_suffix).strip('_')
+            if safe_suffix:
+                log_name = f"{log_name}_{safe_suffix}"
+                
+            # ファイル名が長くなりすぎるのを防ぐ
+            if len(log_name) > 100:
+                log_name = log_name[:100]
+                
+        log_name += ".log"
+        
+        print(f"cd {base_dir_str} && ./pts_regression.py{cmd_suffix} > {log_name} 2>&1")
         sys.exit(0)
     
     # カテゴリ・テストの抽出と属性の付与
