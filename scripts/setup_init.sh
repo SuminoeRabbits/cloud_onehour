@@ -16,6 +16,32 @@ sudo apt-get install -y cl-ppcre libpcre3-dev
 sudo apt-get -y install p7zip-full
 sudo apt-get install -y libc6-dev numactl
 sudo apt-get install -y gawk
+# libsharpyuv (required by pts/avifenc; split from libwebp >= 1.3.0)
+# On Ubuntu 24.04+, libwebp-dev depends on libsharpyuv-dev automatically.
+# On Ubuntu 22.04, libwebp-dev bundles sharpyuv headers.
+sudo apt-get install -y libwebp-dev
+# libyuv (required by pts/avifenc libavif cmake build)
+# Note: libyuv-dev does NOT ship a .pc file; create one so pkg-config can find it.
+sudo apt-get install -y libyuv-dev
+if ! pkg-config --exists libyuv 2>/dev/null; then
+    ARCH_TRIPLE=$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || echo "$(uname -m)-linux-gnu")
+    LIBYUV_LIBDIR="/usr/lib/${ARCH_TRIPLE}"
+    LIBYUV_VER=$(dpkg-query -W -f='${Version}' libyuv-dev 2>/dev/null | grep -oP '^\d+' || echo "0")
+    sudo mkdir -p "${LIBYUV_LIBDIR}/pkgconfig"
+    sudo tee "${LIBYUV_LIBDIR}/pkgconfig/libyuv.pc" >/dev/null <<EOF
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=${LIBYUV_LIBDIR}
+includedir=\${prefix}/include
+
+Name: libyuv
+Description: YUV conversion and scaling library
+Version: ${LIBYUV_VER}
+Libs: -L\${libdir} -lyuv
+Cflags: -I\${includedir}
+EOF
+    echo "[OK] Created ${LIBYUV_LIBDIR}/pkgconfig/libyuv.pc"
+fi
 
 # 1. Architecture Detection
 ARCH=$(uname -m)

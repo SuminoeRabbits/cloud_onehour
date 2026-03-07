@@ -348,10 +348,14 @@ PACKAGE_SPECS=(
     "wget:wget"
     "tar:tar"
     "gzip:gzip"
+    "libwebp-devel:libwebp-devel"
 )
 
 OPTIONAL_PACKAGE_SPECS=(
     "htop:htop"
+    # libyuv: required by pts/avifenc libavif cmake build.
+    # Available in EPEL9; may be absent on EL10 (avifenc will fail to install without it).
+    "libyuv-devel:libyuv-devel"
 )
 
 for spec in "${PACKAGE_SPECS[@]}"; do
@@ -365,6 +369,92 @@ for spec in "${OPTIONAL_PACKAGE_SPECS[@]}"; do
     candidates_csv="${spec#*:}"
     install_required_from_candidates "$logical_name" "$candidates_csv" optional
 done
+
+# Ensure libyuv is findable via pkg-config (needed by pts/avifenc libavif cmake build).
+# libyuv-devel from EPEL9 ships a .pc file; EL10 EPEL may not have the package → build from source.
+
+_libyuv_find_libdir() {
+    local d
+    for d in /usr/lib64 /usr/lib /usr/local/lib64 /usr/local/lib; do
+        if compgen -G "${d}/libyuv.so*" >/dev/null 2>&1 || [ -f "${d}/libyuv.a" ]; then
+            echo "$d"; return 0
+        fi
+    done
+    return 1
+}
+
+_libyuv_create_pc() {
+    local libdir="$1"
+    local prefix includedir
+    if [[ "$libdir" == /usr/local/* ]]; then
+        prefix=/usr/local; includedir=/usr/local/include
+    else
+        prefix=/usr; includedir=/usr/include
+    fi
+    local pc_dir="${libdir}/pkgconfig"
+    sudo mkdir -p "$pc_dir"
+    sudo tee "${pc_dir}/libyuv.pc" >/dev/null <<EOF
+prefix=${prefix}
+exec_prefix=\${prefix}
+libdir=${libdir}
+includedir=${includedir}
+
+Name: libyuv
+Description: YUV conversion and scaling library
+Version: 0
+Libs: -L\${libdir} -lyuv
+Cflags: -I\${includedir}
+EOF
+    echo "[OK] Created ${pc_dir}/libyuv.pc"
+}
+
+_build_libyuv_from_source() {
+    echo "[INFO] Building libyuv from source (EL10 fallback)..."
+    sudo dnf -y install git cmake gcc gcc-c++ make 2>/dev/null || true
+    if ! command -v cmake >/dev/null 2>&1; then
+        echo "[ERROR] cmake unavailable; cannot build libyuv from source."
+        return 1
+    fi
+
+    local build_dir="/tmp/cloud_onehour-libyuv"
+    rm -rf "$build_dir"
+    local cloned=false
+    if git clone --depth 1 https://chromium.googlesource.com/libyuv/libyuv "$build_dir" 2>/dev/null; then
+        cloned=true
+    elif git clone --depth 1 https://github.com/lemenkov/libyuv.git "$build_dir" 2>/dev/null; then
+        cloned=true
+    fi
+    if [ "$cloned" = false ]; then
+        echo "[ERROR] Failed to clone libyuv repository."
+        rm -rf "$build_dir"
+        return 1
+    fi
+
+    cmake -S "$build_dir" -B "${build_dir}/build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_SHARED_LIBS=ON
+    cmake --build "${build_dir}/build" -j"$(nproc)"
+    sudo cmake --install "${build_dir}/build"
+    sudo ldconfig 2>/dev/null || true
+    rm -rf "$build_dir"
+    echo "[OK] libyuv built and installed from source to /usr/local"
+}
+
+if ! pkg-config --exists libyuv 2>/dev/null; then
+    if libdir=$(_libyuv_find_libdir); then
+        # Library installed by package manager but no .pc → create it
+        _libyuv_create_pc "$libdir"
+    else
+        # Library not installed → build from source (EL10 fallback)
+        if _build_libyuv_from_source; then
+            libdir=$(_libyuv_find_libdir) || libdir=/usr/local/lib64
+            pkg-config --exists libyuv 2>/dev/null || _libyuv_create_pc "$libdir"
+        else
+            echo "[WARN] libyuv unavailable; pts/avifenc will fail to install on this host."
+        fi
+    fi
+fi
 
 echo "Installing aria2 (with static binary fallback)..."
 if ! command -v aria2c >/dev/null 2>&1; then
