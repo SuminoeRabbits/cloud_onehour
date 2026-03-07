@@ -262,7 +262,7 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "kvazaar auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them",
-                    "exe_time_v8cpu": "15.0"
+                    "exe_time_v8cpu": "20.0"
                 },
                 "pts/avifenc-1.4.1": {
                     "enabled": true,
@@ -281,6 +281,15 @@
                     "sve2_support": true,
                     "notes": "cwebp auto-detects CPU cores; supports -mt but PTS doesn't use it",
                     "exe_time_v8cpu": "10.0"
+                },
+                "pts/svt-av1-2.17.0": {
+                    "enabled": true,
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "svt-av1 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them",
+                    "exe_time_v8cpu": "50.0"
                 }
             }
         },

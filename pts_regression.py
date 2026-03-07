@@ -56,8 +56,7 @@
 #     - scaling が "single_th" または "max_th" の場合 (例外ルール)
 #       exec_opt = base_opt (このルールを優先)
 #     - scaling が "full" の場合
-#       以下の4通りの exec_opt を生成し、4つの実行コマンドを作成します。
-#         - "N/4 --quick"
+#       以下の3通りの exec_opt を生成し、３つの実行コマンドを作成します。
 #         - "N/4*2 --quick"
 #         - "N/4*3 --quick"
 #         - "288 --quick"
@@ -176,7 +175,13 @@ def check_args_typo(provided_list, valid_list, arg_name):
         if item not in valid_list:
             matches = difflib.get_close_matches(item, valid_list, n=1, cutoff=0.5)
             suggestion = f" もしかして: '{matches[0]}' ですか？" if matches else ""
-            print(f"[ERROR] {arg_name} に '{item}' という値(カテゴリ/属性)は存在しません。{suggestion}", file=sys.stderr)
+            
+            # 複数指定の区切り文字間違い（カンマ使用）に対するヒント
+            list_hint = ""
+            if "," in item:
+                list_hint = f"\n  [ヒント] 複数指定する場合はカンマ(,)ではなくスペース(空欄)で区切ってください。\n  (例: {arg_name} {item.replace(',', ' ')})"
+                
+            print(f"[ERROR] {arg_name} に '{item}' という値(カテゴリ/属性)は存在しません。{suggestion}{list_hint}", file=sys.stderr)
             sys.exit(1)
 
 def generate_commands(testname: str, test_length: str, scaling: str) -> list[str]:
@@ -206,12 +211,10 @@ def generate_commands(testname: str, test_length: str, scaling: str) -> list[str
             opts = [base_opt]
         elif test_length == "middle":
             opts = ["--quick"]
-        else: # long, very_long の場合は 4パターンのコマンドを生成
-            n_div_4_1 = max(1, nproc // 4)
+        else: # long, very_long の場合は 3パターンのコマンドを生成
             n_div_4_2 = max(1, (nproc * 2) // 4)
             n_div_4_3 = max(1, (nproc * 3) // 4)
             opts = [
-                f"{n_div_4_1} --quick",
                 f"{n_div_4_2} --quick",
                 f"{n_div_4_3} --quick",
                 "288 --quick"
@@ -248,6 +251,8 @@ def main():
     # 実行モード
     parser.add_argument("--dry_run", action="store_true", help="Print commands without executing (Default)")
     parser.add_argument("--run", action="store_true", help="Execute generated commands (overrides dry_run)")
+    parser.add_argument("--regression", action="store_true", help="Output command to run pts_regression.py itself")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Outputs explicitly expanded arguments in --regression mode")
     
     args = parser.parse_args()
     
@@ -272,6 +277,47 @@ def main():
     
     valid_categories = list(suite_data.get("test_category", {}).keys())
     check_args_typo(args.testcategory, valid_categories, "--testcategory")
+
+    # --regression フラグが指定された場合は、自身を実行するコマンドを標準出力して終了する
+    if args.regression:
+        base_dir_str = str(Path(__file__).resolve().parent)
+        
+        if args.verbose:
+            # -v が指定された場合、省略されたオプションを明示的に展開して表示
+            final_opts = []
+            
+            # testcategory の展開
+            if "Full" in args.testcategory:
+                cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in valid_categories])
+                final_opts.append(f"--testcategory {cat_cmd}")
+            else:
+                cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in args.testcategory])
+                final_opts.append(f"--testcategory {cat_cmd}")
+                
+            # test_length の展開
+            if "Full" in selected_lengths and not (args.short or args.middle or args.long or args.very_long):
+                final_opts.append("--short --middle --long --very_long")
+            else:
+                len_flags = []
+                if "short" in selected_lengths: len_flags.append("--short")
+                if "middle" in selected_lengths: len_flags.append("--middle")
+                if "long" in selected_lengths: len_flags.append("--long")
+                if "very_long" in selected_lengths: len_flags.append("--very_long")
+                if len_flags:
+                    final_opts.append(" ".join(len_flags))
+            
+            if args.run: final_opts.append("--run")
+            if args.dry_run: final_opts.append("--dry_run")
+            
+            opts_str = " ".join(final_opts)
+        else:
+            # 通常は入力されたコマンド引数から --regression を取り除くだけ
+            opts = [arg for arg in sys.argv[1:] if arg != "--regression"]
+            opts_str = " ".join([f'"{opt}"' if ' ' in opt else opt for opt in opts])
+            
+        cmd_suffix = f" {opts_str}" if opts_str else ""
+        print(f"cd {base_dir_str} && ./pts_regression.py{cmd_suffix}")
+        sys.exit(0)
     
     # カテゴリ・テストの抽出と属性の付与
     test_plan = []
@@ -294,6 +340,10 @@ def main():
                 
             t_len = get_test_length(exe_time)
             
+            # test_length でのフィルタリング (ここで弾けば、scalingエラー等のチェックをスキップできる)
+            if "Full" not in selected_lengths and t_len not in selected_lengths:
+                continue
+            
             # scaling 取得
             t_scaling = get_scaling(
                 attrs.get("THFix_in_compile", False),
@@ -306,10 +356,6 @@ def main():
                 print(f"[CRITICAL ERROR] Cannot classify test '{testname}' scaling properties into attributes.", file=sys.stderr)
                 print(f"  THFix_in_compile={attrs.get('THFix_in_compile')} / THChange_at_runtime={attrs.get('THChange_at_runtime')} / TH_scaling='{attrs.get('TH_scaling')}'", file=sys.stderr)
                 sys.exit(1)
-                
-            # test_length でのフィルタリング
-            if "Full" not in selected_lengths and t_len not in selected_lengths:
-                continue
                 
             test_plan.append({
                 "category": cat_name,
