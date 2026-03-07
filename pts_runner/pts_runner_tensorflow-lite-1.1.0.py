@@ -891,6 +891,18 @@ class TensorFlowLiteBenchmarkRunner:
         else:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
+        # Clean only thread-specific files (preserve other threads' results)
+        # Do NOT remove the entire results_dir — it would destroy parallel thread results.
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        for num_threads in self.thread_list:
+            prefix = f"{num_threads}-thread"
+            thread_dir = self.results_dir / prefix
+            if thread_dir.exists():
+                shutil.rmtree(thread_dir)
+            for f in self.results_dir.glob(f"{prefix}.*"):
+                f.unlink()
+            print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
+
         # Run benchmark for each thread count
         for num_threads in self.thread_list:
             print(f"\n{'='*80}")

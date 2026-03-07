@@ -195,8 +195,7 @@ class PgbenchRunner:
         # Results directory
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
-        self.results_dir = (self.project_root / "results" / self.machine_name
-                            / self.os_name / self.test_category_dir / self.benchmark)
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         # Quick mode for development
         self.quick_mode = quick_mode
@@ -990,7 +989,7 @@ class PgbenchRunner:
         print(f"{'#'*80}")
 
         # Clean only thread-specific files (preserve other threads' results)
-        # NEVER use shutil.rmtree(self.results_dir) here!
+        # Do NOT remove the entire results_dir — it would destroy parallel thread results.
         self.results_dir.mkdir(parents=True, exist_ok=True)
         for num_threads in self.thread_list:
             prefix = f"{num_threads}-thread"

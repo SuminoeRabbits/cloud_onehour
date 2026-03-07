@@ -236,10 +236,6 @@ class PerfBenchRunner:
         # Enforce safety
         self.ensure_upload_disabled()
 
-        # Ensure /usr/bin/python exists as a real file before install.
-        # Must run before install_benchmark() to fix jevents build on EL10.
-        self.check_and_setup_python()
-
         # IMPORTANT: Setup perf permissions BEFORE testing perf availability
         # This allows perf to work on cloud VMs with restrictive defaults
         self.perf_paranoid = self.check_and_setup_perf_permissions()
@@ -449,49 +445,6 @@ class PerfBenchRunner:
         # Test 3: perf unavailable
         print("  [WARN] perf events not available")
         return None
-
-    def check_and_setup_python(self):
-        """Ensure /usr/bin/python exists as a real file for perf-bench jevents build.
-
-        EL10 exposes 'python' as a shell function via /etc/profile.d, which works in bash
-        but is invisible to make's $(shell which python), causing jevents build failure.
-        We check for the actual file on disk and create a symlink to python3 if missing.
-        """
-        print(f"\n{'='*80}")
-        print(">>> Checking /usr/bin/python for jevents build")
-        print(f"{'='*80}")
-
-        python_path = Path("/usr/bin/python")
-        python3_path = shutil.which("python3")
-
-        # Debug: always log current state
-        if python_path.exists() or python_path.is_symlink():
-            try:
-                real = python_path.resolve()
-                result = subprocess.run([str(python_path), "--version"],
-                                        capture_output=True, text=True)
-                ver = result.stdout.strip() or result.stderr.strip()
-                print(f"  [OK] /usr/bin/python exists -> {real} ({ver})")
-            except Exception as e:
-                print(f"  [WARN] /usr/bin/python exists but unreadable: {e}")
-        else:
-            print("  [WARN] /usr/bin/python NOT FOUND as a file")
-            if python3_path:
-                try:
-                    subprocess.run(
-                        ["sudo", "ln", "-sf", python3_path, "/usr/bin/python"],
-                        check=True
-                    )
-                    result = subprocess.run([python3_path, "--version"],
-                                            capture_output=True, text=True)
-                    ver = result.stdout.strip() or result.stderr.strip()
-                    print(f"  [FIX] Created /usr/bin/python -> {python3_path} ({ver})")
-                except Exception as e:
-                    print(f"  [ERROR] Failed to create /usr/bin/python symlink: {e}")
-            else:
-                print("  [ERROR] python3 not found in PATH, cannot create symlink")
-
-        print(f"  [INFO] which python3 : {python3_path or 'NOT FOUND'}")
 
     def check_and_setup_perf_permissions(self):
         """Check and adjust perf_event_paranoid setting."""

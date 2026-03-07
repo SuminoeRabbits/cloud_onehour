@@ -4,39 +4,24 @@ PTS Runner for cassandra-1.3.1
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-  * C/C++ Compiler Toolchain
-  * Zlib
-  * OpenSSL
-- Estimated Install Time: 70 Seconds
-- Environment Size: 193 MB
-- Test Type: System
+  * Java
+- Estimated Install Time: 3 Seconds
+- Download Size: 67.04 MB
+- Environment Size: 2100 MB
+- Average Run-Time: 11 Minutes
+- Test Type: System (Database)
 - Supported Platforms: Linux, BSD, Solaris, MacOSX
 
 Test Characteristics:
-- Multi-threaded: Yes (wrk client uses multiple threads)
-- Honors CFLAGS/CXXFLAGS: Yes
-- Notable Instructions: N/A
+- Multi-threaded: Yes
+- Honors CFLAGS/CXXFLAGS: N/A (Java based)
 - THFix_in_compile: false - Thread count NOT fixed at compile time
-- THChange_at_runtime: true - Runtime thread configuration via wrk -t $NUM_CPU_CORES option
+- THChange_at_runtime: true - Thread execution scalable at runtime testing config
 
-GCC-14 Compatibility Fix:
-- Problem: wrk-4.2.0 bundles OpenSSL 1.1.1i which has inline assembly syntax incompatible with GCC-14
-- Solution: Patch PTS install.sh BEFORE batch-install to modify wrk's Makefile for GCC-14 compatibility
-- Implementation: patch_install_sh_for_gcc14() patches install.sh to:
-  * Change wrk CFLAGS from -std=c99 to -std=gnu99
-  * Add OPENSSL_CFLAGS="-std=gnu89 -Wno-error -O2 -march=native" for OpenSSL build
-  * Modify OpenSSL build commands to use OPENSSL_CFLAGS
-  * Use $(nproc) instead of $NUM_CPU_CORES for compilation parallelism
-- Result: wrk is statically linked with OpenSSL 1.1.1i built with GCC-14 compatible flags
-- Timing: install.sh is patched BEFORE batch-install, so wrk builds correctly on first attempt
-
-Architecture Support:
-- Automatic detection: uname -m detects x86_64, amd64, arm64, aarch64, etc.
-- Native optimization: -march=native enables architecture-specific instructions
-  * x86_64/amd64: SSE4.2, AVX, AVX2, AVX-512 (based on CPU capabilities)
-  * arm64/aarch64: NEON, Crypto extensions, LSE atomics (based on CPU capabilities)
-- Cross-platform: OpenSSL's config script auto-detects target architecture
-- Consistent performance: Each architecture uses optimal instruction sets for that platform
+Notes:
+- This test uses cassandra-stress to benchmark the NoSQL database system.
+- Initial tests indicate no special C/C++ compilation patches like GCC-14 are required out of the box.
+- The default profile script handles most setup seamlessly.
 """
 
 import argparse
@@ -48,6 +33,142 @@ import subprocess
 import sys
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+
+
+class PreSeedDownloader:
+    """
+    Utility to pre-download large test files into Phoronix Test Suite cache
+    using faster downloaders (aria2c) if available.
+    """
+    def __init__(self, cache_dir=None):
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+        else:
+            self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+        
+        self.aria2_available = shutil.which("aria2c") is not None
+
+    def is_aria2_available(self):
+        return self.aria2_available
+
+    def download_from_xml(self, benchmark_name, threshold_mb=96):
+        """
+        Parse downloads.xml for the benchmark and download large files.
+        """
+        if not self.aria2_available:
+            print("  [INFO] aria2c not found, skipping pre-seed (will rely on PTS default)")
+            return False
+
+        profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
+        
+        if not profile_path.exists():
+            print(f"  [WARN] downloads.xml not found at {profile_path}")
+            try:
+                subprocess.run(
+                    ['phoronix-test-suite', 'info', benchmark_name],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                print(f"  [WARN] Failed to run phoronix-test-suite info: {e}")
+                return False
+            
+            if not profile_path.exists():
+                print(f"  [WARN] downloads.xml still missing after info: {profile_path}")
+                return False
+        
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(profile_path)
+            root = tree.getroot()
+            
+            downloads_node = root.find('Downloads')
+            if downloads_node is None:
+                return False
+                
+            for package in downloads_node.findall('Package'):
+                url_node = package.find('URL')
+                filename_node = package.find('FileName')
+                filesize_node = package.find('FileSize')
+                
+                if url_node is None or filename_node is None:
+                    continue
+                    
+                url = url_node.text.strip()
+                filename = filename_node.text.strip()
+                
+                size_bytes = -1
+                if filesize_node is not None and filesize_node.text:
+                    try:
+                        size_bytes = int(filesize_node.text.strip())
+                    except ValueError:
+                        pass
+                
+                if size_bytes <= 0:
+                    size_bytes = self.get_remote_file_size(url)
+                    
+                if size_bytes > 0:
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb < threshold_mb:
+                        continue
+                    print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
+                    self.ensure_file(url, filename)
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to parse downloads.xml: {e}")
+            return False
+
+        return True
+
+    def get_remote_file_size(self, url):
+        try:
+            cmd = ['curl', '-s', '-I', '-L', url]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                return -1
+                
+            for line in result.stdout.splitlines():
+                if line.lower().startswith('content-length:'):
+                    try:
+                        size_str = line.split(':')[1].strip()
+                        return int(size_str)
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+            
+        return -1
+
+    def ensure_file(self, url, filename):
+        target_path = self.cache_dir / filename
+        
+        if target_path.exists():
+            print(f"  [CACHE] File found: {filename}")
+            return True
+
+        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        cmd = [
+            "aria2c", "-x", "16", "-s", "16", 
+            "-d", str(self.cache_dir), 
+            "-o", filename,
+            url
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"  [aria2c] Download completed: {filename}")
+            return True
+        except subprocess.CalledProcessError:
+            print("  [WARN] aria2c download failed, falling back to PTS default")
+            if target_path.exists():
+                target_path.unlink()
+            return False
+
+
 
 
 class CassandraRunner:
@@ -459,10 +580,15 @@ class CassandraRunner:
         Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
         Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
         """
-        print(f"\n>>> Installing {self.benchmark_full}...")
+
+        print("\\n>>> Checking for large files to pre-seed...")
+        downloader = PreSeedDownloader()
+        downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
+
+        print(f"\\n>>> Installing {self.benchmark_full}...")
 
         # STEP 1: Force PTS to download test profile first
-        print("\n  [INFO] Downloading test profile...")
+        print("\\n  [INFO] Downloading test profile...")
         download_cmd = f'phoronix-test-suite info {self.benchmark_full}'
         subprocess.run(
             ['bash', '-c', download_cmd],
@@ -570,8 +696,6 @@ class CassandraRunner:
             print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
-        print("  [INFO] wrk was built with GCC-14 compatible flags via patched install.sh")
-
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """
         Parse perf stat output and CPU frequency files to generate performance summary.

@@ -1208,7 +1208,7 @@ class ValkeyRunner:
         print(f"# OS: {self.os_name}")
         print(f"# vCPU Count: {self.vcpu_count}")
         print(f"# Thread List: {self.thread_list}")
-        print(f"# MT Mode: server io-threads + benchmark threads via NUM_CPU_CORES")
+        print("# MT Mode: server io-threads + benchmark threads via NUM_CPU_CORES")
         if self.quick_mode:
             print("# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
         print(f"{'#'*80}")
