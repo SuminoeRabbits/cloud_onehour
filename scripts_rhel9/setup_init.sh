@@ -349,6 +349,7 @@ PACKAGE_SPECS=(
     "tar:tar"
     "gzip:gzip"
     "libwebp-devel:libwebp-devel"
+    "libpng-devel:libpng-devel"
 )
 
 OPTIONAL_PACKAGE_SPECS=(
