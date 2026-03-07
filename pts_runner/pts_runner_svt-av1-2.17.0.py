@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
 """
-PTS Runner for avifenc-1.4.1
+PTS Runner for svt-av1-2.17.0
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
-    * C/C++ Compiler Toolchain
-    * CMake
-    * PERL
-    * Yasm Assembler
-    * Meson Build System
-    * Nasm Assembler
-    * PNG Library
-    * JPEG Library
-- Estimated Install Time: 122 Seconds
-- Environment Size: 70 MB
+  * C/C++ Compiler Toolchain
+  * 7-Zip / p7zip
+  * Yasm Assembler
+  * CMake
+- Estimated Install Time: ~159 Seconds
+- Environment Size: ~TBD MB (includes large YUV video input files)
 - Test Type: Processor
-- Supported Platforms: Linux, MacOSX, BSD, Windows
+- Supported Platforms: Linux, MacOSX (x86_64, aarch64)
 
 Test Characteristics:
-- Multi-threaded: Yes (encoding uses NUM_CPU_CORES with runtime cap)
-- Honors CFLAGS/CXXFLAGS: Yes
-- Notable Instructions: MMX, SSE, SSE2
+- Multi-threaded: Yes (video encoding is highly parallel)
+- Honors CFLAGS/CXXFLAGS: Via CMake -DCMAKE_C_FLAGS
+- Notable Instructions: AVX2, AVX-512 on x86_64; SVE2 on aarch64
 - THFix_in_compile: false - Thread count NOT fixed at compile time
-- THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
+- THChange_at_runtime: false - SVT-AV1 auto-detects CPU cores in this PTS profile
+  (SVT-AV1 supports --lp N, but the PTS profile does not expose this option)
+
+Test Presets (SVT-AV1 v4.0): 3, 5, 8, 13
+Input Files: Bosphorus 1080p YUV, Bosphorus 4K YUV, Beauty 4K 10-bit YUV (large files)
+Metric: Frames per second (FPS)
+
+Note: This runner uses taskset to limit CPU availability for thread scaling tests,
+since SVT-AV1 auto-detects available CPUs (THChange_at_runtime=false).
 """
 
 import argparse
@@ -46,7 +50,7 @@ class PreSeedDownloader:
             self.cache_dir = Path(cache_dir)
         else:
             self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
-        
+
         self.aria2_available = shutil.which("aria2c") is not None
 
     def is_aria2_available(self):
@@ -55,15 +59,22 @@ class PreSeedDownloader:
     def download_from_xml(self, benchmark_name, threshold_mb=96):
         """
         Parse downloads.xml for the benchmark and download large files.
+
+        Args:
+            benchmark_name: Full benchmark name (e.g., "pts/svt-av1-2.17.0")
+            threshold_mb: Size threshold in MB to trigger aria2c (default: 96MB)
         """
         if not self.aria2_available:
             print("  [INFO] aria2c not found, skipping pre-seed (will rely on PTS default)")
             return False
 
+        # Locate downloads.xml
+        # ~/.phoronix-test-suite/test-profiles/<benchmark_name>/downloads.xml
         profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / benchmark_name / "downloads.xml"
-        
+
         if not profile_path.exists():
             print(f"  [WARN] downloads.xml not found at {profile_path}")
+            print(f"  [INFO] Attempting to fetch test profile via phoronix-test-suite info {benchmark_name}...")
             try:
                 subprocess.run(
                     ['phoronix-test-suite', 'info', benchmark_name],
@@ -74,47 +85,58 @@ class PreSeedDownloader:
             except Exception as e:
                 print(f"  [WARN] Failed to run phoronix-test-suite info: {e}")
                 return False
-            
+
             if not profile_path.exists():
                 print(f"  [WARN] downloads.xml still missing after info: {profile_path}")
                 return False
-        
+
+        print(f"  [INFO] Parsing {profile_path}...")
         try:
             import xml.etree.ElementTree as ET
             tree = ET.parse(profile_path)
             root = tree.getroot()
-            
+
+            # Find all Package elements
+            # Structure: <Downloads><Package><URL>...</URL><FileName>...</FileName><FileSize>...</FileSize></Package>...</Downloads>
             downloads_node = root.find('Downloads')
             if downloads_node is None:
+                print("  [WARN] No <Downloads> section found in XML")
                 return False
-                
+
             for package in downloads_node.findall('Package'):
                 url_node = package.find('URL')
                 filename_node = package.find('FileName')
                 filesize_node = package.find('FileSize')
-                
+
                 if url_node is None or filename_node is None:
                     continue
-                    
+
                 url = url_node.text.strip()
                 filename = filename_node.text.strip()
-                
+
+                # Determine size
                 size_bytes = -1
                 if filesize_node is not None and filesize_node.text:
                     try:
                         size_bytes = int(filesize_node.text.strip())
                     except ValueError:
                         pass
-                
+
+                # If size not in XML, try to get it from network (fallback)
                 if size_bytes <= 0:
+                    print(f"  [CHECK] Size not in XML, checking remote for {filename}...")
                     size_bytes = self.get_remote_file_size(url)
-                    
+
+                # Check threshold
                 if size_bytes > 0:
                     size_mb = size_bytes / (1024 * 1024)
                     if size_mb < threshold_mb:
+                        print(f"  [SKIP] {filename} is small ({size_mb:.1f} MB < {threshold_mb} MB)")
                         continue
                     print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
                     self.ensure_file(url, filename)
+                else:
+                    print(f"  [WARN] Could not determine size for {filename}, skipping auto-download")
 
         except Exception as e:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
@@ -123,13 +145,18 @@ class PreSeedDownloader:
         return True
 
     def get_remote_file_size(self, url):
+        """
+        Get remote file size in bytes using curl.
+        Returns -1 if size cannot be determined.
+        """
         try:
             cmd = ['curl', '-s', '-I', '-L', url]
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
             if result.returncode != 0:
+                print(f"  [WARN] Failed to get headers for {url}")
                 return -1
-                
+
             for line in result.stdout.splitlines():
                 if line.lower().startswith('content-length:'):
                     try:
@@ -137,28 +164,31 @@ class PreSeedDownloader:
                         return int(size_str)
                     except ValueError:
                         pass
-        except Exception:
-            pass
-            
+        except Exception as e:
+            print(f"  [WARN] Error checking size: {e}")
+
         return -1
 
     def ensure_file(self, url, filename):
+        """
+        Directly download file using aria2c (assumes size check passed).
+        """
         target_path = self.cache_dir / filename
-        
+
         if target_path.exists():
             print(f"  [CACHE] File found: {filename}")
             return True
 
         print(f"  [ARIA2] Downloading {filename} with 16 connections...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         cmd = [
-            "aria2c", "-x", "16", "-s", "16", 
-            "-d", str(self.cache_dir), 
+            "aria2c", "-x", "16", "-s", "16",
+            "-d", str(self.cache_dir),
             "-o", filename,
             url
         ]
-        
+
         try:
             subprocess.run(cmd, check=True)
             print(f"  [aria2c] Download completed: {filename}")
@@ -170,22 +200,20 @@ class PreSeedDownloader:
             return False
 
 
-
-
-class AvifencRunner:
+class SvtAv1Runner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """
-        Initialize avifenc runner.
+        Initialize SVT-AV1 runner.
 
         Args:
             threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
             quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
-        self.benchmark = "avifenc-1.4.1"
+        self.benchmark = "svt-av1-2.17.0"
         self.benchmark_full = f"pts/{self.benchmark}"
         self.test_category = "Multimedia"
-        # Replace spaces and slashes with underscores in test_category for directory name
-        self.test_category_dir = self.test_category.replace(" ", "_").replace("/", "_")
+        # Replace spaces with underscores in test_category for directory name
+        self.test_category_dir = self.test_category.replace(" ", "_")
 
         # System info
         self.vcpu_count = os.cpu_count() or 1
@@ -194,15 +222,10 @@ class AvifencRunner:
 
         # Determine thread execution mode
         if threads_arg is None:
-            # Even-number scaling: [2, 4, 6, ..., nproc]
             # 4-point scaling: [nproc/4, nproc/2, nproc*3/4, nproc]
-
             n_4 = self.vcpu_count // 4
-
             self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
-
             # Remove any zeros and deduplicate
-
             self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
         else:
             # Fixed mode: single thread count
@@ -237,16 +260,16 @@ class AvifencRunner:
         else:
             print("  [INFO] Perf monitoring disabled (command missing or unsupported)")
 
-    def ensure_build_tools_available(self):
-        """Ensure required local build tools exist before PTS install."""
-        required_commands = ["cmake", "ninja", "nasm", "yasm", "perl"]
-        missing_commands = [cmd for cmd in required_commands if shutil.which(cmd) is None]
+    def ensure_7z_available(self):
+        """Ensure 7z is available for extracting input YUV files.
 
-        if not missing_commands:
+        7z (p7zip) should be pre-installed by scripts/setup_init.sh.
+        This method only verifies its presence.
+        """
+        if shutil.which("7z"):
             return True
 
-        print(f"  [ERROR] Missing required build tools: {', '.join(missing_commands)}")
-        print("  [INFO] Please run scripts/setup_init.sh (and scripts/setup_pts.sh if needed) first.")
+        print("  [ERROR] 7z command not found. Please run scripts/setup_init.sh first.")
         return False
 
     def get_os_name(self):
@@ -255,23 +278,18 @@ class AvifencRunner:
         Example: Ubuntu_22_04
         """
         try:
-            # Try lsb_release first as it's standard on Ubuntu
-            import subprocess
             cmd = "lsb_release -d -s"
             result = subprocess.run(cmd.split(), capture_output=True, text=True)
             if result.returncode == 0:
-                description = result.stdout.strip() # e.g. "Ubuntu 22.04.4 LTS"
-                # Extract "Ubuntu" and "22.04"
+                description = result.stdout.strip()  # e.g. "Ubuntu 22.04.4 LTS"
                 parts = description.split()
                 if len(parts) >= 2:
                     distro = parts[0]
-                    version = parts[1]
-                    # Handle version with dots
-                    version = version.replace('.', '_')
+                    version = parts[1].replace('.', '_')
                     return f"{distro}_{version}"
         except Exception:
             pass
-            
+
         # Fallback to /etc/os-release
         try:
             with open('/etc/os-release', 'r') as f:
@@ -281,14 +299,14 @@ class AvifencRunner:
                 if '=' in line:
                     k, v = line.strip().split('=', 1)
                     info[k] = v.strip('"')
-            
+
             if 'NAME' in info and 'VERSION_ID' in info:
-                distro = info['NAME'].split()[0] # "Ubuntu"
+                distro = info['NAME'].split()[0]
                 version = info['VERSION_ID'].replace('.', '_')
                 return f"{distro}_{version}"
         except Exception:
             pass
-            
+
         return "Unknown_OS"
 
     def is_wsl(self):
@@ -306,6 +324,7 @@ class AvifencRunner:
                 return 'microsoft' in content or 'wsl' in content
         except Exception:
             return False
+
     def get_cpu_frequencies(self):
         """
         Get current CPU frequencies for all CPUs.
@@ -325,7 +344,6 @@ class AvifencRunner:
             )
             if result.returncode == 0 and result.stdout.strip():
                 for line in result.stdout.strip().split('\n'):
-                    # Format: "cpu MHz		: 3400.000"
                     parts = line.split(':')
                     if len(parts) >= 2:
                         mhz = float(parts[1].strip())
@@ -337,10 +355,8 @@ class AvifencRunner:
 
         # Method 2: /sys/devices/system/cpu/cpufreq (works on ARM64 and some x86)
         try:
-            # Try scaling_cur_freq first (more commonly available)
             freq_files = sorted(Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/scaling_cur_freq'))
             if not freq_files:
-                # Fallback to cpuinfo_cur_freq
                 freq_files = sorted(Path('/sys/devices/system/cpu').glob('cpu[0-9]*/cpufreq/cpuinfo_cur_freq'))
 
             for freq_file in freq_files:
@@ -358,18 +374,13 @@ class AvifencRunner:
 
         # Method 3: lscpu (fallback)
         try:
-            result = subprocess.run(
-                ['lscpu'],
-                capture_output=True,
-                text=True
-            )
+            result = subprocess.run(['lscpu'], capture_output=True, text=True)
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
                     if 'CPU MHz' in line or 'CPU max MHz' in line:
                         parts = line.split(':')
                         if len(parts) >= 2:
                             mhz = float(parts[1].strip().replace(',', '.'))
-                            # Return same frequency for all CPUs
                             return [int(mhz * 1000)] * self.vcpu_count
         except Exception:
             pass
@@ -397,15 +408,12 @@ class AvifencRunner:
                 print(f"  [WARN] Failed to write frequency file: {e}")
                 return False
         else:
-            # Write empty file to indicate unavailability
             try:
                 with open(output_file, 'w') as f:
                     pass
                 return False
             except Exception:
                 return False
-
-
 
     def get_perf_events(self):
         """
@@ -426,14 +434,9 @@ class AvifencRunner:
         # Test 1: Try hardware + software events
         hw_events = "cycles,instructions,cpu-clock,task-clock,context-switches,cpu-migrations"
         test_cmd = f"perf stat -e {hw_events} -- sleep 0.01"
-        result = subprocess.run(
-            ['bash', '-c', test_cmd],
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(['bash', '-c', test_cmd], capture_output=True, text=True)
 
         if result.returncode == 0:
-            # Check if output contains error about unsupported events
             combined_output = result.stderr + result.stdout
             if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
                 return hw_events
@@ -441,18 +444,13 @@ class AvifencRunner:
         # Test 2: Try software-only events
         sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
         test_cmd = f"perf stat -e {sw_events} -- sleep 0.01"
-        result = subprocess.run(
-            ['bash', '-c', test_cmd],
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(['bash', '-c', test_cmd], capture_output=True, text=True)
 
         if result.returncode == 0:
             combined_output = result.stderr + result.stdout
             if 'not supported' not in combined_output.lower() and 'not counted' not in combined_output.lower():
                 return sw_events
 
-        # Test 3: perf unavailable
         print("  [WARN] perf events not available")
         return None
 
@@ -468,7 +466,6 @@ class AvifencRunner:
         print(f"{'='*80}")
 
         try:
-            # Read current setting
             result = subprocess.run(
                 ['cat', '/proc/sys/kernel/perf_event_paranoid'],
                 capture_output=True,
@@ -476,11 +473,8 @@ class AvifencRunner:
                 check=True
             )
             current_value = int(result.stdout.strip())
-
             print(f"  [INFO] Current perf_event_paranoid: {current_value}")
 
-            # If too restrictive, try to adjust
-            # Note: -a (system-wide) requires perf_event_paranoid <= 0
             if current_value >= 1:
                 print(f"  [WARN] perf_event_paranoid={current_value} is too restrictive for system-wide monitoring")
                 print("  [INFO] Attempting to adjust perf_event_paranoid to 0...")
@@ -493,28 +487,181 @@ class AvifencRunner:
 
                 if result.returncode == 0:
                     print("  [OK] perf_event_paranoid adjusted to 0 (temporary, until reboot)")
-                    print("       Per-CPU metrics and hardware counters enabled")
-                    print("       Full monitoring mode: perf stat -A -a")
                     return 0
                 else:
                     print("  [ERROR] Failed to adjust perf_event_paranoid (sudo required)")
-                    print("  [WARN] Running in LIMITED mode:")
-                    print("         - No per-CPU metrics (no -A -a flags)")
-                    print("         - No hardware counters (cycles, instructions)")
-                    print("         - Software events only (aggregated)")
-                    print("         - IPC calculation not available")
+                    print("  [WARN] Running in LIMITED mode")
                     return current_value
             else:
                 print(f"  [OK] perf_event_paranoid={current_value} is acceptable")
-                print("       Full monitoring mode: perf stat -A -a")
                 return current_value
 
         except Exception as e:
             print(f"  [ERROR] Could not check perf_event_paranoid: {e}")
             print("  [WARN] Assuming restrictive mode (perf_event_paranoid=2)")
-            print("         Running in LIMITED mode without per-CPU metrics")
             return 2
 
+    def dump_error_diagnostics(self, num_threads, log_file):
+        """
+        Dump diagnostic information when benchmark fails.
+
+        Collects:
+        1. PTS test-logs from ~/.phoronix-test-suite/test-results/
+        2. SVT-AV1 specific logs and error output
+        3. Recent system dmesg output
+        4. Installed test directory contents
+
+        Args:
+            num_threads: Number of threads used in the failed test
+            log_file: Path to the benchmark log file
+        """
+        print(f"\n{'='*80}")
+        print(">>> Dumping error diagnostics")
+        print(f"{'='*80}")
+
+        diag_file = self.results_dir / f"{num_threads}-thread_error_diag.txt"
+        pts_home = Path.home() / ".phoronix-test-suite"
+
+        with open(diag_file, 'w') as f:
+            f.write("="*80 + "\n")
+            f.write(f"ERROR DIAGNOSTICS - {self.benchmark} ({num_threads} threads)\n")
+            f.write(f"Timestamp: {subprocess.run(['date'], capture_output=True, text=True).stdout.strip()}\n")
+            f.write("="*80 + "\n\n")
+
+            # 1. PTS test-logs
+            f.write("-"*80 + "\n")
+            f.write("[1] PTS Test Logs\n")
+            f.write("-"*80 + "\n")
+
+            test_results_dir = pts_home / "test-results"
+            if test_results_dir.exists():
+                for result_dir in sorted(test_results_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:3]:
+                    test_logs_dir = result_dir / "test-logs"
+                    if test_logs_dir.exists():
+                        f.write(f"\n[Result: {result_dir.name}]\n")
+                        for log in test_logs_dir.glob("**/*"):
+                            if log.is_file():
+                                f.write(f"\n--- {log.relative_to(test_logs_dir)} ---\n")
+                                try:
+                                    content = log.read_text(errors='ignore')
+                                    lines = content.split('\n')
+                                    if len(lines) > 100:
+                                        f.write("[...truncated, showing last 100 lines...]\n")
+                                        f.write('\n'.join(lines[-100:]))
+                                    else:
+                                        f.write(content)
+                                except Exception as e:
+                                    f.write(f"[Error reading file: {e}]\n")
+            else:
+                f.write("No test-results directory found\n")
+
+            # 2. Installed test logs
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[2] Installed Test Directory\n")
+            f.write("-"*80 + "\n")
+
+            installed_dir = pts_home / "installed-tests" / "pts" / self.benchmark
+            if installed_dir.exists():
+                result = subprocess.run(
+                    ['ls', '-la', str(installed_dir)],
+                    capture_output=True, text=True
+                )
+                f.write(f"\nDirectory listing: {installed_dir}\n")
+                f.write(result.stdout)
+
+                for log in installed_dir.glob("**/*.log"):
+                    f.write(f"\n--- {log.relative_to(installed_dir)} ---\n")
+                    try:
+                        content = log.read_text(errors='ignore')
+                        lines = content.split('\n')
+                        if len(lines) > 50:
+                            f.write("[...truncated, showing last 50 lines...]\n")
+                            f.write('\n'.join(lines[-50:]))
+                        else:
+                            f.write(content)
+                    except Exception as e:
+                        f.write(f"[Error reading file: {e}]\n")
+
+                for err_file in installed_dir.glob("**/*.err"):
+                    f.write(f"\n--- {err_file.relative_to(installed_dir)} ---\n")
+                    try:
+                        content = err_file.read_text(errors='ignore')
+                        f.write(content[:5000])
+                    except Exception as e:
+                        f.write(f"[Error reading file: {e}]\n")
+            else:
+                f.write(f"Installed test directory not found: {installed_dir}\n")
+
+            # 3. Try to run SvtAv1EncApp manually to capture error
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[3] SvtAv1EncApp Binary Test\n")
+            f.write("-"*80 + "\n")
+
+            # SVT-AV1 encoder binary may be at root or in Bin/Release/
+            svtav1_candidates = [
+                installed_dir / "SvtAv1EncApp",
+                installed_dir / "Bin" / "Release" / "SvtAv1EncApp",
+            ]
+            svtav1_bin = next((b for b in svtav1_candidates if b.exists()), None)
+
+            if svtav1_bin:
+                f.write(f"\n[SvtAv1EncApp --version] (at {svtav1_bin})\n")
+                result = subprocess.run(
+                    [str(svtav1_bin), '--version'],
+                    capture_output=True, text=True
+                )
+                f.write(f"stdout: {result.stdout}\n")
+                f.write(f"stderr: {result.stderr}\n")
+                f.write(f"returncode: {result.returncode}\n")
+            else:
+                f.write(f"SvtAv1EncApp binary not found (checked: {[str(b) for b in svtav1_candidates]})\n")
+
+            # 4. dmesg (last 30 lines)
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[4] Recent dmesg Output\n")
+            f.write("-"*80 + "\n")
+
+            result = subprocess.run(['dmesg', '--time-format=reltime'], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                f.write('\n'.join(lines[-30:]))
+            else:
+                result = subprocess.run(['dmesg'], capture_output=True, text=True)
+                lines = result.stdout.split('\n')
+                f.write('\n'.join(lines[-30:]))
+
+            # 5. Memory and disk status
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[5] System Resources\n")
+            f.write("-"*80 + "\n")
+
+            f.write("\n[free -h]\n")
+            result = subprocess.run(['free', '-h'], capture_output=True, text=True)
+            f.write(result.stdout)
+
+            f.write("\n[df -h /]\n")
+            result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True)
+            f.write(result.stdout)
+
+            # 6. Check for missing libraries
+            f.write("\n\n" + "-"*80 + "\n")
+            f.write("[6] Library Dependencies\n")
+            f.write("-"*80 + "\n")
+
+            if svtav1_bin:
+                f.write(f"\n[ldd {svtav1_bin}]\n")
+                result = subprocess.run(['ldd', str(svtav1_bin)], capture_output=True, text=True)
+                f.write(result.stdout)
+                if 'not found' in result.stdout:
+                    f.write("\n*** WARNING: Missing libraries detected! ***\n")
+
+            f.write("\n" + "="*80 + "\n")
+            f.write("END OF DIAGNOSTICS\n")
+            f.write("="*80 + "\n")
+
+        print(f"  [DIAG] Error diagnostics saved: {diag_file}")
+        print(f"  [INFO] Check {diag_file} for detailed diagnostics")
+        return diag_file
 
     def ensure_upload_disabled(self):
         """
@@ -524,11 +671,11 @@ class AvifencRunner:
         config_path = Path.home() / ".phoronix-test-suite" / "user-config.xml"
         if not config_path.exists():
             return
-            
+
         try:
             with open(config_path, 'r') as f:
                 content = f.read()
-                
+
             if '<UploadResults>TRUE</UploadResults>' in content:
                 print("  [WARN] UploadResults is TRUE in user-config.xml. Disabling...")
                 content = content.replace('<UploadResults>TRUE</UploadResults>', '<UploadResults>FALSE</UploadResults>')
@@ -546,8 +693,6 @@ class AvifencRunner:
 
         # NOTE: Do NOT clean test profiles - they may contain manual fixes for checksum issues
         # Only clean installed tests to force fresh compilation
-
-        # Clean installed tests
         installed_dir = pts_home / 'installed-tests' / 'pts' / self.benchmark
         if installed_dir.exists():
             print(f"  [CLEAN] Removing installed test: {installed_dir}")
@@ -559,9 +704,6 @@ class AvifencRunner:
         """
         Generate CPU affinity list for HyperThreading optimization.
 
-        Prioritizes physical cores (even IDs) first, then logical cores (odd IDs).
-        Pattern: {0,2,4,...,1,3,5,...}
-
         Args:
             n: Number of threads
 
@@ -572,34 +714,119 @@ class AvifencRunner:
         cpu_list = []
 
         if n <= half:
-            # Physical cores only: 0,2,4,...
             cpu_list = [str(i * 2) for i in range(n)]
         else:
-            # Physical cores + logical cores
             cpu_list = [str(i * 2) for i in range(half)]
             logical_count = n - half
             cpu_list.extend([str(i * 2 + 1) for i in range(logical_count)])
 
         return ','.join(cpu_list)
 
+    def patch_install_script(self):
+        """
+        Patch the install.sh script to use GCC-14 with SVT-AV1's CMake build.
+
+        SVT-AV1 uses CMake + make/ninja. We inject explicit compiler selection
+        and optimization flags to ensure GCC-14 is used.
+
+        SVT-AV1 4.0 CMake patterns found in PTS install.sh typically look like:
+          cmake .. -DCMAKE_BUILD_TYPE=Release ...
+          cmake -DCMAKE_BUILD_TYPE=Release .. ...
+          cmake -GNinja .. -DCMAKE_BUILD_TYPE=Release ...
+        """
+        install_sh_path = (
+            Path.home() / '.phoronix-test-suite' / 'test-profiles'
+            / 'pts' / self.benchmark / 'install.sh'
+        )
+
+        if not install_sh_path.exists():
+            print(f"  [WARN] install.sh not found at {install_sh_path}")
+            return False
+
+        print("  [INFO] Patching install.sh for GCC-14 compatibility...")
+
+        try:
+            with open(install_sh_path, 'r') as f:
+                content = f.read()
+
+            patched = False
+            arch = os.uname().machine
+            if arch in ("x86_64", "amd64"):
+                march_flags = "-O3 -march=x86-64-v3 -mtune=generic"
+            else:
+                march_flags = "-O3 -march=native -mtune=native"
+
+            gcc_flags = (
+                f'-DCMAKE_C_COMPILER=gcc-14 '
+                f'-DCMAKE_CXX_COMPILER=g++-14 '
+                f'-DCMAKE_C_FLAGS="{march_flags}" '
+                f'-DCMAKE_CXX_FLAGS="{march_flags}"'
+            )
+
+            # Candidate cmake patterns in SVT-AV1 PTS install.sh
+            cmake_patterns = [
+                # Pattern 1: cmake .. -DCMAKE_BUILD_TYPE=Release
+                ('cmake .. -DCMAKE_BUILD_TYPE=Release',
+                 f'cmake .. -DCMAKE_BUILD_TYPE=Release {gcc_flags}'),
+                # Pattern 2: cmake -DCMAKE_BUILD_TYPE=Release ..
+                ('cmake -DCMAKE_BUILD_TYPE=Release ..',
+                 f'cmake -DCMAKE_BUILD_TYPE=Release {gcc_flags} ..'),
+                # Pattern 3: cmake -GNinja .. -DCMAKE_BUILD_TYPE=Release
+                ('cmake -GNinja .. -DCMAKE_BUILD_TYPE=Release',
+                 f'cmake -GNinja .. -DCMAKE_BUILD_TYPE=Release {gcc_flags}'),
+                # Pattern 4: cmake -GNinja -DCMAKE_BUILD_TYPE=Release ..
+                ('cmake -GNinja -DCMAKE_BUILD_TYPE=Release ..',
+                 f'cmake -GNinja -DCMAKE_BUILD_TYPE=Release {gcc_flags} ..'),
+            ]
+
+            for old_cmake, new_cmake in cmake_patterns:
+                if old_cmake in content and 'CMAKE_C_COMPILER=gcc-14' not in content:
+                    content = content.replace(old_cmake, new_cmake)
+                    patched = True
+                    print(f"  [OK] Applied GCC-14 cmake patch (pattern: '{old_cmake}')")
+                    break
+
+            if not patched:
+                if 'CMAKE_C_COMPILER=gcc-14' in content:
+                    print("  [INFO] CMake patch already applied")
+                else:
+                    print("  [WARN] No cmake pattern matched in install.sh")
+                    print("  [INFO] Relying on CC=gcc-14 / CXX=g++-14 environment variables")
+
+            if patched:
+                with open(install_sh_path, 'w') as f:
+                    f.write(content)
+                print("  [OK] install.sh patched successfully")
+            else:
+                print("  [INFO] install.sh already fully patched or no changes needed")
+
+            return True
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch install.sh: {e}")
+            return False
+
     def install_benchmark(self):
         """
-        Install avifenc-1.4.1.
+        Install svt-av1-2.17.0 with GCC-14 native compilation.
 
-        Note: avifenc does NOT need reinstallation for each thread count
-        because it supports runtime thread configuration.
-
-        Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
-        Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
+        Note: SVT-AV1 auto-detects CPU cores. Since THFix_in_compile=false and
+        THChange_at_runtime=false, we don't control threads via environment
+        variables. Instead, we use taskset at runtime to limit CPU visibility.
         """
-        if not self.ensure_build_tools_available():
+        if not self.ensure_7z_available():
+            print("  [ERROR] 7z is required to extract input files for svt-av1")
             sys.exit(1)
 
-        print("\\n>>> Checking for large files to pre-seed...")
+        # Pre-download large YUV video files (Bosphorus 4K etc. can be hundreds of MB)
+        print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
-        print(f"\\n>>> Installing {self.benchmark_full}...")
+        print(f"\n>>> Installing {self.benchmark_full}...")
+
+        # Patch install.sh for GCC-14 compatibility
+        self.patch_install_script()
 
         # Remove existing installation first
         print("  [INFO] Removing existing installation...")
@@ -611,34 +838,32 @@ class AvifencRunner:
             stderr=subprocess.DEVNULL
         )
 
-        # Build install command with environment variables
-        # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
-        # Thread control is done at runtime, not compile time
-        # Use batch-install to suppress prompts
-        # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
+        # Build install command
         nproc = os.cpu_count() or 1
-        # CMAKE_GENERATOR: force Unix Makefiles so install.sh `make` calls work even when
-        # ninja is installed (cmake defaults to Ninja when ninja is detected).
         install_cmd = (
-            f'CMAKE_GENERATOR="Unix Makefiles" '
-            f'MAKEFLAGS="-j{nproc}" '
+            f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 '
+            f'CFLAGS="-O3 -march=native -mtune=native" '
+            f'CXXFLAGS="-O3 -march=native -mtune=native" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
         )
 
-        # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
         print("[PTS INSTALL COMMAND]")
         print(f"  {install_cmd}")
-        print(f"{'<'*80}\n")        # Execute install command with real-time output streaming
+        print(f"{'<'*80}\n")
+
+        # Execute install command with real-time output streaming
         print("  Running installation...")
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         log_f = open(install_log, 'w') if use_install_log else None
         if log_f:
             log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
             log_f.flush()
+
         process = subprocess.Popen(
             ['bash', '-c', install_cmd],
             stdout=subprocess.PIPE,
@@ -676,15 +901,10 @@ class AvifencRunner:
             install_failed = True
 
         if install_failed:
-            print(f"  [ERROR] Installation failed with return code {returncode}")
-            if pts_test_failed:
-                print(f"  [ERROR] PTS reported failure reason: {pts_failure_reason}")
+            print(f"\n  [ERROR] Installation failed with return code {returncode}")
             print("  [INFO] Check output above for details")
             if use_install_log:
                 print(f"  [INFO] Install log: {install_log}")
-            failed_log = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark / "install-failed.log"
-            if failed_log.exists():
-                print(f"  [INFO] PTS failure log: {failed_log}")
             sys.exit(1)
 
         # Verify installation by checking if directory exists
@@ -713,29 +933,10 @@ class AvifencRunner:
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
-        """
-        Parse perf stat output and CPU frequency files to generate performance summary.
-
-        Args:
-            perf_stats_file: Path to perf stat output file
-            freq_start_file: Path to start frequency file
-            freq_end_file: Path to end frequency file
-            cpu_list: String of CPU IDs used (e.g., "0,2,4")
-
-        Returns:
-            dict: Performance summary containing per-CPU metrics
-        """
+        """Parse perf stat output and CPU frequency files."""
         print("\n>>> Parsing perf stats and frequency data")
-        print(f"  [INFO] perf stats file: {perf_stats_file}")
-        print(f"  [INFO] freq start file: {freq_start_file}")
-        print(f"  [INFO] freq end file: {freq_end_file}")
-        print(f"  [INFO] cpu list: {cpu_list}")
 
-        # Parse CPU list to get individual CPU IDs
         cpu_ids = [int(c.strip()) for c in cpu_list.split(',')]
-        print(f"  [DEBUG] Parsed CPU IDs: {cpu_ids}")
-
-        # Initialize data structures for per-CPU metrics
         per_cpu_metrics = {}
         for cpu_id in cpu_ids:
             per_cpu_metrics[cpu_id] = {
@@ -747,20 +948,11 @@ class AvifencRunner:
                 'cpu_migrations': 0
             }
 
-        # Parse perf stat output file
-        print("  [INFO] Parsing perf stat output...")
+        # Parse perf stat output
         try:
             with open(perf_stats_file, 'r') as f:
-                perf_content = f.read()
-                print(f"  [DEBUG] perf stat file size: {len(perf_content)} bytes")
-
-                # Parse per-CPU metrics (format: "CPU<n>   <value>   <event>")
-                # Example: "CPU0                123456789      cycles"
-                for line in perf_content.split('\n'):
+                for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-
                     # Match CPU-specific lines
                     # Format: "CPU<n>   <value>   <event>"
                     # Example: "CPU0                123,456      cycles"
@@ -771,7 +963,6 @@ class AvifencRunner:
                         value_str = match.group(2).strip()
                         event = match.group(3)
 
-                        # Only process CPUs in our cpu_list
                         if cpu_num not in cpu_ids:
                             continue
 
@@ -779,14 +970,12 @@ class AvifencRunner:
                             continue
 
                         try:
-                            # Remove units like "msec" if present (e.g. "123.45 msec" -> "123.45")
                             value_clean = value_str.split()[0]
                             value = float(value_clean.replace(',', ''))
                         except ValueError:
                             print(f"  [WARN] Failed to parse value '{value_str}' for CPU{cpu_num} {event}")
                             continue
 
-                        # Map event names to our data structure
                         if event == 'cycles':
                             per_cpu_metrics[cpu_num]['cycles'] = value
                         elif event == 'instructions':
@@ -800,41 +989,33 @@ class AvifencRunner:
                         elif event == 'cpu-migrations':
                             per_cpu_metrics[cpu_num]['cpu_migrations'] = value
 
-            print(f"  [OK] Parsed perf stat data for {len(per_cpu_metrics)} CPUs")
-
         except FileNotFoundError:
             print(f"  [INFO] Perf monitoring data not found: {perf_stats_file} (likely disabled or missing)")
         except Exception as e:
             print(f"  [WARN] Failed to parse perf stat file: {e}")
 
         # Parse frequency files
-        print("  [INFO] Parsing frequency files...")
         freq_start = {}
         freq_end = {}
 
         try:
-            # Read start frequencies (format: one frequency per line in kHz)
             with open(freq_start_file, 'r') as f:
                 lines = f.read().strip().split('\n')
                 for i, line in enumerate(lines):
                     if line.strip():
                         freq_start[i] = float(line.strip())
-            print(f"  [DEBUG] Read {len(freq_start)} start frequencies")
 
-            # Read end frequencies
             with open(freq_end_file, 'r') as f:
                 lines = f.read().strip().split('\n')
                 for i, line in enumerate(lines):
                     if line.strip():
                         freq_end[i] = float(line.strip())
-            print(f"  [DEBUG] Read {len(freq_end)} end frequencies")
 
         except Exception as e:
             print(f"  [ERROR] Failed to parse frequency files: {e}")
             raise
 
         # Calculate metrics
-        print("  [INFO] Calculating performance metrics...")
         perf_summary = {
             'avg_frequency_ghz': {},
             'start_frequency_ghz': {},
@@ -852,64 +1033,47 @@ class AvifencRunner:
         for cpu_id in cpu_ids:
             metrics = per_cpu_metrics[cpu_id]
 
-            # avg_frequency_ghz = cycles / (cpu-clock / 1000) / 1e9
             if metrics['cpu_clock'] > 0:
                 avg_freq = metrics['cycles'] / (metrics['cpu_clock'] / 1000.0) / 1e9
                 perf_summary['avg_frequency_ghz'][str(cpu_id)] = round(avg_freq, 3)
             else:
                 perf_summary['avg_frequency_ghz'][str(cpu_id)] = 0.0
 
-            # start_frequency_ghz = freq_start[cpu] / 1,000,000 (kHz to GHz)
             if cpu_id in freq_start:
-                start_freq = freq_start[cpu_id] / 1_000_000.0
-                perf_summary['start_frequency_ghz'][str(cpu_id)] = round(start_freq, 3)
+                perf_summary['start_frequency_ghz'][str(cpu_id)] = round(freq_start[cpu_id] / 1_000_000.0, 3)
             else:
                 perf_summary['start_frequency_ghz'][str(cpu_id)] = 0.0
 
-            # end_frequency_ghz = freq_end[cpu] / 1,000,000 (kHz to GHz)
             if cpu_id in freq_end:
-                end_freq = freq_end[cpu_id] / 1_000_000.0
-                perf_summary['end_frequency_ghz'][str(cpu_id)] = round(end_freq, 3)
+                perf_summary['end_frequency_ghz'][str(cpu_id)] = round(freq_end[cpu_id] / 1_000_000.0, 3)
             else:
                 perf_summary['end_frequency_ghz'][str(cpu_id)] = 0.0
 
-            # ipc = instructions / cycles
             if metrics['cycles'] > 0:
-                ipc = metrics['instructions'] / metrics['cycles']
-                perf_summary['ipc'][str(cpu_id)] = round(ipc, 2)
+                perf_summary['ipc'][str(cpu_id)] = round(metrics['instructions'] / metrics['cycles'], 2)
             else:
                 perf_summary['ipc'][str(cpu_id)] = 0.0
 
-            # Store raw values
             perf_summary['total_cycles'][str(cpu_id)] = int(metrics['cycles'])
             perf_summary['total_instructions'][str(cpu_id)] = int(metrics['instructions'])
 
-            # Track task-clock for utilization calculation
             total_task_clock += metrics['task_clock']
             max_task_clock = max(max_task_clock, metrics['task_clock'])
 
-        # Calculate elapsed time (use max task-clock as elapsed time in ms)
         if max_task_clock > 0:
             perf_summary['elapsed_time_sec'] = round(max_task_clock / 1000.0, 2)
-
-        # Calculate CPU utilization (total task-clock / elapsed_time / num_cpus * 100)
-        # This represents the average CPU utilization across all CPUs
-        if max_task_clock > 0:
             utilization = (total_task_clock / max_task_clock / len(cpu_ids)) * 100.0
             perf_summary['cpu_utilization_percent'] = round(utilization, 1)
 
         print("  [OK] Performance metrics calculated")
-        print(f"  [DEBUG] Elapsed time: {perf_summary['elapsed_time_sec']} sec")
-        print(f"  [DEBUG] CPU utilization: {perf_summary['cpu_utilization_percent']}%")
-
         return perf_summary
 
     def run_benchmark(self, num_threads):
         """
         Run benchmark with specified thread count.
 
-        Args:
-            num_threads: Number of threads to use
+        Note: SVT-AV1 auto-detects CPU cores. We use taskset to limit CPU visibility
+        since THChange_at_runtime=false (this PTS profile does not accept --lp at runtime).
         """
         print(f"\n{'='*80}")
         print(f">>> Running benchmark with {num_threads} thread(s)")
@@ -920,22 +1084,16 @@ class AvifencRunner:
         log_file = self.results_dir / f"{num_threads}-thread.log"
         stdout_log = self.results_dir / "stdout.log"
 
-        # Define file paths for perf stats and frequency monitoring
         perf_stats_file = self.results_dir / f"{num_threads}-thread_perf_stats.txt"
         freq_start_file = self.results_dir / f"{num_threads}-thread_freq_start.txt"
         freq_end_file = self.results_dir / f"{num_threads}-thread_freq_end.txt"
         perf_summary_file = self.results_dir / f"{num_threads}-thread_perf_summary.json"
 
-        # Build PTS command based on thread count
-        # If N >= vCPU: don't use taskset (all vCPUs assigned)
-        # If N < vCPU: use taskset with CPU affinity
-
-        # Environment variables to suppress all prompts
-        # BATCH_MODE, SKIP_ALL_PROMPTS: additional safeguards
-        # TEST_RESULTS_NAME, TEST_RESULTS_IDENTIFIER: auto-generate result names
-        # DISPLAY_COMPACT_RESULTS: suppress "view text results" prompt
-        # Note: PTS_USER_PATH_OVERRIDE removed - use default ~/.phoronix-test-suite/ with batch-setup config
+        # Build PTS command
+        # Note: SVT-AV1 auto-detects, so we don't pass NUM_CPU_CORES
+        # Instead, we use taskset to limit visible CPUs
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
+
         # Remove existing PTS result to avoid interactive prompts
         # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
         sanitized_benchmark = self.benchmark.replace('.', '')
@@ -946,21 +1104,21 @@ class AvifencRunner:
         for cmd in remove_cmds:
             subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        batch_env = f'{quick_env}NUM_CPU_CORES={num_threads} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+        batch_env = (
+            f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 '
+            f'TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads '
+            f'TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads '
+            f'TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+        )
 
-        if num_threads >= self.vcpu_count:
-            # All vCPUs mode - no taskset needed
-            cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])
-            pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
-            cpu_info = f"Using all {num_threads} vCPUs (no taskset)"
-        else:
-            # Partial vCPU mode - use taskset with affinity
-            cpu_list = self.get_cpu_affinity_list(num_threads)
-            pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
-            cpu_info = f"CPU affinity (taskset): {cpu_list}"
+        # Always use taskset for SVT-AV1 to control CPU visibility
+        # SVT-AV1 will auto-detect the CPUs available in the taskset mask
+        cpu_list = self.get_cpu_affinity_list(num_threads)
+        pts_base_cmd = f'taskset -c {cpu_list} phoronix-test-suite batch-run {self.benchmark_full}'
+        cpu_info = f"CPU affinity (taskset): {cpu_list} - SVT-AV1 will auto-detect {num_threads} CPU(s)"
 
-        # Wrap PTS command with perf stat (mode depends on perf availability and paranoid)
-        # Important: Environment variables must come BEFORE perf stat command
+        # CRITICAL: Environment variables MUST come BEFORE perf stat
+        # Note: NO NUM_CPU_CORES for SVT-AV1 (auto-detect only via taskset)
         if self.perf_events:
             if self.perf_paranoid <= 0:
                 # Full monitoring mode: per-CPU stats + hardware counters
@@ -971,46 +1129,32 @@ class AvifencRunner:
                 pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
                 perf_mode = "Limited (aggregated events only)"
         else:
-            # No perf monitoring available
+            # No perf monitoring
             pts_cmd = f'{batch_env} {pts_base_cmd}'
             perf_mode = "Disabled (perf unavailable)"
 
-        print(f"[INFO] {cpu_info}")
         print(f"[INFO] Perf monitoring mode: {perf_mode}")
-
-        # Print PTS command to stdout for debugging (as per README requirement)
+        print(f"[INFO] {cpu_info}")
         print(f"\n{'>'*80}")
         print("[PTS BENCHMARK COMMAND]")
         print(f"  {pts_cmd}")
-        print(f"  {cpu_info}")
-        print("  Output:")
-        print(f"    Thread log: {log_file}")
-        print(f"    Stdout log: {stdout_log}")
-        print(f"    Perf stats: {perf_stats_file}")
-        print(f"    Freq start: {freq_start_file}")
-        print(f"    Freq end: {freq_end_file}")
-        print(f"    Perf summary: {perf_summary_file}")
         print(f"{'<'*80}\n")
 
         # Record CPU frequency before benchmark
-        # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
         print("[INFO] Recording CPU frequency before benchmark...")
         if self.record_cpu_frequency(freq_start_file):
             print("  [OK] Start frequency recorded")
         else:
             print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
-        # Execute with tee-like behavior: output to both terminal and log files
+        # Execute PTS command
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
-            # Write command header to stdout.log
             stdout_f.write(f"\n{'='*80}\n")
             stdout_f.write(f"[PTS BENCHMARK COMMAND - {num_threads} thread(s)]\n")
             stdout_f.write(f"{pts_cmd}\n")
-            stdout_f.write(f"{cpu_info}\n")
             stdout_f.write(f"{'='*80}\n\n")
             stdout_f.flush()
 
-            # Run PTS command with real-time output streaming
             process = subprocess.Popen(
                 ['bash', '-c', pts_cmd],
                 stdout=subprocess.PIPE,
@@ -1019,37 +1163,44 @@ class AvifencRunner:
                 bufsize=1
             )
 
-            # Stream output to terminal, thread-specific log, and cumulative stdout.log
             for line in process.stdout:
-                print(line, end='')  # Terminal output
-                log_f.write(line)    # Thread-specific log file
-                stdout_f.write(line) # Cumulative stdout.log
+                print(line, end='')
+                log_f.write(line)
+                stdout_f.write(line)
                 log_f.flush()
                 stdout_f.flush()
 
             process.wait()
             returncode = process.returncode
 
-        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
-
         # Record CPU frequency after benchmark
-        # Uses cross-platform method (works on x86_64, ARM64, and cloud VMs)
         print("\n[INFO] Recording CPU frequency after benchmark...")
         if self.record_cpu_frequency(freq_end_file):
             print("  [OK] End frequency recorded")
         else:
             print("  [WARN] CPU frequency not available (common on ARM64/cloud VMs)")
 
-        if returncode == 0 and pts_test_failed:
-            print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
-            return False
+        # Check for PTS-reported test failures in the log (even if returncode is 0)
+        pts_test_failed = False
+        if log_file.exists():
+            try:
+                log_content = log_file.read_text(errors='ignore')
+                failure_patterns = [
+                    'quit with a non-zero exit status',
+                    'failed to properly run',
+                    'The following tests failed',
+                ]
+                for pattern in failure_patterns:
+                    if pattern.lower() in log_content.lower():
+                        pts_test_failed = True
+                        print(f"\n[WARN] PTS reported test failure: '{pattern}' found in log")
+                        break
+            except Exception as e:
+                print(f"  [WARN] Could not check log for failures: {e}")
 
-        if returncode == 0:
+        if returncode == 0 and not pts_test_failed:
             print("\n[OK] Benchmark completed successfully")
-            print(f"     Thread log: {log_file}")
-            print(f"     Stdout log: {stdout_log}")
 
-            # Parse perf stats and save summary
             try:
                 perf_summary = self.parse_perf_stats_and_freq(
                     perf_stats_file,
@@ -1058,14 +1209,30 @@ class AvifencRunner:
                     cpu_list
                 )
 
-                # Save perf summary to JSON
                 with open(perf_summary_file, 'w') as f:
                     json.dump(perf_summary, f, indent=2)
                 print(f"     Perf summary: {perf_summary_file}")
 
             except Exception as e:
                 print(f"  [ERROR] Failed to parse perf stats: {e}")
-                print("  [INFO] Benchmark results are still valid, continuing...")
+
+        elif pts_test_failed:
+            print("\n[WARN] Benchmark completed with some test failures")
+            print(f"     Thread log: {log_file}")
+
+            self.dump_error_diagnostics(num_threads, log_file)
+
+            try:
+                perf_summary = self.parse_perf_stats_and_freq(
+                    perf_stats_file,
+                    freq_start_file,
+                    freq_end_file,
+                    cpu_list
+                )
+                with open(perf_summary_file, 'w') as f:
+                    json.dump(perf_summary, f, indent=2)
+            except Exception:
+                pass  # Ignore perf parsing errors for failed tests
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
@@ -1074,6 +1241,8 @@ class AvifencRunner:
                 f.write(f"Benchmark failed with return code {returncode}\n")
                 f.write(f"See {log_file} for details.\n")
             print(f"     Error log: {err_file}")
+
+            self.dump_error_diagnostics(num_threads, log_file)
             return False
 
         return True
@@ -1089,52 +1258,63 @@ class AvifencRunner:
         for num_threads in self.thread_list:
             result_name = f"{self.benchmark}-{num_threads}threads"
 
-            # PTS removes dots from directory names
-            result_dir_name = result_name.replace('.', '')
-            result_dir = pts_results_dir / result_dir_name
+            # Check if result exists, try both with dots (standard) and without dots (PTS sanitized)
+            result_dir = pts_results_dir / result_name
+            result_dir_nodots = pts_results_dir / result_name.replace('.', '')
 
-            # Check if result exists
-            if not result_dir.exists():
-                print(f"[WARN] Result not found for {num_threads} threads: {result_dir}")
+            target_result_dir = None
+            target_result_name = None
+
+            if result_dir.exists():
+                target_result_dir = result_dir
+                target_result_name = result_name
+            elif result_dir_nodots.exists():
+                target_result_dir = result_dir_nodots
+                target_result_name = result_name.replace('.', '')
+
+            if not target_result_dir:
+                print(f"[WARN] Result not found for {num_threads} threads: {result_name}")
                 continue
 
             print(f"\n[INFO] Exporting results for {num_threads} thread(s)...")
 
             # Export to CSV
-            # Note: Use result_dir_name (with dots removed) for PTS commands
             csv_output = self.results_dir / f"{num_threads}-thread.csv"
-            print(f"  [EXPORT] CSV: {csv_output}")
-            result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                # PTS saves to ~/result_dir_name.csv (with dots removed)
-                home_csv = Path.home() / f"{result_dir_name}.csv"
-                if home_csv.exists():
-                    shutil.move(str(home_csv), str(csv_output))
-                    print(f"  [OK] Saved: {csv_output}")
+            if csv_output.exists():
+                print(f"  [SKIP] CSV already exists: {csv_output}")
             else:
-                print(f"  [WARN] CSV export failed: {result.stderr}")
+                result = subprocess.run(
+                    ['phoronix-test-suite', 'result-file-to-csv', target_result_name],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    home_csv = Path.home() / f"{target_result_name}.csv"
+                    if home_csv.exists():
+                        shutil.move(str(home_csv), str(csv_output))
+                        print(f"  [OK] Saved: {csv_output}")
+                    elif result.stdout.strip():
+                        csv_output.write_text(result.stdout, encoding="utf-8")
+                        print(f"  [OK] Saved stdout to: {csv_output}")
 
             # Export to JSON
-            # Note: Use result_dir_name (with dots removed) for PTS commands
             json_output = self.results_dir / f"{num_threads}-thread.json"
-            print(f"  [EXPORT] JSON: {json_output}")
-            result = subprocess.run(
-                ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                # PTS saves to ~/result_dir_name.json (with dots removed)
-                home_json = Path.home() / f"{result_dir_name}.json"
-                if home_json.exists():
-                    shutil.move(str(home_json), str(json_output))
-                    print(f"  [OK] Saved: {json_output}")
+            if json_output.exists():
+                print(f"  [SKIP] JSON already exists: {json_output}")
             else:
-                print(f"  [WARN] JSON export failed: {result.stderr}")
+                result = subprocess.run(
+                    ['phoronix-test-suite', 'result-file-to-json', target_result_name],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    home_json = Path.home() / f"{target_result_name}.json"
+                    if home_json.exists():
+                        shutil.move(str(home_json), str(json_output))
+                        print(f"  [OK] Saved: {json_output}")
+                    elif result.stdout.strip():
+                        json_output.write_text(result.stdout, encoding="utf-8")
+                        print(f"  [OK] Saved stdout to: {json_output}")
 
         print("\n[OK] Export completed")
 
@@ -1147,14 +1327,12 @@ class AvifencRunner:
         summary_log = self.results_dir / "summary.log"
         summary_json_file = self.results_dir / "summary.json"
 
-        # Collect results from all JSON files
         all_results = []
         for num_threads in self.thread_list:
             json_file = self.results_dir / f"{num_threads}-thread.json"
             if json_file.exists():
                 with open(json_file, 'r') as f:
                     data = json.load(f)
-                    # Extract benchmark result
                     for result_id, result in data.get('results', {}).items():
                         for system_id, system_result in result.get('results', {}).items():
                             all_results.append({
@@ -1170,10 +1348,10 @@ class AvifencRunner:
             print("[WARN] No results found for summary generation")
             return
 
-        # Generate summary.log (human-readable)
+        # Generate summary.log
         with open(summary_log, 'w') as f:
             f.write("="*80 + "\n")
-            f.write("avifenc 1.4.1 Benchmark Summary\n")
+            f.write("SVT-AV1 2.17.0 Benchmark Summary\n")
             f.write(f"Machine: {self.machine_name}\n")
             f.write(f"Test Category: {self.test_category}\n")
             f.write("="*80 + "\n\n")
@@ -1181,33 +1359,15 @@ class AvifencRunner:
             for result in all_results:
                 f.write(f"Threads: {result['threads']}\n")
                 f.write(f"  Test: {result['test_name']}\n")
-                f.write(f"  Description: {result['description']}\n")
 
                 val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
                 f.write(f"  Average: {val_str} {result['unit']}\n")
 
-                # Handle raw values safely
-                raw_vals = result.get('raw_values')
-                if raw_vals:
-                    val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
-                    f.write(f"  Raw values: {val_str}\n")
-                else:
-                    f.write("  Raw values: N/A\n")
-
                 f.write("\n")
-
-            f.write("="*80 + "\n")
-            f.write("Summary Table\n")
-            f.write("="*80 + "\n")
-            f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\n")
-            f.write("-"*80 + "\n")
-            for result in all_results:
-                val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
-                f.write(f"{result['threads']:<10} {val_str} {result['unit']:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 
-        # Generate summary.json (AI-friendly format)
+        # Generate summary.json
         summary_data = {
             "benchmark": self.benchmark,
             "test_category": self.test_category,
@@ -1224,18 +1384,16 @@ class AvifencRunner:
     def run(self):
         """Main execution flow."""
         print(f"{'='*80}")
-        print("avifenc 1.4.1 Benchmark Runner")
+        print("SVT-AV1 2.17.0 Benchmark Runner")
         print(f"{'='*80}")
         print(f"[INFO] Machine: {self.machine_name}")
         print(f"[INFO] vCPU count: {self.vcpu_count}")
-        print(f"[INFO] Test category: {self.test_category}")
-        print("[INFO] Thread mode: Runtime configurable (THChange_at_runtime=true)")
+        print("[INFO] Thread mode: Auto-detect (taskset-limited)")
         print(f"[INFO] Threads to test: {self.thread_list}")
-        print(f"[INFO] Results directory: {self.results_dir}")
         print()
 
-        # Clean existing results directory before starting
         # Clean only thread-specific files (preserve other threads' results)
+        # NEVER use shutil.rmtree(self.results_dir) here - would destroy other threads' results
         self.results_dir.mkdir(parents=True, exist_ok=True)
         for num_threads in self.thread_list:
             prefix = f"{num_threads}-thread"
@@ -1246,7 +1404,6 @@ class AvifencRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        # Install benchmark ONCE (runtime thread configuration, no reinstall needed)
         install_status = get_install_status(self.benchmark_full, self.benchmark)
         info_installed = install_status["info_installed"]
         test_installed_ok = install_status["test_installed_ok"]
@@ -1269,29 +1426,21 @@ class AvifencRunner:
         else:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
-        # Run for each thread count
         failed = []
         for num_threads in self.thread_list:
-            # For runtime mode, NO reinstallation needed - just run with different NUM_CPU_CORES
             if not self.run_benchmark(num_threads):
                 failed.append(num_threads)
 
-        # Export results to CSV and JSON
         self.export_results()
-
-        # Generate summary
         self.generate_summary()
         cleanup_pts_artifacts(self.benchmark)
 
-        # Summary
         print(f"\n{'='*80}")
         print("Benchmark Summary")
         print(f"{'='*80}")
         print(f"Total tests: {len(self.thread_list)}")
         print(f"Successful: {len(self.thread_list) - len(failed)}")
         print(f"Failed: {len(failed)}")
-        if failed:
-            print(f"Failed thread counts: {failed}")
         print(f"{'='*80}")
 
         return len(failed) == 0
@@ -1299,7 +1448,7 @@ class AvifencRunner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="avifenc 1.4.1 Benchmark Runner",
+        description="SVT-AV1 2.17.0 Benchmark Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -1326,12 +1475,12 @@ def main():
 
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
-        print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
+        print("[INFO] Tests will run once instead of 3+ times (60-70% time reduction)")
 
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
 
-    runner = AvifencRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = SvtAv1Runner(threads_arg=threads, quick_mode=args.quick)
     success = runner.run()
 
     sys.exit(0 if success else 1)

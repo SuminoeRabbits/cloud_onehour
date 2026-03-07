@@ -1013,9 +1013,10 @@ class X265Runner:
                         elif event == 'cpu-migrations':
                             per_cpu_metrics[cpu_num]['cpu_migrations'] = value
 
+        except FileNotFoundError:
+            print(f"  [INFO] Perf monitoring data not found: {perf_stats_file} (likely disabled or missing)")
         except Exception as e:
-            print(f"  [ERROR] Failed to parse perf stat file: {e}")
-            raise
+            print(f"  [WARN] Failed to parse perf stat file: {e}")
 
         # Parse frequency files
         freq_start = {}

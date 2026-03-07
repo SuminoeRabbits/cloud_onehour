@@ -123,6 +123,7 @@ class ComplianceChecker:
         self.check_install_verification()
         self.check_install_fail_handling()
         self.check_install_log_toggle()
+        self.check_perf_stats_file_not_found_handling()
         self.check_argparse_setup()
         self.check_upload_safety()
         self.check_batch_env_vars()
@@ -805,6 +806,24 @@ class ComplianceChecker:
 
                 "   Recommended: Check installed-tests directory and use 'phoronix-test-suite test-installed'"
 
+            )
+
+    def check_perf_stats_file_not_found_handling(self):
+        """Check if parse_perf_stats handles FileNotFoundError gracefully."""
+        # Check if scripts have a custom parse method
+        has_parse_method = re.search(r'def\s+parse_perf_stats', self.content)
+        if not has_parse_method:
+            return
+
+        has_fnf_catch = re.search(r'except\s+FileNotFoundError\s*:', self.content)
+
+        if has_fnf_catch:
+            self.passed.append("✅ FileNotFoundError handled for perf stats (avoids false-positive ERROR)")
+        else:
+            self.warnings.append(
+                "⚠️  WARNING: parse_perf_stats does not explicitly catch FileNotFoundError\n"
+                "   Fix: Add 'except FileNotFoundError:' to handle missing perf stats as [INFO]\n"
+                "   This prevents false-positive [ERROR] logs on VMs where perf is unsupported."
             )
 
     def check_install_fail_handling(self):

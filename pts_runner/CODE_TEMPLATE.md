@@ -718,6 +718,11 @@ def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_f
     # Calculate metrics (IPC, frequency, utilization)
     # 詳細な実装はpts_runner_stream-1.3.4.pyを参照
 
+    except FileNotFoundError:
+        print(f"  [INFO] Perf monitoring data not found: {perf_stats_file} (likely disabled or missing)")
+    except Exception as e:
+        print(f"  [WARN] Failed to parse perf stat file: {e}")
+
     return {'per_cpu_metrics': per_cpu_metrics, 'cpu_list': cpu_list}
 ```
 
