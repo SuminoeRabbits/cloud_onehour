@@ -329,6 +329,9 @@ def main():
         
     if not ordered_plan:
         print("[INFO] No tests matched the given criteria.")
+        print("\n[Help] Available Test Categories (--testcategory):")
+        for cat in valid_categories:
+            print(f"  - {cat}")
         sys.exit(0)
 
     # 実行前のパーサーおよびランナー存在チェック (手順9, 10)
@@ -366,6 +369,10 @@ def main():
     all_commands.append(first_clean_cmd)
     
     for idx, cat in enumerate(categories_in_plan):
+        all_commands.append(f"\n# {'='*60}")
+        all_commands.append(f"# Category: {cat}")
+        all_commands.append(f"# {'='*60}")
+        
         cat_tests = [t for t in ordered_plan if t["category"] == cat]
         for t in cat_tests:
             cmds = generate_commands(t["testname"], t["length"], t["scaling"])
@@ -392,7 +399,29 @@ def main():
         print("=== DRY RUN (Generated Commands) ===")
         for cmd in all_commands:
             print(cmd)
-        print(f"\n[INFO] Total {len(all_commands)} commands generated.")
+            
+        # Generate Summary Table
+        print("\n=== Summary of Selected Tests ===")
+        print(f"{'Category':<25} | {'Short':<7} | {'Middle':<7} | {'Long':<7} | {'Very Long':<10} | {'Total'}")
+        print("-" * 75)
+        for cat in categories_in_plan:
+            cat_tests = [t for t in ordered_plan if t["category"] == cat]
+            c_short = sum(1 for t in cat_tests if t["length"] == "short")
+            c_mid = sum(1 for t in cat_tests if t["length"] == "middle")
+            c_long = sum(1 for t in cat_tests if t["length"] == "long")
+            c_vlong = sum(1 for t in cat_tests if t["length"] == "very_long")
+            c_total = len(cat_tests)
+            print(f"{cat:<25} | {c_short:<7} | {c_mid:<7} | {c_long:<7} | {c_vlong:<10} | {c_total}")
+        print("-" * 75)
+        print(f"{'TOTAL':<25} | "
+              f"{sum(1 for t in ordered_plan if t['length'] == 'short'):<7} | "
+              f"{sum(1 for t in ordered_plan if t['length'] == 'middle'):<7} | "
+              f"{sum(1 for t in ordered_plan if t['length'] == 'long'):<7} | "
+              f"{sum(1 for t in ordered_plan if t['length'] == 'very_long'):<10} | "
+              f"{len(ordered_plan)}")
+        
+        actual_cmds = [c for c in all_commands if not c.strip().startswith('#') and c.strip()]
+        print(f"\n[INFO] Total {len(actual_cmds)} commands generated.")
         print("[INFO] Note: Use --run flag to execute these commands.\n")
 
 if __name__ == "__main__":
