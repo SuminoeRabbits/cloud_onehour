@@ -108,6 +108,12 @@
 #     --cost --no_amd64\
 #     --output ./global/<testcategory>/<testcategory>_cost_analysis_arm64.json
 #
+# 6. Global以下の"testcategory"でExcel&PDFを生成
+# ${PWD}/JSONtoEXCEL.mdで指定された方法でgloba/<testcategory>以下のディレクトリでExcel&PDFファイルを生成します。
+# 実行には${PWD}/JSONtoEXCEL.pyを利用します。
+# $> ./JSONtoEXCEL.py
+# 
+#
 # オプション省略フォーム
 # オプション: --L<n>（省略可能）<n>は２－５の数字。
 # --L<n>が指定された場合は、ステップ2,3..nをまとめて実行します。例えば、--L3ならステップ2,3をまとめて実行します。
