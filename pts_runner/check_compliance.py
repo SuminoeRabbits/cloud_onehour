@@ -996,10 +996,14 @@ class ComplianceChecker:
               prefix = f"{num_threads}-thread"
               # remove prefix.* and prefix/ directory only
         """
-        # Check for the dangerous pattern
+        # Strip Python line comments before checking to avoid false positives
+        # caused by explanatory comments like "# NEVER use shutil.rmtree(self.results_dir)"
+        code_without_comments = re.sub(r'#[^\n]*', '', self.content)
+
+        # Check for the dangerous pattern (in non-comment code only)
         dangerous_pattern = re.search(
             r'shutil\.rmtree\(self\.results_dir\)',
-            self.content
+            code_without_comments
         )
 
         if dangerous_pattern:
