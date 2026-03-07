@@ -1,47 +1,51 @@
 # JSON to Excel
 
-ベンチマーク結果を保存したJSONファイルを加工しやすい様にExcel（.xlsx）形式に変換します。形式変換の仕様と、その変換を実装したJSONtoEXCEL.pyについて記載します。
+Convert benchmark result JSON files to analysis-ready Excel (`.xlsx`) format.
 
-## Python version
-Python3.12で動作すること。
+## Python Version
 
-## Excel index
+Requires Python 3.12 or newer.
 
-1行目はIndexとする。
+## Excel Columns (A–I)
 
-|     | A列       | B列 | C列    | D列  | E列         | F列      | G列   | H列                  |
-| --- | --------- | --- | ------ | ---- | ----------- | -------- | ----- | -------------------- |
-| 1行 | benchmark | os  | thread | unit | machinename | cpu_name | score | relative_performance |
+Row 1 is the header row.
 
-## Excel contents
+| Col | Header | Type |
+|-----|--------|------|
+| A | `benchmark` | string |
+| B | `os` | string |
+| C | `thread` | integer |
+| D | `unit` | string |
+| E | `machinename` | string |
+| F | `cpu_name` | string |
+| G | `score` | float, 2 decimal places |
+| H | `relative_performance` | float, 2 decimal places |
+| I | `performance` | float, 2 decimal places |
 
-２行目以降にJSONのデータをExcelに入れる。例として下記のJSONを考える。
+## Excel Contents
 
-```
+Data starts from row 2. Source JSON structure:
+
+```json
 {
-  "generation log": {
-    "version info": "v1.6.0-gb4d3e25",
-    "date": "20260302-070133"
-  },
   "performance_comparison": {
-    "description": "Performance comparison leaderboard by OS",
     "workload": {
-      "tensorflow-lite-1.1.0": {
-        "TensorFlow Lite 2022-05-18 - Model: SqueezeNet": {
+      "<workload-key>": {
+        "<benchmark>": {
           "os": {
-            "RHEL_10": {
+            "<OS>": {
               "thread": {
-                "4": {
+                "<thread>": {
                   "unit": "Microseconds",
                   "leaderboard": [
                     {
                       "rank": 1,
                       "machinename": "aws-m8a-4xlarge-amd64",
                       "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
-                      "cpu_isa": "x86-64 (AMX + AVX-512)",
                       "score": 2271.33,
                       "relative_performance": 1.0
-                    }]
+                    }
+                  ]
                 }
               }
             }
@@ -53,118 +57,123 @@ Python3.12で動作すること。
 }
 ```
 
-この場合、Excelに抽出されるデータ例とそのデータタイプは以下の通り。
+Field mapping for each entry in `leaderboard` (or `ranking`):
 
-- A列　benchmark : "TensorFlow Lite 2022-05-18 - Model: SqueezeNet",文字列
-- B列　os : "RHEL_10" 、文字列
-- C列　thread : 4, 整数
-- D列　unit :"Microseconds",文字列
-- E列　machinename:"aws-m8a-4xlarge-amd64"、文字列
-- F列　cpu_name:"AMD EPYC 9R45 (Zen 5 \"Turin\")"、文字列
-- G列　score: 2271.33、小数点以下２点
-- H列　relative_performance: 1.0、小数点以下２点
+| Column | Source field |
+|--------|-------------|
+| A `benchmark` | benchmark name key |
+| B `os` | OS key |
+| C `thread` | thread key (string converted to integer) |
+| D `unit` | `unit` |
+| E `machinename` | `machinename` |
+| F `cpu_name` | `cpu_name` |
+| G `score` | `score`; falls back to `efficiency_score` |
+| H `relative_performance` | `relative_performance`; falls back to `relative_cost_efficiency` |
+| I `performance` | computed (see below) |
 
-## Adding original colum in Excel file
+## Column I: performance
 
-追加でI列を独自に付け加える。I列のデータは以下の条件を満たす。
+Column I is populated **only for `*performance_analysis*` files**; it is empty for all other files.
 
-- 同一のBenchmark、OS、Unitにおいて考える。
-- performance_analysisの場合にのみ
-  - 最小のthread数でrank=１であるscoreをI列の１００と定義。
-- rank, threadを推移させた時のscoreの推移を１００に対して算出し、I列とするが
-  - もしunit={Microseconds}の場合は、scoreの推移の逆数x100をI列とする。
+Within each (benchmark, OS, unit) group, the baseline is defined as the `score` of rank=1 at the minimum thread count = **100**.
 
-I列の趣旨は同一のBenchmark、OS、Unitにおいてperformance_analysisの場合にのみthreadの変化によるscoreの推移を比率として算出する事である。
+For all other rows the ratio relative to that baseline is computed:
 
-I列のタイトルは"performance"とする。
+- If `unit` is `Microseconds`: `performance = (baseline_score / score) × 100`
+- Otherwise: `performance = (score / baseline_score) × 100`
 
-## sort, reorder in Excel file
-次の順序で列に対してソートを行う。
+## Sort Order
 
-1. A列 `benchmark` : Excelの自然順ルール
-2. E列 `machinename` : Excelの自然順ルール
-3. C列 `thread` : Excelの昇順ルール
+Rows are sorted in the following priority:
 
-補足（自然順の意味）:
+1. **A** `benchmark` — natural order
+2. **E** `machinename` — natural order
+3. **C** `thread` — ascending
 
-- 数字を文字列ではなく数値として比較する。
-- 例: `1 < 20 < 100 < 200 < 1000 < 4000`
+> **Natural order**: numbers are compared as integers, not strings.
+> Example: `1 < 20 < 100 < 200 < 1000 < 4000`
 
+## Graph Generation
 
-## generate graph 
-グラフ作成は*performance_analysis*ファイルにのみ実施されます。
-次の手順でそれぞれの`benchmark`毎にグラフを作り、１つのグラフを１ページの構成でまとめたPDFを作る。
+Graphs are generated **only for `*performance_analysis*` files**.
+One graph per `benchmark`, all compiled into a single PDF (one page per graph).
 
-### グラフの色
+### Line Colors
 
-グラフの色はF列`cpu_name`からインスタンスがarm64系なのか、amd系なのか、Intel系なのかを判断する。
+Colors are determined from **F** `cpu_name`:
 
-- arm64系インスタンスは青っぽい色のバリエーション
-- amd系インスタンスは黒っぽい色のバリエーション
-- Intel系インスタンスは赤っぽい色のバリエーション
+| Architecture | Color |
+|---|---|
+| ARM64 (Graviton, Neoverse, Ampere, …) | Blue variants |
+| AMD (EPYC, …) | Black / dark grey variants |
+| Intel (Xeon, …) | Red variants |
 
-複数のグラフで色が見分けにくい場合に備えて、それぞれの系列の中でSolid line, Dot line(目の粗さによる区別)などを順番に利用して区別をつけやすくする。
-グラフに用いた色を凡例と系列にも利用しグラフ全体を見やすくする。
+Within each architecture group, line styles (solid, dashed, dotted, dash-dot) cycle to improve distinguishability. Colors and styles are consistent between the graph lines and the legend entries.
 
-### `thread`が複数ある場合
-x軸：`thread`(整数)
-y軸：`performance`　y軸は１０刻みで横線
-系列:`machinename`
-タイトル:`benchmark`(`unit`)
+### Multiple Thread Values — Line Chart
 
-グラフの範囲は`benchmark`名が同じもの。
-グラフの系列に番号(1,2...)を付けて、それを凡例とグラフ側にも付けてください。系列の番号がグラフで重なってみえない場合を防ぐために番号はグラフの左端、右端と交互に番号を振る。
+- X-axis: `thread` (integer)
+- Y-axis: `performance`, grid lines every 10
+- Series: one line per `machinename`
+- Title: `benchmark (unit)`
 
+Each series is labeled with a number (1, 2, …) in both the legend and on the graph.
+To prevent overlap, labels alternate between the **left end** and **right end** of each line.
 
-### `thread`が１つしかないの場合
-`performance`を縦棒グラフで表す。
-y軸：`performance`　y軸0-100の間を１０刻みで横線
-系列:`machinename`
-タイトル:`benchmark`(`unit`),Thread=`thread`
-縦棒グラフ時のx軸ラベル：`machinename`（短縮）
+### Single Thread Value — Bar Chart
 
-グラフの範囲は`benchmark`名が同じもの。
-グラフの系列に番号を付けない。
-系列は`performance`が大きいものを左において順番に右に並べてください。
+- Y-axis: `performance`, range 0–100, grid lines every 10
+- Series: one bar per `machinename`
+- Title: `benchmark (unit), Thread=<thread>`
+- X-axis labels: shortened `machinename`
 
+Bars are arranged from **highest performance on the left** to lowest on the right.
+Series numbers are not shown.
 
-## Excel file output
-今まで生成されたExcel fileをファイルにダンプする。
-`<Testcategory>`として、["AI","Compression","Cryptography_and_TLS","Database","Java_Applications","Memory_Access","Multimedia","Network","Processor","System"]を定義。それぞれの`<Testcategory>`に対して、`<Testcategory>`/`<xxxx>`.jsonを`<xxxx>`.xlsxとしてファイルを作成。Excel保存場所は`<xxxx>`.jsonと同じ。
+## Excel File Output
 
-### Overwrite
+Output location: same directory as the source JSON, with `.json` replaced by `.xlsx`.
+If a file with the same name already exists, it is **overwritten**.
 
-すでに同名のExcelファイルがある場合は、上書きする。
+Test categories processed:
+`AI`, `Compression`, `Cryptography_and_TLS`, `Database`, `Java_Applications`,
+`Memory_Access`, `Multimedia`, `Network`, `Processor`, `System`
 
-## 変換ルール補足
+For each category `<Category>`, files matching `<Category>/<Category>_*.json`
+are converted to `<Category>/<Category>_*.xlsx`.
 
-- JSON内の比較ブロックは `*_comparison` を探索し、配下の `workload` を処理対象とする。
-- `leaderboard` が存在する場合は `leaderboard` を優先し、無い場合は `ranking` を使用する。
-- `score` は `score` を優先し、無い場合は `efficiency_score` を使用する。
-- `relative_performance` は `relative_performance` を優先し、無い場合は `relative_cost_efficiency` を使用する。
-- `thread` が数字文字列（例: `"4"`）の場合は整数に変換する。
+## Conversion Rules
 
-## JSONtoEXCEL.py implementation
+- Comparison block: any top-level key ending in `*_comparison` that contains a `workload` sub-key.
+- Entry list: `leaderboard` is preferred; falls back to `ranking`.
+- Score field: `score` is preferred; falls back to `efficiency_score`.
+- Relative performance field: `relative_performance` is preferred; falls back to `relative_cost_efficiency`.
+- Thread value: converted from string to integer when the value is numeric (e.g. `"4"` → `4`).
 
-- Requirement : Python 3.12 or newer
-- Requirement : `openpyxl`
-- Requirement : `matplotlib`
+## JSONtoEXCEL.py
 
-### 実行コマンド
+### Requirements
+
+- Python 3.12 or newer
+- `openpyxl`
+- `matplotlib`
+
+### Usage
 
 ```bash
-python JSONtoEXCEL.py
+python JSONtoEXCEL.py [options]
 ```
 
-### オプション
+### Options
 
-- `--root` : ワークスペースルート（省略時は `JSONtoEXCEL.py` 配置ディレクトリ）
-- `--ext` : 出力拡張子（現状 `.xlsx` 固定）
-- `--log` : 実行の際に出力されるLog fileが保存されるディレクトリ。省略時は `$PWD/log`。ディレクトリがない場合は自動生成。
-- `--graph` :既存のExcelを読みこみ、そこから## generate graph に従いPDFを作成する。 
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--root PATH` | script directory | Workspace root. The `global/` sub-directory is searched for JSON files. |
+| `--ext .xlsx` | `.xlsx` | Output file extension (currently fixed to `.xlsx`). |
+| `--log DIR` | `$PWD/log` | Directory for log files. Created automatically if absent. |
+| `--graph` | — | Read existing Excel files and regenerate PDFs. **Excel files are not modified or recreated.** Use this when you have manually edited an Excel file and want to refresh the graphs without re-running the full JSON conversion. |
 
+### Notes
 
-### 補足
-
-- 変換処理は `JSONtoEXCEL.py` の1ファイルで実施する。
-- これまでの中間生成用PowerShellファイル（`*.ps1`）は廃止する。
+- All processing is implemented in the single file `JSONtoEXCEL.py`.
+- Previous intermediate PowerShell files (`*.ps1`) are deprecated.

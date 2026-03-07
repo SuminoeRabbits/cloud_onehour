@@ -1,13 +1,17 @@
+#!/usr/bin/env python3
 import argparse
 import json
+import logging
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 import matplotlib
+
 matplotlib.use("Agg")
 
-from openpyxl import Workbook
+from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font
 from matplotlib import ticker as mticker
 from matplotlib import pyplot as plt
@@ -28,12 +32,21 @@ TEST_CATEGORIES = [
     "System",
 ]
 
+# A-I columns as per spec
 HEADERS = [
-    "benchmark",
-    "machinename",
-    "thread",
-    "performance",
+    "benchmark",          # A
+    "os",                 # B
+    "thread",             # C
+    "unit",               # D
+    "machinename",        # E
+    "cpu_name",           # F
+    "score",              # G
+    "relative_performance",  # H
+    "performance",        # I
 ]
+
+# Column widths (A-I)
+_COL_WIDTHS = [50, 15, 10, 15, 30, 35, 12, 20, 12]
 
 
 def find_comparison_block(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -71,6 +84,7 @@ def is_rank_one(value: Any) -> bool:
 
 
 def extract_rows(payload: Dict[str, Any]) -> List[Tuple[Any, ...]]:
+    """Extract 9-tuples: (benchmark, os, thread, unit, machinename, cpu_name, score, relative, rank)."""
     comparison = find_comparison_block(payload)
     workload = comparison.get("workload", {})
 
@@ -112,7 +126,7 @@ def extract_rows(payload: Dict[str, Any]) -> List[Tuple[Any, ...]]:
                                 item.get("cpu_name"),
                                 score,
                                 relative,
-                                rank,
+                                rank,  # index 8: rank (replaced by performance later)
                             )
                         )
 
@@ -120,28 +134,22 @@ def extract_rows(payload: Dict[str, Any]) -> List[Tuple[Any, ...]]:
 
 
 def add_original_column(rows: Iterable[Tuple[Any, ...]], json_path: Path) -> List[Tuple[Any, ...]]:
-    row_list = list(rows)
-    baseline_scores: Dict[Tuple[Any, Any, Any], float] = {}
-    selected_threads: Dict[Tuple[Any, Any, Any], int] = {}
+    """Replace rank (index 8) with I-column performance value.
 
-    file_name = json_path.name
-    is_performance_analysis = "performance_analysis" in file_name
+    Result tuple: (benchmark, os, thread, unit, machinename, cpu_name, score, relative, performance)
+    """
+    row_list = list(rows)
+    is_performance_analysis = "performance_analysis" in json_path.name
 
     if not is_performance_analysis:
         return [
-            (
-                benchmark,
-                os_name,
-                thread,
-                unit,
-                machine_name,
-                cpu_name,
-                score,
-                relative,
-                None,
-            )
+            (benchmark, os_name, thread, unit, machine_name, cpu_name, score, relative, None)
             for benchmark, os_name, thread, unit, machine_name, cpu_name, score, relative, _ in row_list
         ]
+
+    # Find baseline: rank=1, minimum thread, per (benchmark, os, unit)
+    baseline_scores: Dict[Tuple[Any, Any, Any], float] = {}
+    selected_threads: Dict[Tuple[Any, Any, Any], int] = {}
 
     for row in row_list:
         benchmark, os_name, thread, unit, _, _, score, _, rank = row
@@ -164,126 +172,136 @@ def add_original_column(rows: Iterable[Tuple[Any, ...]], json_path: Path) -> Lis
         key = (benchmark, os_name, unit)
         baseline = baseline_scores.get(key)
 
-        original_value = None
+        performance = None
         if baseline not in (None, 0) and isinstance(score, (int, float)):
             unit_normalized = unit.strip().lower() if isinstance(unit, str) else ""
             if unit_normalized == "microseconds":
-                original_value = (baseline / float(score)) * 100 if score != 0 else None
+                performance = (baseline / float(score)) * 100 if score != 0 else None
             else:
-                original_value = (float(score) / baseline) * 100
+                performance = (float(score) / baseline) * 100
 
         enriched_rows.append(
-            (
-                benchmark,
-                os_name,
-                thread,
-                unit,
-                machine_name,
-                cpu_name,
-                score,
-                relative,
-                original_value,
-            )
+            (benchmark, os_name, thread, unit, machine_name, cpu_name, score, relative, performance)
         )
 
     return enriched_rows
 
 
+# ---------------------------------------------------------------------------
+# Sorting helpers (shared by build_output_rows and graph)
+# ---------------------------------------------------------------------------
+
+def _normalize_sort_text(value: Any, case_insensitive: bool = True, collapse_spaces: bool = True) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    if collapse_spaces:
+        text = " ".join(text.strip().split())
+    return text.casefold() if case_insensitive else text
+
+
+def _natural_sort_key(
+    value: Any,
+    case_insensitive: bool = True,
+    collapse_spaces: bool = True,
+) -> Tuple[Tuple[int, Any], ...]:
+    text = _normalize_sort_text(value, case_insensitive=case_insensitive, collapse_spaces=collapse_spaces)
+    parts = re.split(r"(\d+)", text)
+    key_parts: List[Tuple[int, Any]] = []
+    for part in parts:
+        if part == "":
+            continue
+        if part.isdigit():
+            key_parts.append((0, int(part)))
+        else:
+            key_parts.append((1, part))
+    return tuple(key_parts)
+
+
+def _thread_sort_value(value: Any) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 10**9
+
+
 def build_output_rows(rows: Iterable[Tuple[Any, ...]]) -> List[Tuple[Any, ...]]:
-    projected_rows: List[Tuple[Any, Any, Any, Any]] = []
+    """Sort 9-tuples by benchmark (A) → machinename (E) → thread (C), natural order."""
+    row_list = list(rows)
 
-    for row in rows:
-        benchmark, _, thread, _, machine_name, _, _, _, performance = row
-        projected_rows.append((benchmark, machine_name, thread, performance))
-
-    def normalize_sort_text(value: Any, case_insensitive: bool = True, collapse_spaces: bool = True) -> str:
-        if value is None:
-            return ""
-        text = str(value)
-        if collapse_spaces:
-            text = " ".join(text.strip().split())
-        return text.casefold() if case_insensitive else text
-
-    def natural_sort_key(
-        value: Any,
-        case_insensitive: bool = True,
-        collapse_spaces: bool = True,
-    ) -> Tuple[Tuple[int, Any], ...]:
-        text = normalize_sort_text(
-            value,
-            case_insensitive=case_insensitive,
-            collapse_spaces=collapse_spaces,
+    def sort_key(item: Tuple[Any, ...]) -> Tuple:
+        benchmark = item[0]   # A
+        machine_name = item[4]  # E
+        thread = item[2]  # C
+        return (
+            _natural_sort_key(benchmark, case_insensitive=True, collapse_spaces=False),
+            _natural_sort_key(machine_name, case_insensitive=True, collapse_spaces=True),
+            _thread_sort_value(thread),
         )
-        parts = re.split(r"(\d+)", text)
-        key_parts: List[Tuple[int, Any]] = []
-        for part in parts:
-            if part == "":
-                continue
-            if part.isdigit():
-                key_parts.append((0, int(part)))
-            else:
-                key_parts.append((1, part))
-        return tuple(key_parts)
 
-    def thread_sort_value(value: Any) -> int:
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str) and value.strip().isdigit():
-            return int(value.strip())
-        return 10**9
-
-    def sort_key(item: Tuple[Any, Any, Any, Any]) -> Tuple[Tuple[Tuple[int, Any], ...], Tuple[Tuple[int, Any], ...], int]:
-        benchmark, machine_name, thread, _ = item
-        thread_key = thread_sort_value(thread)
-        machine_key = natural_sort_key(machine_name, case_insensitive=True, collapse_spaces=True)
-        benchmark_key = natural_sort_key(benchmark, case_insensitive=True, collapse_spaces=False)
-        return (benchmark_key, machine_key, thread_key)
-
-    projected_rows.sort(key=sort_key)
-    return projected_rows
+    row_list.sort(key=sort_key)
+    return row_list
 
 
 def write_xlsx(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> None:
+    """Write 9-column Excel (A-I) per spec."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Sheet1"
 
+    # Header row (bold)
     for col, header in enumerate(HEADERS, start=1):
         cell = sheet.cell(row=1, column=col, value=header)
         cell.font = Font(bold=True)
 
-    col_widths = [45, 30, 10, 20]
-    column_letters = ["A", "B", "C", "D"]
-    for letter, width in zip(column_letters, col_widths):
-        sheet.column_dimensions[letter].width = width
+    # Column widths
+    for col_idx, width in enumerate(_COL_WIDTHS, start=1):
+        col_letter = sheet.cell(row=1, column=col_idx).column_letter
+        sheet.column_dimensions[col_letter].width = width
 
+    # Data rows
     for row_idx, row in enumerate(rows, start=2):
         for col_idx, value in enumerate(row, start=1):
             cell = sheet.cell(row=row_idx, column=col_idx, value=value)
-            if col_idx == 4 and isinstance(value, (float, int)):
+            # G=7 (score), H=8 (relative_performance), I=9 (performance) → 2 decimal places
+            if col_idx in (7, 8, 9) and isinstance(value, (int, float)):
                 cell.number_format = "0.00"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(str(output_path))
 
 
+def read_rows_from_xlsx(xlsx_path: Path) -> List[Tuple[Any, ...]]:
+    """Read 9-column Excel back as tuples for --graph mode."""
+    wb = load_workbook(xlsx_path, read_only=True, data_only=True)
+    ws = wb.active
+    rows: List[Tuple[Any, ...]] = []
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0:
+            continue  # skip header
+        if len(row) >= 9:
+            rows.append(tuple(row[:9]))
+    wb.close()
+    return rows
+
+
 def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> int:
+    """Generate per-benchmark PDF graphs.  Expects 9-tuples: (benchmark, os, thread, unit, machinename, cpu_name, score, relative, performance)."""
     grouped: Dict[str, Dict[str, List[Tuple[int, float]]]] = {}
     benchmark_units: Dict[str, str] = {}
     machine_family_by_benchmark: Dict[str, Dict[str, str]] = {}
 
     def detect_machine_family(cpu_name: Any) -> str:
         cpu_text = cpu_name.casefold() if isinstance(cpu_name, str) else ""
-
         arm_markers = ("arm", "aarch64", "graviton", "ampere", "neoverse", "cortex")
         amd_markers = ("amd", "epyc")
         intel_markers = ("intel", "xeon")
-
-        if any(marker in cpu_text for marker in arm_markers):
+        if any(m in cpu_text for m in arm_markers):
             return "arm"
-        if any(marker in cpu_text for marker in amd_markers):
+        if any(m in cpu_text for m in amd_markers):
             return "amd"
-        if any(marker in cpu_text for marker in intel_markers):
+        if any(m in cpu_text for m in intel_markers):
             return "intel"
         return "other"
 
@@ -309,36 +327,22 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
     output_path.parent.mkdir(parents=True, exist_ok=True)
     page_count = 0
 
-    def natural_sort_key(value: Any) -> Tuple[Tuple[int, Any], ...]:
-        text = "" if value is None else str(value).casefold().strip()
-        parts = re.split(r"(\d+)", text)
-        key_parts: List[Tuple[int, Any]] = []
-        for part in parts:
-            if not part:
-                continue
-            if part.isdigit():
-                key_parts.append((0, int(part)))
-            else:
-                key_parts.append((1, part))
-        return tuple(key_parts)
-
     def shorten_machinename(name: str, max_len: int = 18) -> str:
         text = name.strip()
         if len(text) <= max_len:
             return text
-        return text[: max_len - 1] + "…"
+        return text[: max_len - 1] + "\u2026"
 
     def build_machine_colors(benchmark: str, machine_names: List[str]) -> Dict[str, str]:
         palettes = {
-            "arm": ["#1f77b4", "#4f97cc", "#76afd8", "#9bc8e7", "#c2dff2"],
+            "arm":   ["#1f77b4", "#4f97cc", "#76afd8", "#9bc8e7", "#c2dff2"],
             "intel": ["#b22222", "#c74444", "#d96868", "#e58d8d", "#f0b3b3"],
-            "amd": ["#111111", "#2a2a2a", "#444444", "#5e5e5e", "#7a7a7a"],
+            "amd":   ["#111111", "#2a2a2a", "#444444", "#5e5e5e", "#7a7a7a"],
             "other": ["#666666", "#808080", "#9a9a9a", "#b3b3b3", "#cdcdcd"],
         }
         family_counters: Dict[str, int] = {"arm": 0, "intel": 0, "amd": 0, "other": 0}
         family_map = machine_family_by_benchmark.get(benchmark, {})
         machine_colors: Dict[str, str] = {}
-
         for machinename in machine_names:
             family = family_map.get(machinename, "other")
             if family not in palettes:
@@ -347,7 +351,6 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
             index = family_counters[family] % len(palette)
             machine_colors[machinename] = palette[index]
             family_counters[family] += 1
-
         return machine_colors
 
     with PdfPages(str(output_path)) as pdf:
@@ -355,12 +358,9 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
             figure, axis = plt.subplots(figsize=(11.69, 8.27))
             axis.axis("off")
             axis.text(
-                0.5,
-                0.5,
+                0.5, 0.5,
                 "No performance data available for graph generation",
-                ha="center",
-                va="center",
-                fontsize=14,
+                ha="center", va="center", fontsize=14,
             )
             pdf.savefig(figure)
             plt.close(figure)
@@ -371,53 +371,48 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
             figure.subplots_adjust(right=0.72)
             legend_handles: List[Any] = []
             all_threads = sorted(
-                {
-                    thread
-                    for points in machine_map.values()
-                    for thread, _ in points
-                }
+                {thread for points in machine_map.values() for thread, _ in points}
             )
             single_thread_mode = len(all_threads) == 1
 
-            machine_items = sorted(machine_map.items(), key=lambda item: natural_sort_key(item[0]))
+            machine_items = sorted(machine_map.items(), key=lambda item: _natural_sort_key(item[0]))
             machine_names = [name for name, _ in machine_items]
             machine_colors = build_machine_colors(benchmark, machine_names)
+
             if single_thread_mode:
+                # Bar chart: sorted by performance descending (highest = leftmost)
                 ranked_items: List[Tuple[str, List[Tuple[int, float]], float]] = []
                 for machinename, points in machine_items:
-                    y_values = [value for _, value in points]
+                    y_values = [v for _, v in points]
                     if not y_values:
                         continue
                     bar_value = sum(y_values) / len(y_values)
                     ranked_items.append((machinename, points, bar_value))
-
                 ranked_items.sort(key=lambda item: item[2], reverse=True)
 
                 x_positions = list(range(len(ranked_items)))
                 x_labels: List[str] = []
                 label_counts: Dict[str, int] = {}
 
-                for index, (series_number, (machinename, points, bar_value)) in enumerate(
-                    enumerate(ranked_items, start=1)
-                ):
-                    legend_label = machinename
+                for index, (machinename, _, bar_value) in enumerate(ranked_items):
                     short_label = shorten_machinename(machinename)
                     label_counts[short_label] = label_counts.get(short_label, 0) + 1
                     if label_counts[short_label] > 1:
                         short_label = f"{short_label}#{label_counts[short_label]}"
                     x_labels.append(short_label)
-
                     color = machine_colors.get(machinename, "#808080")
                     axis.bar(index, bar_value, width=0.7, color=color)
-                    legend_handles.append(
-                        Patch(facecolor=color, edgecolor=color, label=legend_label)
-                    )
+                    legend_handles.append(Patch(facecolor=color, edgecolor=color, label=machinename))
 
                 axis.set_xticks(x_positions)
                 axis.set_xticklabels(x_labels)
                 axis.set_xlabel("machinename")
                 axis.tick_params(axis="x", labelrotation=25)
+                axis.set_ylim(0, 100)
+                axis.set_yticks(list(range(0, 101, 10)))
+
             else:
+                # Line chart with series numbers alternating left/right
                 line_styles = ["-", "--", ":", "-."]
                 for series_number, (machinename, points) in enumerate(machine_items, start=1):
                     points_sorted = sorted(points, key=lambda item: item[0])
@@ -427,24 +422,13 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
                     color = machine_colors.get(machinename, "#808080")
                     line_style = line_styles[(series_number - 1) % len(line_styles)]
                     axis.plot(
-                        x_values,
-                        y_values,
-                        marker="o",
-                        linewidth=1.5,
-                        label=legend_label,
-                        color=color,
-                        linestyle=line_style,
+                        x_values, y_values,
+                        marker="o", linewidth=1.5,
+                        label=legend_label, color=color, linestyle=line_style,
                     )
                     legend_handles.append(
-                        Line2D(
-                            [0],
-                            [0],
-                            color=color,
-                            linestyle=line_style,
-                            marker="o",
-                            linewidth=1.5,
-                            label=legend_label,
-                        )
+                        Line2D([0], [0], color=color, linestyle=line_style,
+                               marker="o", linewidth=1.5, label=legend_label)
                     )
 
                     if x_values and y_values:
@@ -460,31 +444,25 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
                             xy=(x_anchor, y_anchor),
                             xytext=(x_offset, y_offset),
                             textcoords="offset points",
-                            ha=align,
-                            va="center",
-                            fontsize=8,
-                            fontweight="bold",
-                            color=color,
+                            ha=align, va="center",
+                            fontsize=8, fontweight="bold", color=color,
                             bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.7},
                         )
 
+                axis.set_xlabel("thread")
+                axis.yaxis.set_major_locator(mticker.MultipleLocator(10))
+
+            # Common axes/title
             unit_label = benchmark_units.get(benchmark)
             if single_thread_mode and all_threads:
                 title = (
                     f"{benchmark} ({unit_label}),Thread={all_threads[0]}"
-                    if unit_label
-                    else f"{benchmark},Thread={all_threads[0]}"
+                    if unit_label else f"{benchmark},Thread={all_threads[0]}"
                 )
             else:
                 title = f"{benchmark} ({unit_label})" if unit_label else benchmark
             axis.set_title(title)
-            if not single_thread_mode:
-                axis.set_xlabel("thread")
-                axis.yaxis.set_major_locator(mticker.MultipleLocator(10))
             axis.set_ylabel("performance")
-            if single_thread_mode:
-                axis.set_ylim(0, 100)
-                axis.set_yticks(list(range(0, 101, 10)))
             axis.grid(True, axis="y", linestyle="--", alpha=0.35)
 
             if legend_handles:
@@ -513,11 +491,12 @@ def convert_json_file(json_path: Path, output_ext: str) -> int:
     output_rows = build_output_rows(rows_with_performance)
     output_path = json_path.with_suffix(output_ext)
     pdf_path = json_path.with_suffix(".pdf")
+
     write_xlsx(output_rows, output_path)
 
     is_performance_analysis = "performance_analysis" in json_path.name
     if is_performance_analysis:
-        generate_graph_pdf(rows_with_performance, pdf_path)
+        generate_graph_pdf(output_rows, pdf_path)
     elif pdf_path.exists():
         pdf_path.unlink()
 
@@ -526,12 +505,10 @@ def convert_json_file(json_path: Path, output_ext: str) -> int:
 
 def gather_target_jsons(global_dir: Path) -> List[Path]:
     json_files: List[Path] = []
-
     for category in TEST_CATEGORIES:
         category_dir = global_dir / category
         if not category_dir.exists() or not category_dir.is_dir():
             continue
-
         json_files.extend(
             sorted(
                 json_file
@@ -539,8 +516,34 @@ def gather_target_jsons(global_dir: Path) -> List[Path]:
                 if json_file.name.startswith(f"{category}_")
             )
         )
-
     return json_files
+
+
+def graph_mode(global_dir: Path) -> int:
+    """Read existing performance_analysis Excel files and regenerate PDFs."""
+    errors = 0
+    generated = 0
+    for category in TEST_CATEGORIES:
+        category_dir = global_dir / category
+        if not category_dir.exists() or not category_dir.is_dir():
+            continue
+        for xlsx_path in sorted(category_dir.glob("*.xlsx")):
+            if "performance_analysis" not in xlsx_path.name:
+                continue
+            pdf_path = xlsx_path.with_suffix(".pdf")
+            try:
+                rows = read_rows_from_xlsx(xlsx_path)
+                if not rows:
+                    logging.warning("[WARN] No data in %s", xlsx_path)
+                    continue
+                count = generate_graph_pdf(rows, pdf_path)
+                logging.info("[OK] %s -> %s (%d pages)", xlsx_path, pdf_path, count)
+                generated += 1
+            except Exception as exc:
+                logging.error("[NG] %s: %s", xlsx_path, exc)
+                errors += 1
+    logging.info("Graph mode: %d PDF(s) generated, %d error(s)", generated, errors)
+    return errors
 
 
 def main() -> int:
@@ -557,13 +560,41 @@ def main() -> int:
         default=".xlsx",
         help="Output extension (default: .xlsx)",
     )
+    parser.add_argument(
+        "--log",
+        type=Path,
+        default=None,
+        help="Log file directory (default: $PWD/log)",
+    )
+    parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="Read existing Excel files and regenerate PDFs for performance_analysis files",
+    )
     args = parser.parse_args()
 
-    global_dir = args.root / "global"
-    targets = gather_target_jsons(global_dir)
+    log_dir: Path = args.log if args.log is not None else Path.cwd() / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "JSONtoEXCEL.log"
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+    global_dir = args.root / "global"
+
+    if args.graph:
+        errors = graph_mode(global_dir)
+        return 0 if errors == 0 else 2
+
+    targets = gather_target_jsons(global_dir)
     if not targets:
-        print("No target JSON files found")
+        logging.warning("No target JSON files found under %s", global_dir)
         return 1
 
     total_rows = 0
@@ -574,11 +605,11 @@ def main() -> int:
             row_count = convert_json_file(json_file, args.ext)
             total_rows += row_count
             converted += 1
-            print(f"[OK] {json_file} -> {json_file.with_suffix(args.ext)} ({row_count} rows)")
+            logging.info("[OK] %s -> %s (%d rows)", json_file, json_file.with_suffix(args.ext), row_count)
         except Exception as exc:
-            print(f"[NG] {json_file}: {exc}")
+            logging.error("[NG] %s: %s", json_file, exc)
 
-    print(f"Converted files: {converted}/{len(targets)}, total rows: {total_rows}")
+    logging.info("Converted: %d/%d files, %d total rows", converted, len(targets), total_rows)
     return 0 if converted == len(targets) else 2
 
 
