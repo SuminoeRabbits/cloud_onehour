@@ -818,8 +818,10 @@ class NumpyBenchmarkRunner:
                                    bufsize=1,
                                    env=install_env)
 
+        install_output = []
         for line in process.stdout:
             print(line, end='')
+            install_output.append(line)
             if log_f:
                 log_f.write(line)
                 log_f.flush()
@@ -835,6 +837,12 @@ class NumpyBenchmarkRunner:
             install_failed = True
         elif pts_test_failed:
             install_failed = True
+        else:
+            error_strings = ["Checksum Failed", "ERROR", "FAILED"]
+            for line in install_output:
+                if any(err in line for err in error_strings):
+                    install_failed = True
+                    break
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")
             sys.exit(1)

@@ -380,7 +380,7 @@ class PhpBenchRunner:
         else:
              pts_cmd = f'{batch_env} {pts_base_cmd}'
 
-        subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_start_file}'])
+        self.record_cpu_frequency(freq_start_file)
 
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
             process = subprocess.Popen(['bash', '-c', pts_cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -390,7 +390,7 @@ class PhpBenchRunner:
                 stdout_f.write(line)
             process.wait()
             
-        subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_end_file}'])
+        self.record_cpu_frequency(freq_end_file)
         
         returncode = process.returncode
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)

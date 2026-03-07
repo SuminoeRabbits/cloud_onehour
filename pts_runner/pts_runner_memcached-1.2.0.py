@@ -443,8 +443,8 @@ class MemcachedRunner:
         if timeout_cmd:
             pts_cmd = f'{timeout_cmd} --signal=TERM --kill-after=30s {thread_timeout}s {pts_cmd}'
 
-        # Record start freq
-        subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_start_file}'])
+        # Record start freq (cross-platform: x86_64, ARM64, cloud VMs)
+        self.record_cpu_frequency(freq_start_file)
 
         with open(log_file, 'w') as log_f, open(stdout_log, 'a') as stdout_f:
             stdout_f.write(f"\n{'='*80}\n")
@@ -472,8 +472,8 @@ class MemcachedRunner:
 
         cleanup_stale_memcached_processes()
             
-        # Record end freq
-        subprocess.run(['bash', '-c', f'grep "cpu MHz" /proc/cpuinfo | head -1 > {freq_end_file}'])
+        # Record end freq (cross-platform: x86_64, ARM64, cloud VMs)
+        self.record_cpu_frequency(freq_end_file)
         
         if returncode == 124:
             print(f"  [ERROR] Memcached benchmark timed out at {thread_timeout}s for {num_threads} threads")
