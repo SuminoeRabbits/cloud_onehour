@@ -253,7 +253,10 @@ def is_higher_better_from_unit(unit: str) -> bool:
     """Infer higher-is-better from unit text using same rule as performance scoring."""
     unit_lower = str(unit or "").lower()
     is_rate = "per second" in unit_lower
-    is_time_unit = ("microsecond" in unit_lower or "second" in unit_lower) and not is_rate
+    is_time_unit = (
+        unit_lower == "ms"
+        or ("microsecond" in unit_lower or "second" in unit_lower)
+    ) and not is_rate
     return not is_time_unit
 
 
@@ -494,11 +497,14 @@ def get_performance_score(test_data: Dict[str, Any]) -> Tuple[Any, bool]:
     unit = str(test_data.get("unit", "")).lower()
     
     
-    # If unit is Microseconds or Seconds, lower is better.
+    # If unit is Microseconds, Seconds, or ms, lower is better.
     # EXCEPTION: "per second" (rate) is higher is better.
     unit_lower = unit.lower()
     is_rate = "per second" in unit_lower
-    is_time_unit = ("microsecond" in unit_lower or "second" in unit_lower) and not is_rate
+    is_time_unit = (
+        unit_lower == "ms"
+        or ("microsecond" in unit_lower or "second" in unit_lower)
+    ) and not is_rate
     
     if values not in (None, "N/A"):
         try:

@@ -42,7 +42,7 @@ TEST_VARIANT_RE = re.compile(
     re.IGNORECASE
 )
 TPS_RE = re.compile(
-    r"tps\s*=\s*(?P<tps>[\d.]+)\s+\((?:without initial connection time|excluding connections establishing)\)",
+    r"Average:\s*(?P<tps>[\d.]+)\s+TPS",
     re.IGNORECASE
 )
 

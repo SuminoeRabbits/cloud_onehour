@@ -13,6 +13,12 @@
 - [5. one\_big\_json\_analytics.py 仕様](#5-one_big_json_analyticspy-仕様)
 
 ---
+# 1. Benchmark information
+`<benchmark>`の付加情報を作成するのに`${PWD}../test_suite.json`の情報を利用する。
+
+| <testcategory> | <benchmark> | <test_snippet> | <gcc_ver> |
+| ---------------| ----------- | -------------- | --------- |
+
 
 # 1. Performance comparison (絶対性能比較)
 **目的**: 同一 OS 環境下で、プロセッサ世代（CPU 名/ISA）ごとの絶対的な処理能力を比較し、順位付け（リーダーボード）を行います。
