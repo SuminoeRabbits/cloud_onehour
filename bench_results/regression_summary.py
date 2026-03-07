@@ -115,7 +115,7 @@
 # 
 #
 # オプション省略フォーム
-# オプション: --L<n>（省略可能）<n>は２－５の数字。
+# オプション: --L<n>（省略可能）<n>は２－６の数字。
 # --L<n>が指定された場合は、ステップ2,3..nをまとめて実行します。例えば、--L3ならステップ2,3をまとめて実行します。
 #
 from __future__ import annotations
@@ -217,13 +217,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Continue even if a CSP step fails.",
     )
-    for _n in range(2, 6):
+    parser.add_argument(
+        "--excel",
+        action="store_true",
+        help="Run step 6 only: generate Excel and PDF files via JSONtoEXCEL.py.",
+    )
+    for _n in range(2, 7):
         parser.add_argument(
             f"--L{_n}",
             action="store_true",
             help=(
                 f"Shorthand: run steps 2..{_n} together "
-                f"(e.g. --L3 runs steps 2 and 3; --L5 also targets all testcategories)."
+                f"(e.g. --L3 runs steps 2 and 3; --L5 also targets all testcategories; --L6 also generates Excel/PDF)."
             ),
         )
     parser.add_argument(
@@ -539,6 +544,125 @@ def run_postmortem(
     run_script(cmd, cwd)
 
 
+# ---------------------------------------------------------------------------
+# Per-machine / per-category task functions
+# Each function encapsulates exactly one parallelization unit.
+# Future: wrap the loops in main() with ThreadPoolExecutor(max_workers=args.jobs).
+# ---------------------------------------------------------------------------
+
+def extract_machine(tar_path: Path, workdir: Path) -> Optional[Path]:
+    """Extract one tar.gz into workdir/<machinename>/.
+    Returns machine_dir on success, None when the archive is empty (skipped).
+    Raises on extraction failure.
+    """
+    if tar_path.stat().st_size == 0:
+        print(f"Skipping empty tar.gz: {tar_path}", file=sys.stderr)
+        tar_path.unlink(missing_ok=True)
+        return None
+    machinename = infer_machine_name(tar_path)
+    machine_dir = workdir / machinename
+    machine_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tar_path, "r:gz") as tar:
+        safe_extract(tar, machine_dir)
+    print(f"Extracted {tar_path.name} -> {machine_dir}")
+    return machine_dir
+
+
+def prepare_machine_json(
+    csp_dir: Path,
+    make_one_big_json: Path,
+    postmortem_script: Path,
+    target_major: Optional[str],
+) -> None:
+    """Generate one_big_json and postmortem JSON for one machine directory."""
+    results_path = csp_dir / "results"
+    if not results_path.is_dir():
+        return
+    output_json = results_path / f"one_big_json_{csp_dir.name}.json"
+    if not output_json.exists() or not is_valid_one_big_json(output_json, csp_dir.name, target_major):
+        generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
+    postmortem_output = results_path / f"postmortem_{csp_dir.name}.json"
+    run_postmortem(postmortem_script, results_path, postmortem_output, results_path)
+    print(f"Generated postmortem -> {postmortem_output}")
+
+
+def merge_machine(
+    csp_dir: Path,
+    make_one_big_json: Path,
+    target_major: Optional[str],
+) -> None:
+    """Merge all one_big_json_*.json files for one machine into all_results_<name>.json."""
+    results_path = csp_dir / "results"
+    if not results_path.is_dir():
+        raise FileNotFoundError(f"Missing results directory: {results_path}")
+    output_json = results_path / f"all_results_{csp_dir.name}.json"
+    generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
+    input_jsons = sorted(results_path.glob("one_big_json_*.json"))
+    for json_file in input_jsons:
+        if not is_valid_one_big_json(json_file, csp_dir.name, target_major):
+            print(f"Removing invalid JSON -> {json_file}")
+            json_file.unlink(missing_ok=True)
+    input_jsons = sorted(results_path.glob("one_big_json_*.json"))
+    if not input_jsons:
+        raise RuntimeError(f"No valid one_big_json files found in {results_path}")
+    if len(input_jsons) == 1:
+        shutil.copy2(input_jsons[0], output_json)
+        print(f"Copied single CSP result -> {output_json}")
+    else:
+        merge_jsons(make_one_big_json, input_jsons, output_json, results_path)
+        print(f"Merged CSP results -> {output_json}")
+
+
+def run_global_analytics(
+    analytics_script: Path,
+    global_results: Path,
+    global_dir: Path,
+) -> None:
+    """Run the 4 global analytics tasks (perf / cost / thread-scaling / csp).
+    Future: each entry in `tasks` can be submitted to ThreadPoolExecutor independently.
+    """
+    tasks = [
+        (global_dir / "global_performance_analysis.json",    ["--perf"]),
+        (global_dir / "global_cost_analysis.json",           ["--cost"]),
+        (global_dir / "global_thread_scaling_analysis.json", ["--th"]),
+        (global_dir / "global_csp_analysis.json",            ["--csp"]),
+    ]
+    for out, flags in tasks:
+        if out.exists():
+            print(f"Overwriting existing analysis -> {out}")
+        run_analytics(analytics_script, global_results, out, flags, global_dir)
+        print(f"Generated analysis -> {out}")
+
+
+def run_testcategory_analytics(
+    category: str,
+    analytics_script: Path,
+    global_results: Path,
+    global_dir: Path,
+) -> None:
+    """Run 6 per-category analytics tasks + flatten output for one testcategory.
+    Future: each entry in `tasks` (and the outer loop over categories in main())
+    can be submitted to ThreadPoolExecutor independently.
+    """
+    category_dir = global_dir / category
+    category_dir.mkdir(parents=True, exist_ok=True)
+    base_flags = ["--testcategory", category, "--rhel-os-merge"]
+    tasks = [
+        (category_dir / f"{category}_performance_analysis.json",        base_flags + ["--perf"]),
+        (category_dir / f"{category}_performance_analysis_x86_64.json", base_flags + ["--perf", "--no_arm64"]),
+        (category_dir / f"{category}_performance_analysis_arm64.json",  base_flags + ["--perf", "--no_amd64"]),
+        (category_dir / f"{category}_cost_analysis.json",               base_flags + ["--cost"]),
+        (category_dir / f"{category}_cost_analysis_x86_64.json",        base_flags + ["--cost", "--no_arm64"]),
+        (category_dir / f"{category}_cost_analysis_arm64.json",         base_flags + ["--cost", "--no_amd64"]),
+    ]
+    for out, flags in tasks:
+        if out.exists():
+            print(f"Overwriting existing analysis -> {out}")
+        run_analytics(analytics_script, global_results, out, flags, category_dir)
+        flatten_testcategory_in_json(out, category)
+        print(f"Generated analysis -> {out}")
+
+
 def main() -> int:
     if not validate_script_syntax():
         return 1
@@ -546,7 +670,8 @@ def main() -> int:
 
     # Expand --L<n> shorthand into individual step flags.
     # --L2 = step 2, --L3 = steps 2-3, --L4 = steps 2-4, --L5 = steps 2-5 (all testcategories).
-    _max_level = max((n for n in range(2, 6) if getattr(args, f"L{n}")), default=0)
+    # --L6 = steps 2-6 (also generates Excel/PDF).
+    _max_level = max((n for n in range(2, 7) if getattr(args, f"L{n}")), default=0)
     if _max_level >= 2:
         args.merge_machine = True
     if _max_level >= 3:
@@ -556,6 +681,8 @@ def main() -> int:
     if _max_level >= 5:
         if not args.testcategory:
             args.testcategory = ["__ALL__"]
+    if _max_level >= 6:
+        args.excel = True
 
     requested_testcategories, all_testcategories_requested = parse_testcategory_filters(args.testcategory)
     if (requested_testcategories or all_testcategories_requested) and not args.analyze:
@@ -570,7 +697,7 @@ def main() -> int:
     postmortem_script = results_dir / "pts_runner_postmortem.py"
     target_major = get_script_major_version(make_one_big_json)
 
-    step_flags = [args.extract, args.merge_machine, args.merge_global, args.analyze]
+    step_flags = [args.extract, args.merge_machine, args.merge_global, args.analyze, args.excel]
     run_all = not any(step_flags)
 
     csp_dirs: List[Path] = []
@@ -581,77 +708,35 @@ def main() -> int:
             print(f"No tar.gz files found in {workdir}", file=sys.stderr)
             return 1
 
+        # Step 1a: extract tarballs (future: parallelize per tarball)
         for tar_path in tarballs:
-            if tar_path.stat().st_size == 0:
-                print(f"Skipping empty tar.gz: {tar_path}", file=sys.stderr)
-                tar_path.unlink(missing_ok=True)
-                continue
-            machinename = infer_machine_name(tar_path)
-            machine_dir = workdir / machinename
-            machine_dir.mkdir(parents=True, exist_ok=True)
             try:
-                with tarfile.open(tar_path, "r:gz") as tar:
-                    safe_extract(tar, machine_dir)
-                csp_dirs.append(machine_dir)
-                print(f"Extracted {tar_path.name} -> {machine_dir}")
+                machine_dir = extract_machine(tar_path, workdir)
+                if machine_dir is not None:
+                    csp_dirs.append(machine_dir)
             except Exception as exc:
                 print(f"Failed to extract {tar_path}: {exc}", file=sys.stderr)
                 if not args.keep_going:
                     return 1
+
+        # Step 1b: prepare per-machine JSON (future: parallelize per machine)
         for csp_dir in csp_dirs:
-            results_path = csp_dir / "results"
-            if results_path.is_dir():
-                try:
-                    # check and regenerate if invalid or old version
-                    output_json = results_path / f"one_big_json_{csp_dir.name}.json"
-                    if not output_json.exists() or not is_valid_one_big_json(output_json, csp_dir.name, target_major):
-                        generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
-                    
-                    postmortem_output = results_path / f"postmortem_{csp_dir.name}.json"
-                    run_postmortem(postmortem_script, results_path, postmortem_output, results_path)
-                    print(f"Generated postmortem -> {postmortem_output}")
-                except Exception as exc:
-                    print(f"Failed to generate JSON in {results_path}: {exc}", file=sys.stderr)
-                    if not args.keep_going:
-                        return 1
+            try:
+                prepare_machine_json(csp_dir, make_one_big_json, postmortem_script, target_major)
+            except Exception as exc:
+                print(f"Failed to generate JSON for {csp_dir.name}: {exc}", file=sys.stderr)
+                if not args.keep_going:
+                    return 1
     else:
         csp_dirs = find_csp_dirs(workdir)
 
     if run_all or args.merge_machine:
+        # Step 2: merge per-machine results (future: parallelize per machine)
         for csp_dir in csp_dirs:
-            results_path = csp_dir / "results"
-            if not results_path.is_dir():
-                msg = f"Missing results directory: {results_path}"
-                if args.keep_going:
-                    print(msg, file=sys.stderr)
-                    continue
-                print(msg, file=sys.stderr)
-                return 1
-
-            output_json = results_path / f"all_results_{csp_dir.name}.json"
             try:
-                # Always regenerate canonical one_big_json with latest parser/lookup logic
-                generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
-
-                # Ensure any additional one_big_json_*.json are still valid
-                input_jsons = sorted(results_path.glob("one_big_json_*.json"))
-                for json_file in input_jsons:
-                    if not is_valid_one_big_json(json_file, csp_dir.name, target_major):
-                        print(f"Removing invalid JSON -> {json_file}")
-                        json_file.unlink(missing_ok=True)
-
-                input_jsons = sorted(results_path.glob("one_big_json_*.json"))
-                if not input_jsons:
-                    raise RuntimeError(f"No valid one_big_json files found in {results_path}")
-
-                if len(input_jsons) == 1:
-                    shutil.copy2(input_jsons[0], output_json)
-                    print(f"Copied single CSP result -> {output_json}")
-                else:
-                    merge_jsons(make_one_big_json, input_jsons, output_json, results_path)
-                    print(f"Merged CSP results -> {output_json}")
+                merge_machine(csp_dir, make_one_big_json, target_major)
             except Exception as exc:
-                print(f"Failed to merge CSP results in {results_path}: {exc}", file=sys.stderr)
+                print(f"Failed to merge CSP results for {csp_dir.name}: {exc}", file=sys.stderr)
                 if not args.keep_going:
                     return 1
 
@@ -680,27 +765,10 @@ def main() -> int:
 
     if run_all or args.analyze:
         try:
-            # Step 4: always run global flat analysis
-            perf_output = global_dir / "global_performance_analysis.json"
-            cost_output = global_dir / "global_cost_analysis.json"
-            th_output = global_dir / "global_thread_scaling_analysis.json"
-            csp_output = global_dir / "global_csp_analysis.json"
+            # Step 4: global analytics (future: parallelize 4 tasks inside run_global_analytics)
+            run_global_analytics(analytics_script, global_results, global_dir)
 
-            for out in (perf_output, cost_output, th_output, csp_output):
-                if out.exists():
-                    print(f"Overwriting existing analysis -> {out}")
-
-            run_analytics(analytics_script, global_results, perf_output, ["--perf"], global_dir)
-            run_analytics(analytics_script, global_results, cost_output, ["--cost"], global_dir)
-            run_analytics(analytics_script, global_results, th_output, ["--th"], global_dir)
-            run_analytics(analytics_script, global_results, csp_output, ["--csp"], global_dir)
-
-            print(f"Generated analysis -> {perf_output}")
-            print(f"Generated analysis -> {cost_output}")
-            print(f"Generated analysis -> {th_output}")
-            print(f"Generated analysis -> {csp_output}")
-
-            # Step 5: per-testcategory analysis (only when --testcategory is specified)
+            # Step 5: per-testcategory analytics (future: parallelize per category)
             if requested_testcategories or all_testcategories_requested:
                 available_categories = extract_available_testcategories(global_results)
                 valid_categories = []
@@ -722,39 +790,24 @@ def main() -> int:
                     return 1
 
                 for category in valid_categories:
-                    category_dir = global_dir / category
-                    category_dir.mkdir(parents=True, exist_ok=True)
-                    category_base_flags = ["--testcategory", category, "--rhel-os-merge"]
-
-                    perf_output = category_dir / f"{category}_performance_analysis.json"
-                    perf_x86_output = category_dir / f"{category}_performance_analysis_x86_64.json"
-                    perf_arm64_output = category_dir / f"{category}_performance_analysis_arm64.json"
-                    cost_output = category_dir / f"{category}_cost_analysis.json"
-                    cost_x86_output = category_dir / f"{category}_cost_analysis_x86_64.json"
-                    cost_arm64_output = category_dir / f"{category}_cost_analysis_arm64.json"
-
-                    for out in (perf_output, perf_x86_output, perf_arm64_output, cost_output, cost_x86_output, cost_arm64_output):
-                        if out.exists():
-                            print(f"Overwriting existing analysis -> {out}")
-
-                    run_analytics(analytics_script, global_results, perf_output, category_base_flags + ["--perf"], category_dir)
-                    run_analytics(analytics_script, global_results, perf_x86_output, category_base_flags + ["--perf", "--no_arm64"], category_dir)
-                    run_analytics(analytics_script, global_results, perf_arm64_output, category_base_flags + ["--perf", "--no_amd64"], category_dir)
-                    run_analytics(analytics_script, global_results, cost_output, category_base_flags + ["--cost"], category_dir)
-                    run_analytics(analytics_script, global_results, cost_x86_output, category_base_flags + ["--cost", "--no_arm64"], category_dir)
-                    run_analytics(analytics_script, global_results, cost_arm64_output, category_base_flags + ["--cost", "--no_amd64"], category_dir)
-
-                    for out in (perf_output, perf_x86_output, perf_arm64_output, cost_output, cost_x86_output, cost_arm64_output):
-                        flatten_testcategory_in_json(out, category)
-
-                    print(f"Generated analysis -> {perf_output}")
-                    print(f"Generated analysis -> {perf_x86_output}")
-                    print(f"Generated analysis -> {perf_arm64_output}")
-                    print(f"Generated analysis -> {cost_output}")
-                    print(f"Generated analysis -> {cost_x86_output}")
-                    print(f"Generated analysis -> {cost_arm64_output}")
+                    run_testcategory_analytics(category, analytics_script, global_results, global_dir)
         except Exception as exc:
             print(f"Failed to run analytics: {exc}", file=sys.stderr)
+            return 1
+
+    if run_all or args.excel:
+        json_to_excel_script = script_dir / "JSONtoEXCEL.py"
+        if not json_to_excel_script.exists():
+            print(f"Error: JSONtoEXCEL.py not found: {json_to_excel_script}", file=sys.stderr)
+            return 1
+        try:
+            run_script(
+                [sys.executable, str(json_to_excel_script), "--root", str(workdir)],
+                workdir,
+            )
+            print(f"Generated Excel/PDF files under {workdir / 'global'}")
+        except Exception as exc:
+            print(f"Failed to generate Excel/PDF files: {exc}", file=sys.stderr)
             return 1
 
     return 0

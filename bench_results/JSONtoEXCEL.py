@@ -48,6 +48,68 @@ HEADERS = [
 # Column widths (A-I)
 _COL_WIDTHS = [50, 15, 10, 15, 30, 35, 12, 20, 12]
 
+# ---------------------------------------------------------------------------
+# CSP Marker Table (Line Chart only)
+# Determined from machinename prefix.  Sync with JSONtoEXCEL.md.
+#
+# | CSP   | prefix   | marker | fillstyle | shape |
+# |-------|----------|--------|-----------|-------|
+# | AWS   | aws-     | "o"    | "none"    | ○ 白抜き円 |
+# | GCP   | gcp-     | "o"    | "full"    | ● 塗り円   |
+# | OCI   | oci-     | "^"    | "none"    | △ 白抜き三角 |
+# | Azure | azure-   | "^"    | "full"    | ▲ 塗り三角  |
+# | Other | (else)   | "s"    | "full"    | ■ 正方形    |
+# ---------------------------------------------------------------------------
+CSP_MARKER_TABLE: Dict[str, Tuple[str, str]] = {
+    "aws":   ("o", "none"),
+    "gcp":   ("o", "full"),
+    "oci":   ("^", "none"),
+    "azure": ("^", "full"),
+    "other": ("s", "full"),
+}
+
+_CSP_PREFIXES = [
+    ("aws-",   "aws"),
+    ("gcp-",   "gcp"),
+    ("oci-",   "oci"),
+    ("azure-", "azure"),
+]
+
+def detect_csp(machinename: str) -> str:
+    """Return CSP key for machinename based on prefix matching."""
+    name = machinename.casefold()
+    for prefix, csp in _CSP_PREFIXES:
+        if name.startswith(prefix):
+            return csp
+    return "other"
+
+
+def load_snippet_map() -> Dict[str, str]:
+    """Load test_suite.json and return {benchmark_short_name: test_snippet}.
+
+    benchmark_short_name is derived from the pts/ key, e.g.
+    "pts/coremark-1.0.1" -> "coremark-1.0.1"
+    """
+    suite_path = Path(__file__).resolve().parent.parent / "test_suite.json"
+    if not suite_path.exists():
+        return {}
+    try:
+        with suite_path.open(encoding="utf-8") as fp:
+            data = json.load(fp)
+    except Exception:
+        return {}
+    result: Dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(value, dict):
+            continue
+        snippet = value.get("test_snippet")
+        if not isinstance(snippet, str):
+            continue
+        # Strip leading "pts/" so keys match the benchmark names used in rows
+        short_key = key[4:] if key.startswith("pts/") else key
+        result[short_key] = snippet
+    return result
+
 
 def find_comparison_block(payload: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in payload.items():
@@ -287,7 +349,13 @@ def read_rows_from_xlsx(xlsx_path: Path) -> List[Tuple[Any, ...]]:
 
 
 def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> int:
-    """Generate per-benchmark PDF graphs.  Expects 9-tuples: (benchmark, os, thread, unit, machinename, cpu_name, score, relative, performance)."""
+    """Generate per-benchmark PDF graphs.  Expects 9-tuples: (benchmark, os, thread, unit, machinename, cpu_name, score, relative, performance).
+
+    Graph title layout:
+      Main title  — test_snippet from test_suite.json (e.g. "SVT-AV1-4.0")
+      Subtitle    — benchmark (unit)[, Thread=N]
+    """
+    snippet_map = load_snippet_map()
     grouped: Dict[str, Dict[str, List[Tuple[int, float]]]] = {}
     benchmark_units: Dict[str, str] = {}
     machine_family_by_benchmark: Dict[str, Dict[str, str]] = {}
@@ -421,14 +489,17 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
                     legend_label = f"{series_number}: {machinename}"
                     color = machine_colors.get(machinename, "#808080")
                     line_style = line_styles[(series_number - 1) % len(line_styles)]
+                    csp_key = detect_csp(machinename)
+                    csp_marker, csp_fillstyle = CSP_MARKER_TABLE.get(csp_key, CSP_MARKER_TABLE["other"])
                     axis.plot(
                         x_values, y_values,
-                        marker="o", linewidth=1.5,
+                        marker=csp_marker, fillstyle=csp_fillstyle, linewidth=1.5,
                         label=legend_label, color=color, linestyle=line_style,
                     )
                     legend_handles.append(
                         Line2D([0], [0], color=color, linestyle=line_style,
-                               marker="o", linewidth=1.5, label=legend_label)
+                               marker=csp_marker, fillstyle=csp_fillstyle,
+                               linewidth=1.5, label=legend_label)
                     )
 
                     if x_values and y_values:
@@ -455,13 +526,18 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
             # Common axes/title
             unit_label = benchmark_units.get(benchmark)
             if single_thread_mode and all_threads:
-                title = (
-                    f"{benchmark} ({unit_label}),Thread={all_threads[0]}"
-                    if unit_label else f"{benchmark},Thread={all_threads[0]}"
+                subtitle = (
+                    f"{benchmark} ({unit_label}), Thread={all_threads[0]}"
+                    if unit_label else f"{benchmark}, Thread={all_threads[0]}"
                 )
             else:
-                title = f"{benchmark} ({unit_label})" if unit_label else benchmark
-            axis.set_title(title)
+                subtitle = f"{benchmark} ({unit_label})" if unit_label else benchmark
+            main_title = snippet_map.get(benchmark, "")
+            if main_title:
+                axis.set_title(subtitle, fontsize=9, pad=2)
+                figure.text(0.5, 0.98, main_title, ha="center", va="top", fontsize=13, fontweight="bold")
+            else:
+                axis.set_title(subtitle)
             axis.set_ylabel("performance")
             axis.grid(True, axis="y", linestyle="--", alpha=0.35)
 

@@ -110,12 +110,38 @@ Colors are determined from **F** `cpu_name`:
 
 Within each architecture group, line styles (solid, dashed, dotted, dash-dot) cycle to improve distinguishability. Colors and styles are consistent between the graph lines and the legend entries.
 
+### CSP Marker Table (Line Chart)
+
+Line markers are determined from the `machinename` prefix (case-insensitive).
+Sync this table with `CSP_MARKER_TABLE` in `JSONtoEXCEL.py` when making changes.
+
+| CSP   | `machinename` prefix | `marker` | `fillstyle` | Shape |
+|-------|----------------------|----------|-------------|-------|
+| AWS   | `aws-`               | `"o"`    | `"none"`    | ○ 白抜き円 |
+| GCP   | `gcp-`               | `"o"`    | `"full"`    | ● 塗り円 |
+| OCI   | `oci-`               | `"^"`    | `"none"`    | △ 白抜き三角 |
+| Azure | `azure-`             | `"^"`    | `"full"`    | ▲ 塗り三角 |
+| Other | (none of the above)  | `"s"`    | `"full"`    | ■ 正方形 |
+
+### Graph Title Layout
+
+Each graph has a two-level title:
+
+| Level | Content | Source |
+|-------|---------|--------|
+| **Main title** (large, bold) | `test_snippet` value | `test_suite.json` → `"test_snippet"` field |
+| **Subtitle** (smaller, below) | `benchmark (unit)` or `benchmark (unit), Thread=N` | benchmark name + unit from data |
+
+If `test_snippet` is not found for a benchmark, only the subtitle is shown (using `axis.set_title()`).
+
 ### Multiple Thread Values — Line Chart
 
 - X-axis: `thread` (integer)
 - Y-axis: `performance`, grid lines every 10
 - Series: one line per `machinename`
-- Title: `benchmark (unit)`
+- Main title: `test_snippet` from `test_suite.json`
+- Subtitle: `benchmark (unit)`
+- Markers: determined by CSP (see CSP Marker Table above)
 
 Each series is labeled with a number (1, 2, …) in both the legend and on the graph.
 To prevent overlap, labels alternate between the **left end** and **right end** of each line.
@@ -124,7 +150,8 @@ To prevent overlap, labels alternate between the **left end** and **right end** 
 
 - Y-axis: `performance`, range 0–100, grid lines every 10
 - Series: one bar per `machinename`
-- Title: `benchmark (unit), Thread=<thread>`
+- Main title: `test_snippet` from `test_suite.json`
+- Subtitle: `benchmark (unit), Thread=<thread>`
 - X-axis labels: shortened `machinename`
 
 Bars are arranged from **highest performance on the left** to lowest on the right.
