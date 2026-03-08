@@ -27,6 +27,7 @@ import subprocess
 
 # Script version
 VERSION = "v1.6.0"
+DEFAULT_GCC_VER = "14.2-system"
 
 
 OS_MERGE_RULE_DEFS: Dict[str, Dict[str, Any]] = {
@@ -87,6 +88,15 @@ def parse_time_value(test_data: Dict[str, Any]) -> Optional[float]:
     return time_float
 
 
+def is_fallback_value(value: object) -> bool:
+    """Return True when value should be treated as fallback/missing metadata."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() in ("", "N/A", "NA", "n/a", "na")
+    return False
+
+
 def validate_json_syntax(file_path: Path) -> bool:
     """Validate JSON syntax of input file"""
     try:
@@ -136,12 +146,58 @@ def load_data(file_path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def load_test_suite_metadata(input_path: Path) -> Dict[str, Dict[str, str]]:
+    """
+    Optional benchmark metadata from test_suite.json.
+    Preferred path: <input_dir>/../test_suite.json, fallback: <cwd>/test_suite.json.
+    """
+    script_dir = Path(__file__).resolve().parent
+    candidate_paths = [
+        (input_path.parent / ".." / "test_suite.json").resolve(),
+        (input_path.parent.parent / "test_suite.json").resolve(),
+        (Path.cwd() / "test_suite.json").resolve(),
+        (Path.cwd() / ".." / "test_suite.json").resolve(),
+        (script_dir / ".." / "test_suite.json").resolve(),
+    ]
+    data = None
+    for path in candidate_paths:
+        if not path.is_file():
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            break
+        except Exception as e:
+            print(f"Warning: failed to load test_suite metadata from {path}: {e}", file=sys.stderr)
+
+    if data is None:
+        return {}
+
+    metadata: Dict[str, Dict[str, str]] = {}
+    for cat_value in data.get("test_category", {}).values():
+        if not isinstance(cat_value, dict):
+            continue
+        for bench_key, bench_value in cat_value.get("items", {}).items():
+            if not isinstance(bench_value, dict):
+                continue
+            benchmark = str(bench_key).replace("pts/", "")
+            metadata[benchmark] = {
+                "test_snippet": str(bench_value.get("test_snippet", "N/A")),
+                "gcc_ver": str(bench_value.get("gcc_ver", DEFAULT_GCC_VER)),
+            }
+    return metadata
+
+
+def extract_workloads(
+    data: Dict[str, Any],
+    suite_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> List[Dict[str, Any]]:
     """
     Extract all workload entries from the JSON data.
     Returns a list of dicts with workload information.
     """
     workloads = []
+    suite_metadata = suite_metadata or {}
 
     for machinename, machine_data in data.items():
         if machinename in ("generation_log", "generation log"):
@@ -153,10 +209,63 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             for testcategory, tc_content in testcategory_data.items():
                 benchmark_data = tc_content.get("benchmark", {})
                 for benchmark, bm_content in benchmark_data.items():
+                    suite_meta = suite_metadata.get(benchmark, {})
+                    fallback_snippet = str(suite_meta.get("test_snippet", "N/A")).strip()
+                    fallback_gcc_ver = str(suite_meta.get("gcc_ver", DEFAULT_GCC_VER)).strip()
+                    if is_fallback_value(fallback_snippet):
+                        fallback_snippet = "N/A"
+                    if is_fallback_value(fallback_gcc_ver):
+                        fallback_gcc_ver = DEFAULT_GCC_VER
+
                     thread_data = bm_content.get("thread", {})
+                    if not isinstance(thread_data, dict):
+                        continue
+
                     for thread, th_content in thread_data.items():
+                        if not isinstance(th_content, dict):
+                            continue
+
                         test_name_data = th_content.get("test_name", {})
+                        if not isinstance(test_name_data, dict):
+                            continue
+
                         for test_name, test_data in test_name_data.items():
+                            if isinstance(test_data, dict):
+                                raw_snippet = test_data.get("test_snippet")
+                                raw_gcc_ver = test_data.get("gcc_ver")
+                                gcc_ver = (
+                                    str(raw_gcc_ver).strip()
+                                    if isinstance(raw_gcc_ver, str) and str(raw_gcc_ver).strip()
+                                    else DEFAULT_GCC_VER
+                                )
+                                if fallback_snippet != "N/A":
+                                    test_snippet = fallback_snippet
+                                else:
+                                    test_snippet = (
+                                        str(raw_snippet).strip()
+                                        if isinstance(raw_snippet, str) and str(raw_snippet).strip()
+                                        else "N/A"
+                                    )
+                            else:
+                                test_snippet = "N/A"
+                                gcc_ver = DEFAULT_GCC_VER
+                                raw_snippet = None
+
+                            if test_snippet == "N/A":
+                                if fallback_snippet != "N/A":
+                                    test_snippet = fallback_snippet
+                                else:
+                                    test_snippet = (
+                                        str(test_name).strip()
+                                        if isinstance(test_name, str) and str(test_name).strip()
+                                        else "N/A"
+                                    )
+
+                            if fallback_gcc_ver != DEFAULT_GCC_VER:
+                                gcc_ver = fallback_gcc_ver
+                            elif gcc_ver == "N/A":
+                                gcc_ver = fallback_gcc_ver
+
                             workloads.append({
                                 "machinename": machinename,
                                 "cpu_name": machine_data.get("cpu_name", "N/A"),
@@ -166,6 +275,8 @@ def extract_workloads(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                                 "benchmark": benchmark,
                                 "thread": thread,
                                 "test_name": test_name,
+                                "test_snippet": test_snippet,
+                                "gcc_ver": gcc_ver,
                                 "test_data": test_data,
                                 "machine_data": machine_data
                             })
@@ -344,12 +455,22 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
     if not no_arm64 and not no_amd64:
         return output
 
+    METADATA_KEYS = {"test_snippet", "gcc_ver"}
+
+    def iter_test_nodes(node: Dict[str, Any]):
+        for key, value in node.items():
+            if key in METADATA_KEYS:
+                continue
+            if not isinstance(value, dict):
+                continue
+            yield key, value
+
     # performance_comparison: leaderboard filtering
     perf = output.get("performance_comparison", {}).get("workload", {})
     for tc in list(perf.keys()):
         for bm in list(perf[tc].keys()):
-            for tn in list(perf[tc][bm].keys()):
-                os_map = perf[tc][bm][tn].get("os", {})
+            for tn, tn_node in list(iter_test_nodes(perf[tc][bm])):
+                os_map = tn_node.get("os", {})
                 for os_name in list(os_map.keys()):
                     th_map = os_map[os_name].get("thread", {})
                     for th in list(th_map.keys()):
@@ -388,8 +509,8 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
     cost = output.get("cost_comparison", {}).get("workload", {})
     for tc in list(cost.keys()):
         for bm in list(cost[tc].keys()):
-            for tn in list(cost[tc][bm].keys()):
-                os_map = cost[tc][bm][tn].get("os", {})
+            for tn, tn_node in list(iter_test_nodes(cost[tc][bm])):
+                os_map = tn_node.get("os", {})
                 for os_name in list(os_map.keys()):
                     th_map = os_map[os_name].get("thread", {})
                     for th in list(th_map.keys()):
@@ -427,8 +548,7 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
     th_cmp = output.get("thread_scaling_comparison", {}).get("workload", {})
     for tc in list(th_cmp.keys()):
         for bm in list(th_cmp[tc].keys()):
-            for tn in list(th_cmp[tc][bm].keys()):
-                node = th_cmp[tc][bm][tn]
+            for tn, node in list(iter_test_nodes(th_cmp[tc][bm])):
                 curves = node.get("curves", {})
                 kept_curves = {}
                 for machine_label, points in curves.items():
@@ -461,8 +581,7 @@ def postprocess_output_by_arch(output: Dict[str, Any], no_arm64: bool, no_amd64:
     csp = output.get("csp_instance_comparison", {}).get("workload", {})
     for tc in list(csp.keys()):
         for bm in list(csp[tc].keys()):
-            for tn in list(csp[tc][bm].keys()):
-                entry = csp[tc][bm][tn]
+            for tn, entry in list(iter_test_nodes(csp[tc][bm])):
                 baseline = entry.get("baseline", {})
                 baseline_arch = infer_arch_from_text(baseline.get("arch", "") + " " + baseline.get("machinename", ""))
                 if should_exclude_arch(baseline_arch, no_arm64, no_amd64):
@@ -537,7 +656,10 @@ def get_hourly_rate(machine_data: Dict[str, Any]) -> Optional[float]:
         return None
 
 
-def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+def performance_comparison(
+    data: Dict[str, Any],
+    suite_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     """
     Section 1: Performance comparison (OS-separated leaderboard)
     """
@@ -546,7 +668,7 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         "workload": {}
     }
 
-    workloads = extract_workloads(data)
+    workloads = extract_workloads(data, suite_metadata)
 
     # Grouping
     grouped: Dict[tuple, List[Dict]] = {}
@@ -584,7 +706,11 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             })
 
         # Nesting
-        result["workload"].setdefault(tc, {}).setdefault(bm, {}).setdefault(tn, {}).setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
+        benchmark_node = result["workload"].setdefault(tc, {}).setdefault(bm, {})
+        benchmark_node.setdefault("test_snippet", ent["test_snippet"])
+        benchmark_node.setdefault("gcc_ver", ent["gcc_ver"])
+        test_node = benchmark_node.setdefault(tn, {})
+        test_node.setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
             "unit": ent["test_data"].get("unit", "N/A"),
             "leaderboard": leaderboard
         }
@@ -592,7 +718,10 @@ def performance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+def cost_comparison(
+    data: Dict[str, Any],
+    suite_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     """
     Section 2: Cost comparison (OS-separated economic ranking)
     """
@@ -601,7 +730,7 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         "workload": {}
     }
 
-    workloads = extract_workloads(data)
+    workloads = extract_workloads(data, suite_metadata)
     
     grouped: Dict[tuple, List[Dict]] = {}
     for w in workloads:
@@ -636,7 +765,11 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 "relative_cost_efficiency": rel_efficiency
             })
 
-        result["workload"].setdefault(tc, {}).setdefault(bm, {}).setdefault(tn, {}).setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
+        benchmark_node = result["workload"].setdefault(tc, {}).setdefault(bm, {})
+        benchmark_node.setdefault("test_snippet", ent["test_snippet"])
+        benchmark_node.setdefault("gcc_ver", ent["gcc_ver"])
+        test_node = benchmark_node.setdefault(tn, {})
+        test_node.setdefault("os", {}).setdefault(os_name, {}).setdefault("thread", {})[thread] = {
             "unit": "Efficiency (Throughput/USD)",
             "ranking": ranking
         }
@@ -644,7 +777,10 @@ def cost_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+def thread_scaling_comparison(
+    data: Dict[str, Any],
+    suite_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     """
     Section 3: Thread scaling comparison (Workload-centric curves across machines)
     """
@@ -655,13 +791,14 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         "workload": {}
     }
 
-    workloads = extract_workloads(data)
+    workloads = extract_workloads(data, suite_metadata)
 
     # Target structure: Workload -> Machine -> Thread -> Score/HIB
     curves_data: Dict[tuple, Dict[str, Dict[str, float]]] = {}
     machine_meta: Dict[tuple, Dict[str, Dict[str, str]]] = {}
     hib_map: Dict[tuple, bool] = {}
     unit_map: Dict[tuple, str] = {}
+    metadata_map: Dict[tuple, Dict[str, str]] = {}
 
     for w in workloads:
         key = (w["testcategory"], w["benchmark"], w["test_name"])
@@ -676,6 +813,11 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
 
         machine_label = f"{w['machinename']} ({w['cpu_isa']})"
         curves_data.setdefault(key, {}).setdefault(machine_label, {})[str(th_num)] = score
+        if key not in metadata_map:
+            metadata_map[key] = {
+                "test_snippet": w["test_snippet"],
+                "gcc_ver": w["gcc_ver"],
+            }
         machine_meta.setdefault(key, {})[machine_label] = {
             "machinename": w["machinename"],
             "cpu_name": w["cpu_name"],
@@ -760,11 +902,21 @@ def thread_scaling_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
             for i, entry in enumerate(ranking):
                 entry["rank"] = i + 1
 
-            result["workload"].setdefault(tc, {}).setdefault(bm, {})[tn] = {
+            benchmark_node = result["workload"].setdefault(tc, {}).setdefault(bm, {})
+            benchmark_node.setdefault(
+                "test_snippet",
+                metadata_map.get(key, {}).get("test_snippet", "N/A"),
+            )
+            benchmark_node.setdefault(
+                "gcc_ver",
+                metadata_map.get(key, {}).get("gcc_ver", DEFAULT_GCC_VER),
+            )
+            test_node = benchmark_node.setdefault(tn, {})
+            test_node.update({
                 "unit": unit_map[key],
                 "curves": final_curves,
                 "ranking": ranking,
-            }
+            })
 
     return result
 
@@ -808,7 +960,10 @@ def get_economic_efficiency(w: Dict[str, Any]) -> Optional[float]:
     return throughput / rate
 
 
-def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
+def csp_instance_comparison(
+    data: Dict[str, Any],
+    suite_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     """
     Section 4: CSP instance comparison (Trend analysis/Arch crossover)
     """
@@ -817,7 +972,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         "workload": {}
     }
 
-    workloads = extract_workloads(data)
+    workloads = extract_workloads(data, suite_metadata)
     
     # Group by Workload -> CSP
     csp_map = {}
@@ -832,6 +987,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     # Workload -> CSP -> Machine -> Thread -> Efficiency
     comparison_data: Dict[tuple, Dict[str, Dict[str, Dict[str, float]]]] = {}
     machine_os_map: Dict[tuple, str] = {}
+    metadata_map: Dict[tuple, Dict[str, str]] = {}
 
     for w in workloads:
         key = (w["testcategory"], w["benchmark"], w["test_name"])
@@ -845,6 +1001,11 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
         th_label = str(w["thread"])
         comparison_data.setdefault(key, {}).setdefault(csp, {}).setdefault(w["machinename"], {})[th_label] = efficiency
         machine_os_map[(key, w["machinename"])] = w["os"]
+        if key not in metadata_map:
+            metadata_map[key] = {
+                "test_snippet": w["test_snippet"],
+                "gcc_ver": w["gcc_ver"],
+            }
 
     for key, csp_machines in comparison_data.items():
         tc, bm, tn = key
@@ -919,7 +1080,17 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                 }
 
             if trends:
-                result["workload"].setdefault(tc, {}).setdefault(bm, {})[tn] = {
+                benchmark_node = result["workload"].setdefault(tc, {}).setdefault(bm, {})
+                benchmark_node.setdefault(
+                    "test_snippet",
+                    metadata_map.get(key, {}).get("test_snippet", "N/A"),
+                )
+                benchmark_node.setdefault(
+                    "gcc_ver",
+                    metadata_map.get(key, {}).get("gcc_ver", DEFAULT_GCC_VER),
+                )
+                test_node = benchmark_node.setdefault(tn, {})
+                test_node.update({
                     "baseline": {
                         "machinename": baseline_machine,
                         "arch": "arm64",
@@ -927,7 +1098,7 @@ def csp_instance_comparison(data: Dict[str, Any]) -> Dict[str, Any]:
                         "os": machine_os_map.get((key, baseline_machine), "unknown"),
                     },
                     "trends": trends
-                }
+                })
 
     return result
 
@@ -976,6 +1147,7 @@ def main():
 
     if data is None:
         sys.exit(1)
+    suite_metadata = load_test_suite_metadata(input_path)
 
     requested_testcategories = parse_testcategory_filters(args.testcategory)
     available_testcategories = extract_available_testcategories(data)
@@ -1000,16 +1172,16 @@ def main():
     output = get_generation_log()
 
     if args.perf or args.all:
-        output["performance_comparison"] = performance_comparison(data)
+        output["performance_comparison"] = performance_comparison(data, suite_metadata)
 
     if args.cost or args.all:
-        output["cost_comparison"] = cost_comparison(data)
+        output["cost_comparison"] = cost_comparison(data, suite_metadata)
 
     if args.th or args.all:
-        output["thread_scaling_comparison"] = thread_scaling_comparison(data)
+        output["thread_scaling_comparison"] = thread_scaling_comparison(data, suite_metadata)
 
     if args.csp or args.all:
-        output["csp_instance_comparison"] = csp_instance_comparison(data)
+        output["csp_instance_comparison"] = csp_instance_comparison(data, suite_metadata)
 
     # Post-process architecture filtering on generated JSON only
     output = postprocess_output_by_arch(output, args.no_arm64, args.no_amd64)
