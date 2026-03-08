@@ -175,7 +175,7 @@ class KvazaarRunner:
     # Cap frame count for each input to limit per-run duration
     _FRAMES_LIMIT: int = 480
 
-    def __init__(self, threads_arg=None, quick_mode=False):
+    def __init__(self, threads_arg=None, quick_mode=False, diag_mode=True):
         """
         Initialize kvazaar runner.
 
@@ -218,6 +218,7 @@ class KvazaarRunner:
 
         # Quick mode for development
         self.quick_mode = quick_mode
+        self.diag_mode = diag_mode
 
         # Detect environment for logging
         self.is_wsl_env = self.is_wsl()
@@ -802,6 +803,57 @@ class KvazaarRunner:
             print("  [INFO] But installation directory exists, continuing...")
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
+
+        # ------------------------------------------------------------------ #
+        # POST-INSTALL DIAGNOSTIC  (remove this block after root-cause fixed) #
+        # Enable with: --diag  or  KVAZAAR_DIAG=1                            #
+        # ------------------------------------------------------------------ #
+        if self.diag_mode or os.environ.get("KVAZAAR_DIAG", "").strip() == "1":
+            self._run_install_diag(installed_dir)
+
+    def _run_install_diag(self, installed_dir: Path) -> None:
+        """Post-install diagnostic: check binary, ldd, --version. Remove after debugging."""
+        print("\n" + "=" * 60)
+        print("[DIAG] kvazaar post-install diagnostic")
+        print("=" * 60)
+
+        wrapper = installed_dir / "kvazaar-2.2.0" / "src" / "kvazaar"
+        real_bin = installed_dir / "kvazaar-2.2.0" / "src" / ".libs" / "kvazaar"
+        libs_dir = installed_dir / "kvazaar-2.2.0" / "src" / ".libs"
+
+        print(f"[DIAG] wrapper   : exists={wrapper.exists()}  path={wrapper}")
+        print(f"[DIAG] real bin  : exists={real_bin.exists()}  path={real_bin}")
+
+        # List .libs/ to check shared library presence
+        if libs_dir.exists():
+            libs = sorted(str(p.name) for p in libs_dir.iterdir())
+            print(f"[DIAG] .libs/ contents: {libs}")
+        else:
+            print(f"[DIAG] .libs/ directory NOT FOUND: {libs_dir}")
+
+        # ldd on real binary
+        if real_bin.exists():
+            r = subprocess.run(["ldd", str(real_bin)], capture_output=True, text=True)
+            print(f"[DIAG] ldd rc={r.returncode}")
+            for line in (r.stdout + r.stderr).splitlines():
+                print(f"  {line}")
+
+        # Run --version via wrapper (catches SIGILL / missing lib at startup)
+        if wrapper.exists():
+            try:
+                r = subprocess.run(
+                    [str(wrapper), "--version"],
+                    capture_output=True, text=True, timeout=10
+                )
+                print(f"[DIAG] --version rc={r.returncode}")
+                for line in (r.stdout + r.stderr).splitlines():
+                    print(f"  {line}")
+            except subprocess.TimeoutExpired:
+                print("[DIAG] --version timed out (process hung)")
+            except Exception as exc:
+                print(f"[DIAG] --version error: {exc}")
+
+        print("=" * 60 + "\n")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """
@@ -1418,6 +1470,14 @@ def main():
         help='Quick mode: Run each test only once (for development/testing)'
     )
 
+    parser.add_argument(
+        '--no-diag',
+        action='store_false',
+        dest='diag',
+        default=True,
+        help='Disable post-install diagnostic (diagnostic runs by default)'
+    )
+
     args = parser.parse_args()
 
     if args.quick:
@@ -1427,7 +1487,7 @@ def main():
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
 
-    runner = KvazaarRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = KvazaarRunner(threads_arg=threads, quick_mode=args.quick, diag_mode=args.diag)
     success = runner.run()
 
     sys.exit(0 if success else 1)
