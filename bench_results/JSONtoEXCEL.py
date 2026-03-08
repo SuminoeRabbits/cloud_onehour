@@ -734,6 +734,16 @@ def gather_target_jsons(global_dir: Path) -> List[Path]:
                 if json_file.name.startswith(f"{category}_")
             )
         )
+    # Fallback: if no per-category subdirs found, look for flat *performance_analysis*.json
+    # files directly in global_dir (e.g. global_performance_analysis.json)
+    if not json_files:
+        json_files.extend(
+            sorted(
+                json_file
+                for json_file in global_dir.glob("*.json")
+                if "performance_analysis" in json_file.name
+            )
+        )
     return json_files
 
 

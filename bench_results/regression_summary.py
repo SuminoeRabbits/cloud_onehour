@@ -769,10 +769,10 @@ def main() -> int:
             run_global_analytics(analytics_script, global_results, global_dir)
 
             # Step 5: per-testcategory analytics (future: parallelize per category)
-            if requested_testcategories or all_testcategories_requested:
+            if run_all or requested_testcategories or all_testcategories_requested:
                 available_categories = extract_available_testcategories(global_results)
                 valid_categories = []
-                if all_testcategories_requested:
+                if all_testcategories_requested or run_all:
                     valid_categories = sorted(available_categories)
 
                 for category in requested_testcategories:
