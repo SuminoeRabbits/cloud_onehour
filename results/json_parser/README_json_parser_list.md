@@ -44,6 +44,7 @@
 | `json_parser_webp-1.4.0.py` | C (JSON) | 5 | `<N>-thread.json` から取得 (Default / Quality 100 等), pts/webp-1.2.0用 |
 | `json_parser_x265-1.5.0.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Bosphorus 4K / 1080p) |
 | `json_parser_svt-av1-2.17.0.py` | C (JSON) | 12 | `<N>-thread.json` から取得 (Preset 3/5/8/13 × Bosphorus 4K/1080p/Beauty 4K 10-bit)。neo55sGen6 で検証済み |
+| `json_parser_srsran-2.5.0.py` | C (JSON) | 4 | `<N>-thread.json` から取得 (PDSCH/PUSCH × Total/Thread)。neo55sGen6 で検証済み |
 
 ## 現在実行ログがなく未検証（動作未確認）のパーサーリスト
 
@@ -51,7 +52,7 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_apache-3.0.0.py` — neo55sGen6 でテスト未実行（ディレクトリが空）
 - `json_parser_build-llvm-1.6.0.py` — neo55sGen6 でテスト未完了（Pre-Test Script のみ、結果なし）
 
-## neo55sGen6/Ubuntu_24_04_3 で検証済み（2026-03-07）
+## neo55sGen6/Ubuntu_24_04_3 で検証済み（2026-03-08）
 
 以下は neo55sGen6 の実行ログを使って動作確認済み:
 - `json_parser_build-gcc-1.5.0.py` — OK (1 test: time_to_compile)
