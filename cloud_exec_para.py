@@ -1842,6 +1842,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     workload_timeout = config['common'].get('workload_timeout', config['common'].get('command_timeout', 10800))
     workload_timeout_limit = config['common'].get('workload_timeout_limit', 0)
     timeout_count = 0
+    workload_error_limit = config['common'].get('workload_error_limit', 1)
+    error_count = 0
+    workload_aborted = False  # set True when error limit reached; still run post_process
 
     # -----------------------------------------------------------
     # Determine Command List (Testloads vs Workloads)
@@ -1871,8 +1874,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
         else:  # rhel, orcl
             setup_key = 'fedra_setup'
         setup_cmds = config['common'].get(setup_key, [])
+        setup_count = len(setup_cmds)  # setup cmds occupy workload indices 1..setup_count (errors are fatal)
         if logger:
-            logger.info(f"OS family '{os_info['os_family']}': prepending '{setup_key}' ({len(setup_cmds)} commands)")
+            logger.info(f"OS family '{os_info['os_family']}': prepending '{setup_key}' ({setup_count} commands)")
 
         # Standard workloads execution
         if 'workloads' in config['common']:
@@ -1915,6 +1919,9 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
         print(f"  [Workloads] Starting execution of {total_workloads} workloads...")
 
     for i, workload in enumerate(workloads, start=1):
+        if workload_aborted:
+            break
+
         def archive_failure_logs(reason: str, current_cmd: str, wrapper_log_path: Optional[str] = None) -> None:
             """Archive remote debug logs into cloud_reports_dir/debug_logs for postmortem."""
             try:
@@ -2207,7 +2214,27 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "ERROR")
                     archive_failure_logs("long-running-failed", cmd, log_file)
-                    return False
+
+                    if i <= setup_count:
+                        # Setup commands (debian_setup / fedra_setup) are fatal on any error
+                        msg = f"Setup command {i}/{setup_count} failed (fatal), aborting instance."
+                        if logger: logger.error(msg)
+                        else: print(f"  [ERROR] {msg}")
+                        return False
+
+                    error_count += 1
+                    limit_info = f" ({error_count}/{workload_error_limit})" if workload_error_limit > 0 else f" ({error_count}/∞)"
+                    if workload_error_limit > 0 and error_count >= workload_error_limit:
+                        msg = f"Workload error limit reached{limit_info}, stopping workloads (post_process will still run)."
+                        if logger: logger.error(msg)
+                        else: print(f"  [ERROR] {msg}")
+                        workload_aborted = True
+                        break  # break while-True polling; outer for-i loop will see workload_aborted
+                    else:
+                        msg = f"Workload error{limit_info}: continuing to next workload."
+                        if logger: logger.warn(msg)
+                        else: print(f"  [WARN] {msg}")
+                        break  # break while-True polling; outer for-i loop continues
                 elif marker_check and marker_check != "RUNNING":
                     if logger:
                         logger.warn(f"Unexpected marker status: {marker_check}")
@@ -2487,7 +2514,27 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
                     duration = time.time() - workload_start
                     DASHBOARD.add_history(instance_name, f"Workload {i}/{total_workloads}: {cmd}", duration, "ERROR")
                     archive_failure_logs("regular-command-error", cmd)
-                    return False
+
+                    if i <= setup_count:
+                        # Setup commands (debian_setup / fedra_setup) are fatal on any error
+                        msg = f"Setup command {i}/{setup_count} failed (fatal), aborting instance."
+                        if logger: logger.error(msg)
+                        else: print(f"  [ERROR] {msg}")
+                        return False
+
+                    error_count += 1
+                    limit_info = f" ({error_count}/{workload_error_limit})" if workload_error_limit > 0 else f" ({error_count}/∞)"
+                    if workload_error_limit > 0 and error_count >= workload_error_limit:
+                        msg = f"Workload error limit reached{limit_info}, stopping workloads (post_process will still run)."
+                        if logger: logger.error(msg)
+                        else: print(f"  [ERROR] {msg}")
+                        workload_aborted = True
+                        break  # break for-attempt retry loop; outer for-i loop will see workload_aborted
+                    else:
+                        msg = f"Workload error{limit_info}: continuing to next workload."
+                        if logger: logger.warn(msg)
+                        else: print(f"  [WARN] {msg}")
+                        break  # break for-attempt retry loop; outer for-i loop continues
 
         # Special handling: Verify SSH build after SSH-related scripts execution
         # Detects both direct execution and execution via wrapper scripts
@@ -2534,10 +2581,43 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
     progress(instance_name, "All workloads completed", logger)
 
     if logger:
-        logger.info("All workloads completed successfully")
+        logger.info("All workloads completed" + (" (with errors)" if workload_aborted else " successfully"))
     elif False:
-        log("All workloads completed successfully")
+        log("All workloads completed")
 
+    # -----------------------------------------------------------
+    # Post-process phase (always runs after workloads, even if error limit was hit)
+    # -----------------------------------------------------------
+    post_process_cmds = config['common'].get('post_process', [])
+    post_process_failed = False
+    if post_process_cmds:
+        total_pp = len(post_process_cmds)
+        progress(instance_name, f"Post-process started ({total_pp} commands)", logger)
+        if logger:
+            logger.info(f"Starting post-process phase ({total_pp} commands)")
+
+        for j, cmd in enumerate(post_process_cmds, start=1):
+            if logger:
+                logger.info(f"Post-process {j}/{total_pp}: {cmd}")
+            else:
+                print(f"  [Post-process {j}/{total_pp}] {cmd}")
+            try:
+                run_cmd(
+                    f"ssh {ssh_opt} {ssh_user}@{ip} '{cmd}'",
+                    capture=False, timeout=workload_timeout, logger=logger
+                )
+            except Exception as e:
+                msg = f"Post-process {j}/{total_pp} failed: {e}"
+                if logger: logger.error(msg)
+                else: print(f"  [ERROR] {msg}")
+                post_process_failed = True
+
+        progress(instance_name, "Post-process completed", logger)
+        if logger:
+            logger.info("Post-process phase completed" + (" with errors" if post_process_failed else " successfully"))
+
+    if workload_aborted or post_process_failed:
+        return False
     return True
 
 

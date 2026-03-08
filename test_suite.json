@@ -246,6 +246,21 @@
                 }
             }
         },
+        "Telecom": {
+            "enabled": true,
+            "items": {
+                "pts/srsran-2.5.0": {
+                    "enabled": true,
+                    "test_snippet": "srsRAN Project-25.10",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "xml:-T N (injected into test-definition.xml per run)",
+                    "sve2_support": "unknown",
+                    "notes": "5G PHY layer benchmark (PUSCH/PDSCH). Thread count injected as -T N into test-definition.xml before each batch-run; restored after. 4 test combinations: PUSCH/PDSCH × throughput_total/throughput_thread. Result scale: Mb/s (HIB).",
+                    "exe_time_v8cpu": "30.0"
+                }
+            }
+        },
         "Multimedia": {
             "enabled": true,
             "items": {
