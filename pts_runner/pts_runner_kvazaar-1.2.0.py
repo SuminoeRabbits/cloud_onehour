@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
@@ -169,6 +170,11 @@ class PreSeedDownloader:
 
 
 class KvazaarRunner:
+    # Time-reduction: keep only the two fastest presets
+    _KEEP_PRESETS: frozenset = frozenset({"veryfast", "ultrafast"})
+    # Cap frame count for each input to limit per-run duration
+    _FRAMES_LIMIT: int = 480
+
     def __init__(self, threads_arg=None, quick_mode=False):
         """
         Initialize kvazaar runner.
@@ -573,6 +579,110 @@ class KvazaarRunner:
             cpu_list.extend([str(i * 2 + 1) for i in range(logical_count)])
 
         return ','.join(cpu_list)
+
+    def patch_test_definition(self) -> bool:
+        """
+        Patch test-definition.xml to reduce benchmark runtime:
+        - Remove preset entries not in _KEEP_PRESETS (slow, medium, superfast)
+        - Append -f <_FRAMES_LIMIT> to each video input value to cap frame count
+
+        Returns True if the file was successfully patched (backup exists).
+        Restores original on any error and returns False.
+        """
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "test-definition.xml"
+        )
+        bak_path = xml_path.with_suffix(".xml.bak")
+
+        if not xml_path.exists():
+            print(f"[WARN] test-definition.xml not found, skipping patch: {xml_path}")
+            return False
+
+        try:
+            import shutil as _shutil
+            _shutil.copy2(xml_path, bak_path)
+
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+
+            test_settings = root.find("TestSettings")
+            if test_settings is None:
+                raise ValueError("TestSettings element not found")
+
+            for option in test_settings.findall("Option"):
+                identifier_el = option.find("Identifier")
+                if identifier_el is None:
+                    continue
+                identifier = (identifier_el.text or "").strip()
+
+                menu = option.find("Menu")
+                if menu is None:
+                    continue
+
+                if identifier == "preset":
+                    # Remove entries not in _KEEP_PRESETS
+                    for entry in menu.findall("Entry"):
+                        value_el = entry.find("Value")
+                        val = (value_el.text or "").strip() if value_el is not None else ""
+                        if val not in self._KEEP_PRESETS:
+                            menu.remove(entry)
+                            print(f"  [PATCH] Removed preset entry: {val}")
+
+                elif identifier == "video":
+                    # Append -f <limit> to each input value if not already present
+                    frames_suffix = f" -f {self._FRAMES_LIMIT}"
+                    for entry in menu.findall("Entry"):
+                        value_el = entry.find("Value")
+                        if value_el is None:
+                            continue
+                        current = (value_el.text or "").strip()
+                        if f"-f " not in current:
+                            value_el.text = current + frames_suffix
+                            print(f"  [PATCH] Added frames limit to: {current}")
+
+            tree.write(xml_path, encoding="utf-8", xml_declaration=True)
+            print(
+                f"[INFO] test-definition.xml patched: "
+                f"presets={sorted(self._KEEP_PRESETS)}, frames<={self._FRAMES_LIMIT}"
+            )
+            return True
+
+        except Exception as exc:
+            print(f"[WARN] Failed to patch test-definition.xml ({exc}), restoring backup")
+            if bak_path.exists():
+                import shutil as _shutil
+                _shutil.copy2(bak_path, xml_path)
+                bak_path.unlink()
+            return False
+
+    def restore_test_definition(self) -> None:
+        """Restore test-definition.xml from backup created by patch_test_definition."""
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "test-definition.xml"
+        )
+        bak_path = xml_path.with_suffix(".xml.bak")
+
+        if not bak_path.exists():
+            print("[WARN] test-definition.xml.bak not found, cannot restore")
+            return
+
+        try:
+            import shutil as _shutil
+            _shutil.copy2(bak_path, xml_path)
+            bak_path.unlink()
+            print("[INFO] test-definition.xml restored from backup")
+        except Exception as exc:
+            print(f"[ERROR] Failed to restore test-definition.xml: {exc}")
 
     def install_benchmark(self):
         """
@@ -1251,11 +1361,16 @@ class KvazaarRunner:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
         # Run for each thread count
+        patched = self.patch_test_definition()
         failed = []
-        for num_threads in self.thread_list:
-            # For runtime mode, NO reinstallation needed - just run with different NUM_CPU_CORES
-            if not self.run_benchmark(num_threads):
-                failed.append(num_threads)
+        try:
+            for num_threads in self.thread_list:
+                # For runtime mode, NO reinstallation needed - just run with different NUM_CPU_CORES
+                if not self.run_benchmark(num_threads):
+                    failed.append(num_threads)
+        finally:
+            if patched:
+                self.restore_test_definition()
 
         # Export results to CSV and JSON
         self.export_results()
