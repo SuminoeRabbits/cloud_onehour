@@ -1,30 +1,55 @@
 # JSON to Excel
 
-Convert benchmark result JSON files to analysis-ready Excel (`.xlsx`) format.
+ベンチマーク結果 JSON を分析用の Excel（`.xlsx`）形式に変換します。
 
-## Python Version
+## TOC
 
-Requires Python 3.12 or newer.
+- [Python バージョン](#python-バージョン)
+- [Excel 列（A–L）](#excel-列al)
+- [Excel の内容](#excel-の内容)
+- [列 L: `performance`](#列-l-performance)
+- [ソート順](#ソート順)
+- [グラフ生成](#グラフ生成)
+  - [線の色](#線の色)
+  - [CSP マーカー表（折れ線グラフ）](#csp-マーカー表折れ線グラフ)
+  - [グラフタイトルレイアウト](#グラフタイトルレイアウト)
+  - [スレッド数が複数のとき（折れ線グラフ）](#スレッド数が複数のとき折れ線グラフ)
+  - [スレッド数が 1 つのとき（棒グラフ）](#スレッド数が-1-つのとき棒グラフ)
+- [Excel 出力先](#excel-出力先)
+- [変換ルール](#変換ルール)
+- [JSONtoEXCEL.py](#jsontoexcelpy)
+  - [必須環境](#必須環境)
+  - [使い方](#使い方)
+  - [オプション](#オプション)
+  - [ノート](#ノート)
+  - [実行環境メモ（Debian/Ubuntu）](#実行環境メモdebianoubuntu)
 
-## Excel Columns (A–I)
+## Python バージョン
 
-Row 1 is the header row.
+Python 3.12 以上が必要です。
 
-| Col | Header | Type |
+## Excel 列（A–L）
+
+1 行目はヘッダー行です。
+
+| 列 | ヘッダー | 型 |
 |-----|--------|------|
 | A | `benchmark` | string |
-| B | `os` | string |
-| C | `thread` | integer |
-| D | `unit` | string |
-| E | `machinename` | string |
-| F | `cpu_name` | string |
-| G | `score` | float, 2 decimal places |
-| H | `relative_performance` | float, 2 decimal places |
-| I | `performance` | float, 2 decimal places |
+| B | `test_snippet` | string |
+| C | `test_name` | string |
+| D | `os` | string |
+| E | `gcc_ver` | string |
+| F | `thread` | integer |
+| G | `unit` | string |
+| H | `machinename` | string |
+| I | `cpu_name` | string |
+| J | `score` | float（小数 2 桁） |
+| K | `relative_performance` | float（小数 2 桁） |
+| L | `performance` | float（小数 2 桁） |
 
-## Excel Contents
+## Excel の内容
 
-Data starts from row 2. Source JSON structure:
+データは 2 行目から始まり、入力 JSON の構造は次のようになります。
 
 ```json
 {
@@ -32,20 +57,24 @@ Data starts from row 2. Source JSON structure:
     "workload": {
       "<workload-key>": {
         "<benchmark>": {
-          "os": {
-            "<OS>": {
-              "thread": {
-                "<thread>": {
-                  "unit": "Microseconds",
-                  "leaderboard": [
-                    {
-                      "rank": 1,
-                      "machinename": "aws-m8a-4xlarge-amd64",
-                      "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
-                      "score": 2271.33,
-                      "relative_performance": 1.0
-                    }
-                  ]
+          "test_snippet": "SVT-AV1-4.0",
+          "gcc_ver": "14.2-system",
+          "<test_name>": {
+            "os": {
+              "<OS>": {
+                "thread": {
+                  "<thread>": {
+                    "unit": "Microseconds",
+                    "leaderboard": [
+                      {
+                        "rank": 1,
+                        "machinename": "aws-m8a-4xlarge-amd64",
+                        "cpu_name": "AMD EPYC 9R45 (Zen 5 \"Turin\")",
+                        "score": 2271.33,
+                        "relative_performance": 1.0
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -57,150 +86,166 @@ Data starts from row 2. Source JSON structure:
 }
 ```
 
-Field mapping for each entry in `leaderboard` (or `ranking`):
+`leaderboard`（または `ranking`）の各エントリに対する列の対応は次のとおりです。
 
-| Column | Source field |
+| 列 | 元フィールド |
 |--------|-------------|
-| A `benchmark` | benchmark name key |
-| B `os` | OS key |
-| C `thread` | thread key (string converted to integer) |
-| D `unit` | `unit` |
-| E `machinename` | `machinename` |
-| F `cpu_name` | `cpu_name` |
-| G `score` | `score`; falls back to `efficiency_score` |
-| H `relative_performance` | `relative_performance`; falls back to `relative_cost_efficiency` |
-| I `performance` | computed (see below) |
+| A `benchmark` | ベンチマーク名のキー |
+| B `test_snippet` | ベンチマークレベルの `test_snippet` |
+| C `test_name` | ベンチマークレベルの `test_name` |
+| D `os` | OS キー |
+| E `gcc_ver` | ベンチマークレベルの `gcc_ver` |
+| F `thread` | thread キー（文字列の場合は整数に変換） |
+| G `unit` | `unit` |
+| H `machinename` | `machinename` |
+| I `cpu_name` | `cpu_name` |
+| J `score` | `score`（`efficiency_score` を代替値として使用） |
+| K `relative_performance` | `relative_performance`（`relative_cost_efficiency` を代替値として使用） |
+| L `performance` | 別途計算（下記参照） |
 
-## Column I: performance
+## 列 L: `performance`
 
-Column I is populated **only for `*performance_analysis*` files**; it is empty for all other files.
+列 L は `*performance_analysis*` のファイルのみ埋められ、他のファイルでは空になります。
 
-Within each (benchmark, OS, unit) group, the baseline is defined as the `score` of rank=1 at the minimum thread count = **100**.
+各（`benchmark`, `test_name`, `OS`, `unit`）グループについて、`rank=1` のエントリの中で最小スレッド数を用いた `score` をベースライン（100）として定義します。
 
-For all other rows the ratio relative to that baseline is computed:
+他の行はこのベースラインに対する比率で算出します。
 
-- If `unit` is `Microseconds`: `performance = (baseline_score / score) × 100`
-- Otherwise: `performance = (score / baseline_score) × 100`
+- `unit` が `Microseconds` の場合: `performance = (baseline_score / score) × 100`
+- それ以外: `performance = (score / baseline_score) × 100`
 
-## Sort Order
+## ソート順
 
-Rows are sorted in the following priority:
+並び順は次の優先順位です。
 
-1. **A** `benchmark` — natural order
-2. **E** `machinename` — natural order
-3. **C** `thread` — ascending
+1. **A** `benchmark` — ナチュラルソート
+2. **H** `machinename` — ナチュラルソート
+3. **F** `thread` — 昇順
 
-> **Natural order**: numbers are compared as integers, not strings.
-> Example: `1 < 20 < 100 < 200 < 1000 < 4000`
+> **ナチュラルソート**: 数値は文字列比較ではなく整数として比較します。
+> 例: `1 < 20 < 100 < 200 < 1000 < 4000`
 
-## Graph Generation
+## グラフ生成
 
-Graphs are generated **only for `*performance_analysis*` files**.
-One graph per `benchmark`, all compiled into a single PDF (one page per graph).
+グラフは `*performance_analysis*` ファイルのみに対して生成されます。
+`test_name`ごとに 1 つのグラフにまとめ、系列は`machinename`。１グラフあたり1ページの PDF にまとめて出力します。
 
-### Line Colors
+### 線の色
 
-Colors are determined from **F** `cpu_name`:
+色は **H** `cpu_name` から判定します。
 
-| Architecture | Color |
+| アーキテクチャ | 色 |
 |---|---|
-| ARM64 (Graviton, Neoverse, Ampere, …) | Blue variants |
-| AMD (EPYC, …) | Black / dark grey variants |
-| Intel (Xeon, …) | Red variants |
+| ARM64（Graviton, Neoverse, Ampere, …） | 青系 |
+| AMD（EPYC, …） | 黒 / ダークグレー系 |
+| Intel（Xeon, …） | 赤系 |
 
-Within each architecture group, line styles (solid, dashed, dotted, dash-dot) cycle to improve distinguishability. Colors and styles are consistent between the graph lines and the legend entries.
+同一アーキテクチャ内では線種（実線、破線、点線、破線点線）を循環させ、識別性を高めます。色と線種は凡例の表記とも対応しています。
 
-### CSP Marker Table (Line Chart)
+### CSP マーカー表（折れ線グラフ）
 
-Line markers are determined from the `machinename` prefix (case-insensitive).
-Sync this table with `CSP_MARKER_TABLE` in `JSONtoEXCEL.py` when making changes.
+ラインマーカーは `machinename` の接頭辞（大文字小文字を区別しない）で決まります。
+`JSONtoEXCEL.py` の `CSP_MARKER_TABLE` と整合してください。
 
-| CSP   | `machinename` prefix | `marker` | `fillstyle` | Shape |
-|-------|----------------------|----------|-------------|-------|
+| CSP   | `machinename` 接頭辞 | `marker` | `fillstyle` | 図形 |
+|-------|----------------------|----------|-------------|------|
 | AWS   | `aws-`               | `"o"`    | `"none"`    | ○ 白抜き円 |
 | GCP   | `gcp-`               | `"o"`    | `"full"`    | ● 塗り円 |
 | OCI   | `oci-`               | `"^"`    | `"none"`    | △ 白抜き三角 |
 | Azure | `azure-`             | `"^"`    | `"full"`    | ▲ 塗り三角 |
-| Other | (none of the above)  | `"s"`    | `"full"`    | ■ 正方形 |
+| Other | 上記以外            | `"s"`    | `"full"`    | ■ 正方形 |
 
-### Graph Title Layout
+### グラフタイトルレイアウト
 
-Each graph has a two-level title:
+各グラフは 2 階層のタイトルを持ちます。
 
-| Level | Content | Source |
+| レベル | 内容 | 参照元 |
 |-------|---------|--------|
-| **Main title** (large, bold) | `test_snippet` value | `test_suite.json` → `"test_snippet"` field |
-| **Subtitle** (smaller, below) | `benchmark (unit)` or `benchmark (unit), Thread=N` | benchmark name + unit from data |
+| **メインタイトル**（大） | `test_snippet` | Excel 列 **B** (`test_snippet`) |
+| **サブタイトル**（小） | `test_name (unit)` または `test_name (unit), Thread=N` | test_name + 単位 |
 
-If `test_snippet` is not found for a benchmark, only the subtitle is shown (using `axis.set_title()`).
+`test_snippet` が空の場合は、サブタイトルのみを `axis.set_title()` で表示します。
 
-### Multiple Thread Values — Line Chart
+### スレッド数が複数のとき（折れ線グラフ）
 
-- X-axis: `thread` (integer)
-- Y-axis: `performance`, grid lines every 10
-- Series: one line per `machinename`
-- Main title: `test_snippet` from `test_suite.json`
-- Subtitle: `benchmark (unit)`
-- Markers: determined by CSP (see CSP Marker Table above)
+- X 軸: `thread`（整数）
+- Y 軸: `performance`
+- 系列: `machinename` ごとに 1 本の線
+- メインタイトル: Excel 列 **B** `test_snippet`
+- サブタイトル: `test_name (unit)`
+- マーカー: CSP マーカー表（上記）
 
-Each series is labeled with a number (1, 2, …) in both the legend and on the graph.
-To prevent overlap, labels alternate between the **left end** and **right end** of each line.
+各系列は凡例とグラフ上に番号（1, 2, …）で表示されます。
+重なり防止のため、番号ラベルは各線の左右端を交互に使用します。
 
-### Single Thread Value — Bar Chart
+### スレッド数が 1 つのとき（棒グラフ）
 
-- Y-axis: `performance`, range 0–100, grid lines every 10
-- Series: one bar per `machinename`
-- Main title: `test_snippet` from `test_suite.json`
-- Subtitle: `benchmark (unit), Thread=<thread>`
-- X-axis labels: shortened `machinename`
+- Y 軸: `performance`（通常は 0–100）
+- 系列: `machinename` ごとに 1 本の棒
+- メインタイトル: Excel 列 **B** `test_snippet`
+- サブタイトル: `test_name (unit), Thread=<thread>`
+- X 軸ラベル: 短縮した `machinename`
 
-Bars are arranged from **highest performance on the left** to lowest on the right.
-Series numbers are not shown.
+棒は左側が高い性能、右側が低い性能の順に並びます。
+系列番号は表示しません。
 
-## Excel File Output
+## Excel 出力先
 
-Output location: same directory as the source JSON, with `.json` replaced by `.xlsx`.
-If a file with the same name already exists, it is **overwritten**.
+出力は元の JSON と同じディレクトリに保存され、拡張子 `.json` を `.xlsx` に置き換えます。
+同名ファイルが既に存在する場合は上書きされます。
 
-Test categories processed:
+処理対象カテゴリ:
 `AI`, `Compression`, `Cryptography_and_TLS`, `Database`, `Java_Applications`,
 `Memory_Access`, `Multimedia`, `Network`, `Processor`, `System`
 
-For each category `<Category>`, files matching `<Category>/<Category>_*.json`
-are converted to `<Category>/<Category>_*.xlsx`.
+各カテゴリ `<Category>` 配下の `<Category>/<Category>_*.json` という形式のファイルを
+`<Category>/<Category>_*.xlsx` に変換します。
 
-## Conversion Rules
+## 変換ルール
 
-- Comparison block: any top-level key ending in `*_comparison` that contains a `workload` sub-key.
-- Entry list: `leaderboard` is preferred; falls back to `ranking`.
-- Score field: `score` is preferred; falls back to `efficiency_score`.
-- Relative performance field: `relative_performance` is preferred; falls back to `relative_cost_efficiency`.
-- Thread value: converted from string to integer when the value is numeric (e.g. `"4"` → `4`).
+- 比較ブロック: `workload` サブキーを持つ、トップレベルで `*_comparison` で終わるキーを使用します。
+- エントリ順: `leaderboard` を優先し、なければ `ranking` を使用します。
+- スコアフィールド: `score` を優先し、なければ `efficiency_score` を使用します。
+- 相対性能フィールド: `relative_performance` を優先し、なければ `relative_cost_efficiency` を使用します。
+- `test_snippet` と `gcc_ver` は可能な場合、JSON の `<benchmark>` レベルから読み取ります。
+- スレッド値: 数値文字列なら整数へ変換します（例: `"4"` → `4`）。
 
 ## JSONtoEXCEL.py
 
-### Requirements
+### 必須環境
 
-- Python 3.12 or newer
-- `openpyxl`
-- `matplotlib`
+- Python 3.12 以上
+- `openpyxl`（`python3-openpyxl`）
+- `matplotlib`（`python3-matplotlib`）。PDF 生成が不要なら任意
 
-### Usage
+### 使い方
 
 ```bash
 python JSONtoEXCEL.py [options]
 ```
 
-### Options
+### オプション
 
-| Option | Default | Description |
+| オプション | デフォルト | 説明 |
 |--------|---------|-------------|
-| `--root PATH` | script directory | Workspace root. The `global/` sub-directory is searched for JSON files. |
-| `--ext .xlsx` | `.xlsx` | Output file extension (currently fixed to `.xlsx`). |
-| `--log DIR` | `$PWD/log` | Directory for log files. Created automatically if absent. |
-| `--graph` | — | Read existing Excel files and regenerate PDFs. **Excel files are not modified or recreated.** Use this when you have manually edited an Excel file and want to refresh the graphs without re-running the full JSON conversion. |
+| `--root PATH` | スクリプトのあるディレクトリ | ワークスペースルート。`global/` 配下を検索対象とします。 |
+| `--ext .xlsx` | `.xlsx` | 出力拡張子（現在は `.xlsx` 固定） |
+| `--log DIR` | `$PWD/log` | ログ保存先ディレクトリ。なければ自動作成 |
+| `--graph` | — | 既存の Excel を読み込み PDF を再生成します。**Excel は再作成・上書きされません。**
+JSON を再実行せず、手動編集した Excel のグラフだけを更新したい場合に使用します。 |
 
-### Notes
+### ノート
 
-- All processing is implemented in the single file `JSONtoEXCEL.py`.
-- Previous intermediate PowerShell files (`*.ps1`) are deprecated.
+- すべての処理は `JSONtoEXCEL.py` 単体で実装されています。
+- 以前使われていた PowerShell の中間ファイル（`*.ps1`）は非推奨です。
+
+### 実行環境メモ（Debian/Ubuntu）
+
+- `pip install --user` で `externally-managed-environment` エラーが出る場合は、システムパッケージでインストールします。
+
+```bash
+sudo apt install python3-openpyxl python3-matplotlib
+```
+
+- `matplotlib` が利用できない場合でも、`JSONtoEXCEL.py` は Excel の生成だけは続けます。
+  PDF 生成は警告付きでスキップされます。
