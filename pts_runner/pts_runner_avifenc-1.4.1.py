@@ -173,14 +173,18 @@ class PreSeedDownloader:
 
 
 class AvifencRunner:
-    def __init__(self, threads_arg=None, quick_mode=False):
+    def __init__(self, threads_arg=None, quick_mode=False, speed_name="2"):
         """
         Initialize avifenc runner.
 
         Args:
             threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
             quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
+            speed_name: Encoder speed option name as defined in test-definition.xml
+                        ("0"=Slowest, "2"=Slow (default/OpenBenchmarking standard),
+                         "6"=Default, "6, Lossless", "10, Lossless")
         """
+        self.speed_name = speed_name
         self.benchmark = "avifenc-1.4.1"
         self.benchmark_full = f"pts/{self.benchmark}"
         self.test_category = "Multimedia"
@@ -712,6 +716,85 @@ class AvifencRunner:
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
+        # Patch test-definition.xml to select the desired encoder speed
+        self.patch_test_definition_speed(self.speed_name)
+
+    def patch_test_definition_speed(self, target_speed_name):
+        """
+        Reorder enc-mode entries in test-definition.xml so the target speed is first.
+
+        SKIP_ALL_PROMPTS=1 (batch mode) always picks the first menu entry.
+        By moving the desired speed to position 0, we control which option PTS uses
+        without modifying PTS internals.
+
+        Args:
+            target_speed_name: Entry <Name> value to promote (e.g. "2", "6", "0",
+                               "6, Lossless", "10, Lossless")
+        """
+        import xml.etree.ElementTree as ET
+
+        profile_path = (
+            Path.home() / ".phoronix-test-suite" / "test-profiles"
+            / "pts" / self.benchmark / "test-definition.xml"
+        )
+
+        print(f"\n>>> Patching test-definition.xml for encoder speed '{target_speed_name}'")
+        print(f"  [INFO] Profile path: {profile_path}")
+
+        if not profile_path.exists():
+            print(f"  [WARN] test-definition.xml not found, skipping patch")
+            return False
+
+        try:
+            ET.register_namespace('', '')
+            tree = ET.parse(profile_path)
+            root = tree.getroot()
+
+            # Find the enc-mode Option element
+            menu = None
+            for option in root.iter('Option'):
+                identifier = option.find('Identifier')
+                if identifier is not None and identifier.text == 'enc-mode':
+                    menu = option.find('Menu')
+                    break
+
+            if menu is None:
+                print("  [WARN] enc-mode Option not found in test-definition.xml")
+                return False
+
+            entries = list(menu.findall('Entry'))
+
+            # Find the target entry index
+            target_idx = None
+            for i, entry in enumerate(entries):
+                name = entry.find('Name')
+                if name is not None and name.text == target_speed_name:
+                    target_idx = i
+                    break
+
+            if target_idx is None:
+                print(f"  [WARN] Speed '{target_speed_name}' not found. Available: "
+                      + str([e.find('Name').text for e in entries if e.find('Name') is not None]))
+                return False
+
+            if target_idx == 0:
+                print(f"  [OK] Speed '{target_speed_name}' is already first entry, no patch needed")
+                return True
+
+            # Move target entry to front
+            target_entry = entries[target_idx]
+            menu.remove(target_entry)
+            menu.insert(list(menu).index(entries[0]), target_entry)
+
+            tree.write(str(profile_path), xml_declaration=True, encoding='unicode')
+            print(f"  [OK] Patched: speed '{target_speed_name}' moved to first entry "
+                  f"(was index {target_idx})")
+            return True
+
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch test-definition.xml: {e}")
+            return False
+
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
         """
         Parse perf stat output and CPU frequency files to generate performance summary.
@@ -1155,8 +1238,8 @@ class AvifencRunner:
                 with open(json_file, 'r') as f:
                     data = json.load(f)
                     # Extract benchmark result
-                    for result_id, result in data.get('results', {}).items():
-                        for system_id, system_result in result.get('results', {}).items():
+                    for result in data.get('results', {}).values():
+                        for system_result in result.get('results', {}).values():
                             all_results.append({
                                 'threads': num_threads,
                                 'value': system_result.get('value'),
@@ -1322,16 +1405,28 @@ def main():
         help='Quick mode: Run each test only once (for development/testing)'
     )
 
+    parser.add_argument(
+        '--speed',
+        default='2',
+        choices=['0', '2', '6', '6, Lossless', '10, Lossless'],
+        help=(
+            'Encoder speed option (default: 2, OpenBenchmarking standard). '
+            '0=Slowest, 2=Slow, 6=Default, "6, Lossless", "10, Lossless"'
+        )
+    )
+
     args = parser.parse_args()
 
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
         print("[INFO] Tests will run once instead of 3+ times (60-70%% time reduction)")
 
+    print(f"[INFO] Encoder speed: {args.speed} (OpenBenchmarking standard: 2)")
+
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
 
-    runner = AvifencRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = AvifencRunner(threads_arg=threads, quick_mode=args.quick, speed_name=args.speed)
     success = runner.run()
 
     sys.exit(0 if success else 1)
