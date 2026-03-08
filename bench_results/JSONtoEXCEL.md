@@ -1,6 +1,7 @@
 # JSON to Excel
 
 ベンチマーク結果 JSON を分析用の Excel（`.xlsx`）形式に変換します。
+JSONファイルはDefaultで特に指定がない限り${PWD}/globalの下に`testcategory`毎のディレクトリ内に存在しているとします。
 
 ## TOC
 
@@ -194,12 +195,12 @@ Python 3.12 以上が必要です。
 出力は元の JSON と同じディレクトリに保存され、拡張子 `.json` を `.xlsx` に置き換えます。
 同名ファイルが既に存在する場合は上書きされます。
 
-処理対象カテゴリ:
+- 処理対象カテゴリ:
 `AI`, `Compression`, `Cryptography_and_TLS`, `Database`, `Java_Applications`,
-`Memory_Access`, `Multimedia`, `Network`, `Processor`, `System`
+`Memory_Access`, `Multimedia`, `Network`,`Telecom`,`Processor`, `System`
 
-各カテゴリ `<Category>` 配下の `<Category>/<Category>_*.json` という形式のファイルを
-`<Category>/<Category>_*.xlsx` に変換します。
+各カテゴリ `<testcategory>` 配下の `<testcategory>/<testcategory>_*.json` という形式のファイルを
+`<testcategory>/<testcategory>_*.xlsx` に変換します。
 
 ## 変換ルール
 
@@ -209,6 +210,38 @@ Python 3.12 以上が必要です。
 - 相対性能フィールド: `relative_performance` を優先し、なければ `relative_cost_efficiency` を使用します。
 - `test_snippet` と `gcc_ver` は可能な場合、JSON の `<benchmark>` レベルから読み取ります。
 - スレッド値: 数値文字列なら整数へ変換します（例: `"4"` → `4`）。
+
+## 変換後の網羅性チェック
+変換後、処理対象カテゴリ内の `<testcategory>_performance_analysis.json` からテスト結果の網羅性を抽出する。抽出結果は **NOG（欠損あり）のみ** を JSON で出力する。
+出力ファイル名はデフォルトで `coverage_nog_all_<timestamp>.json`。同じ JSON は `stdout` にも出力する。
+
+- とある"machinename"で一つでもデータ点がある場合は、ほかの"machinename"でも等しく情報が存在していなくてはならない。
+- "machinename"の母集団は、<testcategory>_performance_analysis.jsonの中で必ず１度は現れる"machinename"を積算したもの。
+- 判定単位は `benchmark + thread`。その配下の `test_name` のいずれかで欠損があれば `nog` に含める。
+
+出力フォーマットは以下の通りとする。
+
+```
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-03-08T19:30:00+09:00",
+  "results":{
+      "testcategory":{
+         "System":{
+            "nog_count": 1,
+            "nog":{
+                "glibc-bench-1.9.0":{
+                  "thread": "12",
+                  "missing_count": 3,
+                  "missing_test_names": ["..."],
+                  "csp_breakdown": {"gcp": ["..."]}
+                  }
+            }
+          }
+        }
+    }
+}
+```
 
 ## JSONtoEXCEL.py
 
@@ -233,6 +266,7 @@ python JSONtoEXCEL.py [options]
 | `--log DIR` | `$PWD/log` | ログ保存先ディレクトリ。なければ自動作成 |
 | `--graph` | — | 既存の Excel を読み込み PDF を再生成します。**Excel は再作成・上書きされません。**
 JSON を再実行せず、手動編集した Excel のグラフだけを更新したい場合に使用します。 |
+| `--coverage-out PATH` | `<root>/coverage_nog_all_<timestamp>.json` | 網羅性チェック（NOG）JSON の出力先。指定しない場合はデフォルト名で保存され、同じ内容が `stdout` にも出力されます。 |
 
 ### ノート
 

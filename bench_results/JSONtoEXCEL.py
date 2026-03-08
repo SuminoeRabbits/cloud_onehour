@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+from datetime import datetime
 import json
 import logging
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font
@@ -34,6 +35,7 @@ TEST_CATEGORIES = [
     "Network",
     "Processor",
     "System",
+    "Telecom",
 ]
 
 # A-L columns as per spec
@@ -766,6 +768,109 @@ def graph_mode(global_dir: Path) -> int:
     return errors
 
 
+def _sort_strings_natural(values: Iterable[str]) -> List[str]:
+    return sorted(values, key=lambda value: _natural_sort_key(value, case_insensitive=True, collapse_spaces=True))
+
+
+def build_coverage_nog_for_category(json_path: Path) -> Dict[str, Any]:
+    with json_path.open("r", encoding="utf-8") as fp:
+        payload = json.load(fp)
+
+    rows = extract_rows(payload)
+    testcategory = json_path.stem.replace("_performance_analysis", "")
+    machine_population: Set[str] = set()
+    presence: Dict[Tuple[str, int, str], Set[str]] = {}
+    benchmark_threads: Dict[Tuple[str, int], Set[str]] = {}
+
+    for row in rows:
+        benchmark = row[0]
+        test_name = row[2]
+        thread = row[5]
+        machinename = row[7]
+        if not isinstance(benchmark, str):
+            continue
+        if not isinstance(thread, int):
+            continue
+        if not isinstance(machinename, str):
+            continue
+        if machinename.strip() == "":
+            continue
+        if not isinstance(test_name, str):
+            test_name = ""
+        machine_population.add(machinename)
+        key = (benchmark, thread, test_name)
+        presence.setdefault(key, set()).add(machinename)
+        benchmark_threads.setdefault((benchmark, thread), set()).add(test_name)
+
+    nog_by_benchmark: Dict[str, List[Dict[str, Any]]] = {}
+    nog_count = 0
+    all_machines = set(machine_population)
+
+    for benchmark, thread in sorted(
+        benchmark_threads.keys(),
+        key=lambda item: (
+            _natural_sort_key(item[0], case_insensitive=True, collapse_spaces=False),
+            item[1],
+        ),
+    ):
+        missing_machines_union: Set[str] = set()
+        missing_test_names: Set[str] = set()
+        for test_name in benchmark_threads[(benchmark, thread)]:
+            found = presence.get((benchmark, thread, test_name), set())
+            missing_here = all_machines - found
+            if missing_here:
+                missing_machines_union.update(missing_here)
+                if test_name.strip() != "":
+                    missing_test_names.add(test_name)
+
+        if not missing_machines_union:
+            continue
+
+        csp_breakdown: Dict[str, List[str]] = {}
+        for machinename in _sort_strings_natural(missing_machines_union):
+            csp = detect_csp(machinename)
+            csp_breakdown.setdefault(csp, []).append(machinename)
+
+        nog_by_benchmark.setdefault(benchmark, []).append(
+            {
+                "thread": str(thread),
+                "missing_count": len(missing_machines_union),
+                "missing_test_names": _sort_strings_natural(missing_test_names),
+                "csp_breakdown": csp_breakdown,
+            }
+        )
+        nog_count += 1
+
+    for benchmark in list(nog_by_benchmark.keys()):
+        nog_by_benchmark[benchmark].sort(key=lambda item: _thread_sort_value(item.get("thread")))
+
+    return {
+        testcategory: {
+            "nog_count": nog_count,
+            "nog": nog_by_benchmark,
+        }
+    }
+
+
+def generate_coverage_nog_report(global_dir: Path) -> Dict[str, Any]:
+    categories: Dict[str, Any] = {}
+    for category in TEST_CATEGORIES:
+        json_path = global_dir / category / f"{category}_performance_analysis.json"
+        if not json_path.exists():
+            continue
+        if not json_path.is_file():
+            continue
+        categories.update(build_coverage_nog_for_category(json_path))
+
+    return {
+        "schema_version": "1.0",
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "results": {
+            "testcategory": categories,
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert benchmark JSON files to Excel")
     parser.add_argument(
@@ -791,6 +896,12 @@ def main() -> int:
         action="store_true",
         help="Read existing Excel files and regenerate PDFs for performance_analysis files",
     )
+    parser.add_argument(
+        "--coverage-out",
+        type=Path,
+        default=None,
+        help='Coverage NOG JSON output path (default: "<root>/coverage_nog_all_<timestamp>.json")',
+    )
     args = parser.parse_args()
 
     log_dir: Path = args.log if args.log is not None else Path.cwd() / "log"
@@ -802,7 +913,7 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(message)s",
         handlers=[
             logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
+            logging.StreamHandler(sys.stderr),
         ],
     )
 
@@ -828,6 +939,16 @@ def main() -> int:
             logging.info("[OK] %s -> %s (%d rows)", json_file, json_file.with_suffix(args.ext), row_count)
         except Exception as exc:
             logging.error("[NG] %s: %s", json_file, exc)
+
+    coverage_report = generate_coverage_nog_report(global_dir)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    coverage_path = args.coverage_out if args.coverage_out is not None else args.root / f"coverage_nog_all_{timestamp}.json"
+    coverage_path.parent.mkdir(parents=True, exist_ok=True)
+    with coverage_path.open("w", encoding="utf-8") as fp:
+        json.dump(coverage_report, fp, ensure_ascii=False, indent=2)
+        fp.write("\n")
+    print(json.dumps(coverage_report, ensure_ascii=False, indent=2))
+    logging.info("Coverage NOG JSON: %s", coverage_path)
 
     logging.info("Converted: %d/%d files, %d total rows", converted, len(targets), total_rows)
     return 0 if converted == len(targets) else 2
