@@ -152,6 +152,14 @@ log_step "Setup init tools"
 log_step "Setup Rust"
 ./setup_rust.sh
 
+# setup srsRAN dependencies
+log_step "Setup srsRAN dependencies"
+./setup_srs.sh
+
+# setup llama.cpp dependencies
+log_step "Setup llama.cpp dependencies"
+./setup_llama.sh
+
 # Verify libxml2-dev is installed (for pmbench xmlgen build)
 log_step "Ensure libxml2-dev"
 if ! dpkg -s libxml2-dev >/dev/null 2>&1; then
