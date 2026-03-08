@@ -488,6 +488,16 @@
                     "sve2_support": true,
                     "notes": "Dependencies with Python/Numpy/scipy version. Need to revisit",
                     "exe_time_v8cpu": "0.5"
+                },
+                "pts/llama-cpp-2.4.1": {
+                    "enabled": false,
+                    "test_snippet": "Llama.cpp",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "LLM inference benchmark using OpenBLAS CPU backend. Tests: Prompt Processing and Text Generation (tokens/sec, higher is better). LLAMA_OPENBLAS=1 set at build time.",
+                    "exe_time_v8cpu": "400.0"
                 }
             }
         }
