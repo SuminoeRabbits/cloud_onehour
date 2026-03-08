@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
@@ -806,6 +807,108 @@ class SvtAv1Runner:
             print(f"  [ERROR] Failed to patch install.sh: {e}")
             return False
 
+    # -----------------------------------------------------------------------
+    # Test-definition patching (Option B: Preset 5+13, --frames 480 cap)
+    # -----------------------------------------------------------------------
+    _KEEP_PRESETS: frozenset = frozenset({"--preset 5", "--preset 13"})
+    _FRAMES_LIMIT: int = 480
+
+    def patch_test_definition(self) -> bool:
+        """Patch test-definition.xml for faster execution (Option B).
+
+        Changes applied:
+          - Encoder Mode: keep only Preset 5 (Mid-Speed) and Preset 13 (Fastest)
+          - All Inputs: cap frame count to _FRAMES_LIMIT (adds or replaces --frames N)
+
+        The original file is backed up as test-definition.xml.bak and restored
+        by restore_test_definition() after the benchmark run.
+
+        Returns True if the patch was applied (backup exists), False otherwise.
+        """
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "test-definition.xml"
+        )
+        backup_path = xml_path.with_suffix(".xml.bak")
+
+        if not xml_path.exists():
+            print(f"  [WARN] test-definition.xml not found, skipping patch: {xml_path}")
+            return False
+
+        shutil.copy2(xml_path, backup_path)
+        print(f"\n>>> Patching test-definition.xml (Option B: Preset 5+13, --frames {self._FRAMES_LIMIT})")
+
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+
+            for option in root.iter("Option"):
+                ident_el = option.find("Identifier")
+                menu_el = option.find("Menu")
+                if ident_el is None or menu_el is None:
+                    continue
+
+                if ident_el.text == "enc-mode":
+                    # Remove presets not in _KEEP_PRESETS
+                    for entry in list(menu_el.findall("Entry")):
+                        val_el = entry.find("Value")
+                        if val_el is not None and val_el.text not in self._KEEP_PRESETS:
+                            menu_el.remove(entry)
+                            print(f"  [PATCH] Removed encoder mode: {val_el.text}")
+
+                elif ident_el.text == "input":
+                    for entry in menu_el.findall("Entry"):
+                        val_el = entry.find("Value")
+                        if val_el is None:
+                            continue
+                        val = val_el.text or ""
+                        if "--frames" in val:
+                            new_val = re.sub(
+                                r"--frames\s+\d+",
+                                f"--frames {self._FRAMES_LIMIT}",
+                                val,
+                            )
+                            if new_val != val:
+                                print(f"  [PATCH] Reduced frames: {val.strip()}")
+                                print(f"       -> {new_val.strip()}")
+                            val_el.text = new_val
+                        else:
+                            val_el.text = val.rstrip() + f" --frames {self._FRAMES_LIMIT}"
+                            print(f"  [PATCH] Added frames cap: {val_el.text.strip()}")
+
+            tree.write(str(xml_path), encoding="utf-8", xml_declaration=True)
+            print(f"  [OK] test-definition.xml patched successfully")
+            return True
+
+        except Exception as exc:
+            print(f"  [ERROR] Failed to patch test-definition.xml: {exc}", file=sys.stderr)
+            shutil.copy2(backup_path, xml_path)
+            backup_path.unlink(missing_ok=True)
+            return False
+
+    def restore_test_definition(self) -> None:
+        """Restore test-definition.xml from backup created by patch_test_definition()."""
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "test-definition.xml"
+        )
+        backup_path = xml_path.with_suffix(".xml.bak")
+
+        if backup_path.exists():
+            shutil.copy2(backup_path, xml_path)
+            backup_path.unlink()
+            print("  [OK] test-definition.xml restored from backup")
+        else:
+            print(f"  [WARN] restore_test_definition: no backup found at {backup_path}")
+
     def install_benchmark(self):
         """
         Install svt-av1-2.17.0 with GCC-14 native compilation.
@@ -1426,10 +1529,15 @@ class SvtAv1Runner:
         else:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
+        patched = self.patch_test_definition()
         failed = []
-        for num_threads in self.thread_list:
-            if not self.run_benchmark(num_threads):
-                failed.append(num_threads)
+        try:
+            for num_threads in self.thread_list:
+                if not self.run_benchmark(num_threads):
+                    failed.append(num_threads)
+        finally:
+            if patched:
+                self.restore_test_definition()
 
         self.export_results()
         self.generate_summary()
