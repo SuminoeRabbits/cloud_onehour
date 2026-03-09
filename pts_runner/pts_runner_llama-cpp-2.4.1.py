@@ -53,6 +53,9 @@ from runner_common import detect_pts_failure_from_log, get_install_status, clean
 # PreSeedDownloader
 # ---------------------------------------------------------------------------
 
+_LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
+
+
 class PreSeedDownloader:
     """Pre-download large test files into PTS download cache using aria2c."""
 
@@ -66,7 +69,7 @@ class PreSeedDownloader:
     def is_aria2_available(self):
         return self.aria2_available
 
-    def download_from_xml(self, benchmark_name, threshold_mb=96):
+    def download_from_xml(self, benchmark_name, threshold_mb=96, skip_optional=False):
         """Parse downloads.xml and accelerate large files with aria2c."""
         if not self.aria2_available:
             return False
@@ -107,6 +110,14 @@ class PreSeedDownloader:
                 filesize_node = package.find("FileSize")
                 if url_node is None or filename_node is None:
                     continue
+                # Proposal 3: skip Optional packages when requested
+                if skip_optional:
+                    optional_node = package.find("Optional")
+                    if optional_node is not None and optional_node.text:
+                        if optional_node.text.strip().upper() == "TRUE":
+                            filename_hint = filename_node.text.strip() if filename_node.text else "(unknown)"
+                            print(f"  [SKIP] Optional package skipped: {filename_hint}")
+                            continue
                 urls = [u.strip() for u in url_node.text.split(",")]
                 url = urls[0] if urls else None
                 filename = filename_node.text.strip()
@@ -124,7 +135,7 @@ class PreSeedDownloader:
                     size_mb = size_bytes / (1024 * 1024)
                     if size_mb >= threshold_mb:
                         print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
-                        self._ensure_file(urls, filename)
+                        self._ensure_file(urls, filename, size_bytes=size_bytes)
         except Exception as e:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
             return False
@@ -148,16 +159,36 @@ class PreSeedDownloader:
             pass
         return -1
 
-    def _ensure_file(self, urls, filename):
+    def _ensure_file(self, urls, filename, size_bytes=-1):
         target_path = self.cache_dir / filename
+        # Proposal 2: size verification before cache-hit
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
+            if size_bytes > 0:
+                actual = target_path.stat().st_size
+                if actual == size_bytes:
+                    print(f"  [CACHE] Verified: {filename} ({actual / (1024 ** 3):.1f} GB)")
+                    return True
+                else:
+                    print(f"  [WARN] Incomplete cache: {filename} ({actual}/{size_bytes} bytes). Resuming...")
+                    # Fall through to download with --continue
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
         if isinstance(urls, str):
             urls = [urls]
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        # Proposal 1: dynamic connection count based on file size
+        if size_bytes > 0 and size_bytes >= _LARGE_FILE_THRESHOLD_BYTES:
+            num_conn = 4
+        else:
+            num_conn = 16
+        print(f"  [ARIA2] Downloading {filename} with {num_conn} connections...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        cmd = ["aria2c", "-x", "16", "-s", "16", "-d", str(self.cache_dir), "-o", filename] + urls
+        cmd = [
+            "aria2c",
+            "-x", str(num_conn), "-s", str(num_conn),
+            "--continue=true",
+            "-d", str(self.cache_dir), "-o", filename,
+        ] + urls
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:
@@ -173,7 +204,7 @@ class PreSeedDownloader:
 class LlamaCppRunner:
     """PTS runner for pts/llama-cpp-2.4.1 (LLM inference benchmark)."""
 
-    def __init__(self, threads_arg=None, quick_mode=False):
+    def __init__(self, threads_arg=None, quick_mode=False, skip_optional=False):
         # Benchmark identification
         self.benchmark = "llama-cpp-2.4.1"
         self.benchmark_full = f"pts/{self.benchmark}"
@@ -204,6 +235,7 @@ class LlamaCppRunner:
         )
 
         self.quick_mode = quick_mode
+        self.skip_optional = skip_optional
 
         # WSL detection (informational only)
         self.is_wsl_env = self.is_wsl()
@@ -358,7 +390,7 @@ class LlamaCppRunner:
         downloader = PreSeedDownloader()
         if downloader.is_aria2_available():
             print("  [INFO] Pre-seeding downloads with aria2c...")
-            downloader.download_from_xml(self.benchmark_full)
+            downloader.download_from_xml(self.benchmark_full, skip_optional=self.skip_optional)
         else:
             print("  [INFO] aria2c not found; PTS will handle download")
 
@@ -948,6 +980,10 @@ Examples:
         "--quick", action="store_true",
         help="Quick mode: FORCE_TIMES_TO_RUN=1 (for development/testing)",
     )
+    parser.add_argument(
+        "--skip-optional", action="store_true",
+        help="Skip Optional packages during aria2c pre-seeding",
+    )
     args = parser.parse_args()
 
     threads = args.threads if args.threads is not None else args.threads_pos
@@ -955,11 +991,14 @@ Examples:
     if args.quick:
         print("[INFO] Quick mode enabled: FORCE_TIMES_TO_RUN=1")
 
+    if args.skip_optional:
+        print("[INFO] --skip-optional: Optional packages will be skipped during pre-seeding")
+
     if threads is not None and threads < 1:
         print(f"[ERROR] Thread count must be >= 1 (got: {threads})")
         sys.exit(1)
 
-    runner = LlamaCppRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = LlamaCppRunner(threads_arg=threads, quick_mode=args.quick, skip_optional=args.skip_optional)
     success = runner.run()
     sys.exit(0 if success else 1)
 

@@ -141,6 +141,10 @@ class ComplianceChecker:
         # Disk space management (new 2026-02)
         self.check_pts_installed_cleanup()
 
+        # aria2 download robustness (new 2026-03)
+        self.check_aria2_size_verification()
+        self.check_aria2_connection_tuning()
+
         # Informational checks
         self.find_hardcoded_thread_lists()
 
@@ -1724,6 +1728,101 @@ class ComplianceChecker:
                 "            cleanup_pts_artifacts(self.benchmark)\n"
                 "   Reference: CODE_TEMPLATE.md 'クリーンアップメソッド' section"
             )
+
+    def check_aria2_size_verification(self):
+        """
+        Check that ensure_file() / _ensure_file() accepts size_bytes and performs
+        size-aware cache verification with --continue support (CODE_TEMPLATE 2026-03).
+
+        Required patterns:
+          - ensure_file (or _ensure_file) accepts size_bytes parameter
+          - compares actual file size against expected (stat().st_size or os.path.getsize)
+          - passes --continue=true to aria2c for resume support
+        """
+        # Only check runners that use PreSeedDownloader / aria2c
+        has_aria2 = bool(re.search(r'aria2c', self.content))
+        if not has_aria2:
+            return
+
+        has_size_param = bool(
+            re.search(r'def\s+_?ensure_file\s*\([^)]*size_bytes', self.content)
+        )
+        has_size_check = bool(
+            re.search(r'stat\(\)\.st_size|os\.path\.getsize', self.content)
+        )
+        has_continue = bool(
+            re.search(r'--continue[=\s]true', self.content, re.IGNORECASE)
+        )
+
+        if has_size_param and has_size_check and has_continue:
+            self.passed.append(
+                "✅ ensure_file(): size verification + --continue=true resume implemented"
+            )
+        else:
+            missing = []
+            if not has_size_param:
+                missing.append("size_bytes parameter missing from ensure_file()")
+            if not has_size_check:
+                missing.append("file size comparison (stat().st_size) missing")
+            if not has_continue:
+                missing.append("--continue=true missing from aria2c command")
+            self.warnings.append(
+                "⚠️  WARNING: aria2 download robustness incomplete (2026-03)\n"
+                f"   Missing: {', '.join(missing)}\n"
+                "   Risk: partial/corrupt cache files cause silent re-download failures\n"
+                "   Fix: update ensure_file() per CODE_TEMPLATE.md 'PreSeedDownloader' section\n"
+                "     1. Add size_bytes=-1 parameter\n"
+                "     2. Compare target_path.stat().st_size == size_bytes before cache-hit\n"
+                "     3. Add --continue=true to aria2c command for resume support"
+            )
+
+    def check_aria2_connection_tuning(self):
+        """
+        Check that connection count is dynamically adjusted based on file size
+        (CODE_TEMPLATE 2026-03 Proposal 1):
+          < 10 GB  -> 16 connections
+          >= 10 GB ->  4 connections
+
+        Required patterns:
+          - 10 GB threshold constant (10 * 1024 * 1024 * 1024 or equivalent)
+          - dynamic num_conn / connection count selection (not hardcoded -x 16 only)
+        """
+        has_aria2 = bool(re.search(r'aria2c', self.content))
+        if not has_aria2:
+            return
+
+        # 10 GB threshold: accept decimal (10_737_418_240) or expression form
+        has_10gb_threshold = bool(
+            re.search(
+                r'10\s*\*\s*1024\s*\*\s*1024\s*\*\s*1024'   # 10 * 1024 * 1024 * 1024
+                r'|10737418240'                                # literal decimal
+                r'|_LARGE_FILE_THRESHOLD',                     # named constant
+                self.content,
+            )
+        )
+        # Dynamic connection: variable assigned 4 and 16, then used in aria2c command
+        has_dynamic_conn = bool(
+            re.search(r'num_conn\s*=\s*4|num_connections\s*=\s*4|conn\s*=\s*4', self.content)
+        ) and bool(
+            re.search(r'num_conn\s*=\s*16|num_connections\s*=\s*16|conn\s*=\s*16', self.content)
+        )
+        # Reject pure hardcoded -x 16 with no dynamic path
+        only_hardcoded = bool(re.search(r'"-x",\s*"16"', self.content)) and not has_dynamic_conn
+
+        if has_10gb_threshold and has_dynamic_conn:
+            self.passed.append(
+                "✅ aria2 connection count: dynamic tuning (4 for ≥10 GB, 16 for <10 GB)"
+            )
+        elif only_hardcoded:
+            self.warnings.append(
+                "⚠️  WARNING: aria2 connection count hardcoded to 16 (2026-03)\n"
+                "   Risk: 16 parallel connections to HuggingFace XetHub CAS causes DL:0B\n"
+                "         stalls for large files (presigned URL thundering herd)\n"
+                "   Fix: use dynamic num_conn in ensure_file() per CODE_TEMPLATE.md\n"
+                "     _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024\n"
+                "     num_conn = 4 if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else 16"
+            )
+        # If aria2 is used but neither pattern found, skip (might be a custom approach)
 
     def print_results(self):
 

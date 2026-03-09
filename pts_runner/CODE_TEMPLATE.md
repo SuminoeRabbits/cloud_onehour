@@ -129,8 +129,8 @@ class PreSeedDownloader:
                     size_mb = size_bytes / (1024 * 1024)
                     if size_mb >= threshold_mb:
                         print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
-                        # Pass all URLs to ensure_file for fallback support
-                        self.ensure_file(urls, filename)
+                        # Pass all URLs and size_bytes to ensure_file for verification and connection tuning
+                        self.ensure_file(urls, filename, size_bytes=size_bytes)
         except Exception as e:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
             return False
@@ -186,34 +186,70 @@ class PreSeedDownloader:
         except Exception as e:
             print(f"  [WARN] Failed to check/update user-config.xml: {e}")
 
-    def ensure_file(self, urls, filename):
+    def ensure_file(self, urls, filename, size_bytes=-1):
         """
-        Directly download file using aria2c (assumes size check passed).
+        Download file using aria2c with size verification and connection tuning.
+
         Args:
             urls: List of URLs or single URL string
             filename: Target filename
+            size_bytes: Expected file size in bytes from downloads.xml (-1 if unknown)
+
+        Connection count policy (to avoid presigned URL thundering herd on CDNs such as
+        HuggingFace XetHub CAS which redirect each parallel connection to a time-limited
+        presigned S3 URL):
+            < 10 GB  : 16 connections  (fast, safe for smaller files)
+            >= 10 GB :  4 connections  (reduces simultaneous redirect storm)
+
+        Size verification policy (Proposal 2):
+            - If size_bytes is known and file exists but is incomplete → resume with --continue
+            - If size_bytes is known and file is complete → cache hit, skip download
+            - If size_bytes is unknown and file exists → cache hit (legacy behaviour)
         """
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
+
         target_path = self.cache_dir / filename
-        
-        # Check if file exists in cache
+
+        # --- Proposal 2: size-aware cache verification ---
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
+            if size_bytes > 0:
+                actual = target_path.stat().st_size
+                if actual == size_bytes:
+                    print(f"  [CACHE] Verified: {filename} ({actual / (1024 ** 3):.1f} GB)")
+                    return True
+                else:
+                    print(
+                        f"  [WARN] Incomplete cache: {filename} "
+                        f"({actual}/{size_bytes} bytes). Resuming..."
+                    )
+                    # Fall through to download with --continue
+            else:
+                # size unknown – trust existence (legacy behaviour)
+                print(f"  [CACHE] File found: {filename}")
+                return True
 
         if isinstance(urls, str):
             urls = [urls]
 
-        # Need to download
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        # --- Proposal 1: connection count based on file size ---
+        if size_bytes > 0 and size_bytes >= _LARGE_FILE_THRESHOLD_BYTES:
+            num_conn = 4
+        else:
+            num_conn = 16
+        print(f"  [ARIA2] Downloading {filename} with {num_conn} connections...")
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        # aria2c command - pass all URLs as separate arguments
+
+        # --continue=true: resume partial downloads safely
         cmd = [
-            "aria2c", "-x", "16", "-s", "16", 
-            "-d", str(self.cache_dir), 
-            "-o", filename
+            "aria2c",
+            "-x", str(num_conn),
+            "-s", str(num_conn),
+            "--continue=true",
+            "-d", str(self.cache_dir),
+            "-o", filename,
         ] + urls
-        
+
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:
