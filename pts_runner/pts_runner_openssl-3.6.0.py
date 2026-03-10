@@ -519,6 +519,77 @@ class OpensslRunner:
         print(f"         - Compilation now uses all {os.cpu_count()} CPU cores")
         print("         - Benchmark thread count still controlled by NUM_CPU_CORES at runtime")
 
+    def patch_profile_for_sha3_512(self):
+        """
+        Patch OpenSSL PTS profile to add SHA3-512 benchmark support.
+
+        Minimal changes:
+        1. Add SHA3-512 option to test-definition.xml
+        2. Add sha3-512 parser to results-definition.xml
+        """
+        print("\n>>> Patching OpenSSL profile for SHA3-512...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+        profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
+        test_def = profile_dir / 'test-definition.xml'
+        results_def = profile_dir / 'results-definition.xml'
+
+        if not test_def.exists() or not results_def.exists():
+            print(f"  [WARN] Profile XML not found under: {profile_dir}")
+            return
+
+        # 1) test-definition.xml: add SHA3-512 menu entry
+        with open(test_def, 'r') as f:
+            test_def_content = f.read()
+
+        if '<Name>SHA3-512</Name>' not in test_def_content:
+            sha3_menu_entry = """        <Entry>
+          <Name>SHA3-512</Name>
+          <Value>-evp sha3-512</Value>
+        </Entry>
+"""
+            anchor = """        <Entry>
+          <Name>SHA512</Name>
+          <Value>sha512</Value>
+        </Entry>
+"""
+            if anchor in test_def_content:
+                test_def_content = test_def_content.replace(anchor, anchor + sha3_menu_entry)
+                with open(test_def, 'w') as f:
+                    f.write(test_def_content)
+                print("  [OK] Added SHA3-512 menu entry to test-definition.xml")
+            else:
+                print("  [WARN] Could not find SHA512 anchor in test-definition.xml")
+        else:
+            print("  [INFO] SHA3-512 menu entry already exists in test-definition.xml")
+
+        # 2) results-definition.xml: add sha3-512 parser
+        with open(results_def, 'r') as f:
+            results_def_content = f.read()
+
+        if '<LineHint>sha3-512</LineHint>' not in results_def_content:
+            sha3_parser = """  <ResultsParser>
+    <OutputTemplate>sha3-512        773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>sha3-512</LineHint>
+    <ResultScale>byte/s</ResultScale>
+  </ResultsParser>
+"""
+            anchor = """  <ResultsParser>
+    <OutputTemplate>sha512          773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>sha512</LineHint>
+    <ResultScale>byte/s</ResultScale>
+  </ResultsParser>
+"""
+            if anchor in results_def_content:
+                results_def_content = results_def_content.replace(anchor, anchor + sha3_parser)
+                with open(results_def, 'w') as f:
+                    f.write(results_def_content)
+                print("  [OK] Added sha3-512 parser to results-definition.xml")
+            else:
+                print("  [WARN] Could not find sha512 parser anchor in results-definition.xml")
+        else:
+            print("  [INFO] sha3-512 parser already exists in results-definition.xml")
+
     def install_benchmark(self):
         """
         Install openssl-3.6.0 with GCC-14 native compilation.
@@ -1190,6 +1261,9 @@ class OpensslRunner:
             for f in self.results_dir.glob(f"{prefix}.*"):
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
+
+        # Patch profile XML to add SHA3-512 benchmark support
+        self.patch_profile_for_sha3_512()
 
         # Install benchmark once (not per thread count, since THFix_in_compile=false)
         install_status = get_install_status(self.benchmark_full, self.benchmark)
