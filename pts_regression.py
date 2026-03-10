@@ -204,8 +204,8 @@ def generate_commands(testname: str, test_length: str, scaling: str) -> list[str
             opts = [base_opt]
         elif test_length == "middle":
             opts = [f"{base_opt} --quick" if base_opt else "--quick"]
-        else: # long, very_long の場合はscaling優先 (1コマンドのみ)
-            opts = [base_opt]
+        else: # long, very_long: 1コマンドのみだが --quick は付加する
+            opts = [f"{base_opt} --quick".strip()]
     else: # scaling == "full"
         if test_length == "short":
             opts = [base_opt]
@@ -344,11 +344,18 @@ def main():
     for cat_name, cat_data in suite_data.get("test_category", {}).items():
         if "Full" not in args.testcategory and cat_name not in args.testcategory:
             continue
-            
+
+        if not cat_data.get("enabled", True):
+            continue
+
         items = cat_data.get("items", {})
         for item_key, attrs in items.items():
             if not item_key.startswith("pts/"):
                 continue
+
+            if not attrs.get("enabled", True):
+                continue
+
             testname = item_key[4:] # remove "pts/"
             
             # exe_time 取得
