@@ -2645,6 +2645,7 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
         f"ssh {ssh_opt} {ssh_user}@{ip} "
         f"'tar -czf /tmp/reports.tar.gz -C $(dirname {cloud_rep_dir}) $(basename {cloud_rep_dir})'",
         capture=False,
+        timeout=300,
         logger=logger
     )
 
@@ -2668,6 +2669,7 @@ def collect_results(ip, config, cloud, name, inst, key_path, ssh_strict_host_key
     run_cmd(
         f"ssh {ssh_opt} {ssh_user}@{ip} 'cat /tmp/reports.tar.gz' > {local_f}",
         capture=False,
+        timeout=300,
         logger=logger
     )
 
@@ -3758,12 +3760,25 @@ def process_instance(
                 f"ssh {'-o StrictHostKeyChecking=no' if not ssh_strict else ''} "
                 f"-i {key_path} {ssh_user}@{ip} "
             )
-            # Fallback LVM expansion: pvresize (re-scans PV to pick up new disk
-            # space) then lvextend.  Both are idempotent and safe to run even
-            # when the bootcmd already succeeded.
+            # Fallback LVM expansion: growpart -> pvresize -> lvextend.
+            # Mirrors the cloud-init bootcmd (build_oci_lvm_userdata) but runs
+            # via SSH after boot.  All three steps are needed:
+            #   1. growpart  -- extend partition table entry to fill disk
+            #   2. pvresize  -- inform LVM the PV is now larger
+            #   3. lvextend  -- extend root LV to consume all free VG space
+            # Previously pvresize+lvextend only; growpart was missing, so the
+            # fallback could not expand root when the bootcmd did not run.
             lvm_fallback = (
                 "PV=$(sudo pvs --noheadings -o pv_name 2>/dev/null | tr -d ' ' | head -1); "
-                "[ -n \"$PV\" ] && sudo pvresize \"$PV\" 2>/dev/null || true; "
+                "[ -z \"$PV\" ] && exit 0; "
+                "if echo \"$PV\" | grep -q nvme; then "
+                "  DISK=$(echo \"$PV\" | sed 's/p[0-9]*$//'); "
+                "else "
+                "  DISK=$(echo \"$PV\" | sed 's/[0-9]*$//'); "
+                "fi; "
+                "PARTNUM=$(echo \"$PV\" | grep -oE '[0-9]+$'); "
+                "sudo growpart \"$DISK\" \"$PARTNUM\" 2>/dev/null || true; "
+                "sudo pvresize \"$PV\" 2>/dev/null || true; "
                 "sudo lvextend -r -l +100%FREE /dev/mapper/ocivolume-root 2>/dev/null || true"
             )
             lvm_cmd = ssh_prefix + f"'{lvm_fallback}'"
@@ -3794,12 +3809,17 @@ def process_instance(
             logger.error(f"Workload execution failed: {workload_error}")
             commands_success = False
 
-        # Collect results
-        try:
-            collect_results(ip, config, provider.csp_config.get('name', 'unknown'), sanitized_name, inst, key_path, ssh_strict, instance_name, logger)
-            results_collected = True
-        except Exception as collect_error:
-            logger.error(f"Result collection failed: {collect_error}")
+        # Collect results (skip if instance was terminated externally)
+        with DASHBOARD.lock:
+            _current_status = DASHBOARD.instances.get(instance_name, {}).get('status')
+        if _current_status == 'TERMINATED':
+            logger.warn("Skipping result collection: instance was terminated externally")
+        else:
+            try:
+                collect_results(ip, config, provider.csp_config.get('name', 'unknown'), sanitized_name, inst, key_path, ssh_strict, instance_name, logger)
+                results_collected = True
+            except Exception as collect_error:
+                logger.error(f"Result collection failed: {collect_error}")
 
         # Update status
         terminal_statuses = {"TERMINATED", "ERROR", "TERM_TIMEOUT", "TERM_FAILED"}
