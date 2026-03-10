@@ -596,6 +596,11 @@ def merge_machine(
     if not results_path.is_dir():
         raise FileNotFoundError(f"Missing results directory: {results_path}")
     output_json = results_path / f"all_results_{csp_dir.name}.json"
+    # If a valid all_results_*.json already exists (e.g. raw result dirs were removed after
+    # a previous run), skip regeneration and reuse it as-is.
+    if output_json.exists() and is_valid_one_big_json(output_json, csp_dir.name, target_major):
+        print(f"Skipping regeneration, existing file is valid -> {output_json}")
+        return
     generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
     input_jsons = sorted(results_path.glob("one_big_json_*.json"))
     for json_file in input_jsons:
@@ -604,7 +609,11 @@ def merge_machine(
             json_file.unlink(missing_ok=True)
     input_jsons = sorted(results_path.glob("one_big_json_*.json"))
     if not input_jsons:
-        raise RuntimeError(f"No valid one_big_json files found in {results_path}")
+        raise RuntimeError(
+            f"No valid one_big_json files found in {results_path}. "
+            f"If raw result directories were removed, ensure a valid "
+            f"all_results_{csp_dir.name}.json exists to skip regeneration."
+        )
     if len(input_jsons) == 1:
         shutil.copy2(input_jsons[0], output_json)
         print(f"Copied single CSP result -> {output_json}")

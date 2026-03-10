@@ -694,7 +694,10 @@ def performance_comparison(
         leaderboard = []
         for i, ent in enumerate(sorted_entries):
             score = ent["score_internal"]
-            rel_perf = round(best_score / score, 2) if not hib else round(score / best_score, 2)
+            if hib:
+                rel_perf = round(score / best_score, 2) if best_score != 0 else None
+            else:
+                rel_perf = round(best_score / score, 2) if score != 0 else None
             
             leaderboard.append({
                 "rank": i + 1,
