@@ -590,6 +590,108 @@ class OpensslRunner:
         else:
             print("  [INFO] sha3-512 parser already exists in results-definition.xml")
 
+    def patch_profile_for_aes_cbc(self):
+        """
+        Patch OpenSSL PTS profile to add AES-128-CBC and AES-256-CBC benchmark support.
+
+        Minimal changes:
+        1. Add AES-128-CBC and AES-256-CBC options to test-definition.xml
+        2. Add aes-128-cbc and aes-256-cbc parsers to results-definition.xml
+        """
+        print("\n>>> Patching OpenSSL profile for AES-128-CBC / AES-256-CBC...")
+
+        pts_home = Path.home() / '.phoronix-test-suite'
+        profile_dir = pts_home / 'test-profiles' / 'pts' / self.benchmark
+        test_def = profile_dir / 'test-definition.xml'
+        results_def = profile_dir / 'results-definition.xml'
+
+        if not test_def.exists() or not results_def.exists():
+            print(f"  [WARN] Profile XML not found under: {profile_dir}")
+            return
+
+        # 1) test-definition.xml: add AES-128-CBC and AES-256-CBC menu entries
+        with open(test_def, 'r') as f:
+            test_def_content = f.read()
+
+        # Insert AES-128-CBC and AES-256-CBC after SHA3-512 entry (added by patch_profile_for_sha3_512)
+        aes_menu_entries = """        <Entry>
+          <Name>AES-128-CBC</Name>
+          <Value>-evp aes-128-cbc</Value>
+        </Entry>
+        <Entry>
+          <Name>AES-256-CBC</Name>
+          <Value>-evp aes-256-cbc</Value>
+        </Entry>
+"""
+        sha3_anchor = """        <Entry>
+          <Name>SHA3-512</Name>
+          <Value>-evp sha3-512</Value>
+        </Entry>
+"""
+        sha512_anchor = """        <Entry>
+          <Name>SHA512</Name>
+          <Value>sha512</Value>
+        </Entry>
+"""
+        if '<Name>AES-128-CBC</Name>' not in test_def_content:
+            if sha3_anchor in test_def_content:
+                test_def_content = test_def_content.replace(sha3_anchor, sha3_anchor + aes_menu_entries)
+                with open(test_def, 'w') as f:
+                    f.write(test_def_content)
+                print("  [OK] Added AES-128-CBC / AES-256-CBC menu entries to test-definition.xml (after SHA3-512)")
+            elif sha512_anchor in test_def_content:
+                test_def_content = test_def_content.replace(sha512_anchor, sha512_anchor + aes_menu_entries)
+                with open(test_def, 'w') as f:
+                    f.write(test_def_content)
+                print("  [OK] Added AES-128-CBC / AES-256-CBC menu entries to test-definition.xml (after SHA512)")
+            else:
+                print("  [WARN] Could not find anchor entry in test-definition.xml")
+        else:
+            print("  [INFO] AES-128-CBC menu entry already exists in test-definition.xml")
+
+        # 2) results-definition.xml: add aes-128-cbc and aes-256-cbc parsers
+        with open(results_def, 'r') as f:
+            results_def_content = f.read()
+
+        aes_parsers = """  <ResultsParser>
+    <OutputTemplate>aes-128-cbc      773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>aes-128-cbc</LineHint>
+    <ResultScale>byte/s</ResultScale>
+  </ResultsParser>
+  <ResultsParser>
+    <OutputTemplate>aes-256-cbc      773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>aes-256-cbc</LineHint>
+    <ResultScale>byte/s</ResultScale>
+  </ResultsParser>
+"""
+        sha3_parser_anchor = """  <ResultsParser>
+    <OutputTemplate>sha3-512        773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>sha3-512</LineHint>
+    <ResultScale>byte/s</ResultScale>
+  </ResultsParser>
+"""
+        sha512_parser_anchor = """  <ResultsParser>
+    <OutputTemplate>sha512          773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>sha512</LineHint>
+    <ResultScale>byte/s</ResultScale>
+  </ResultsParser>
+"""
+        if '<LineHint>aes-128-cbc</LineHint>' not in results_def_content:
+            if sha3_parser_anchor in results_def_content:
+                results_def_content = results_def_content.replace(sha3_parser_anchor, sha3_parser_anchor + aes_parsers)
+                with open(results_def, 'w') as f:
+                    f.write(results_def_content)
+                print("  [OK] Added aes-128-cbc / aes-256-cbc parsers to results-definition.xml (after sha3-512)")
+            elif sha512_parser_anchor in results_def_content:
+                results_def_content = results_def_content.replace(sha512_parser_anchor, sha512_parser_anchor + aes_parsers)
+                with open(results_def, 'w') as f:
+                    f.write(results_def_content)
+                print("  [OK] Added aes-128-cbc / aes-256-cbc parsers to results-definition.xml (after sha512)")
+            else:
+                print("  [WARN] Could not find anchor parser in results-definition.xml")
+        else:
+            print("  [INFO] aes-128-cbc parser already exists in results-definition.xml")
+
     def install_benchmark(self):
         """
         Install openssl-3.6.0 with GCC-14 native compilation.
@@ -1264,6 +1366,9 @@ class OpensslRunner:
 
         # Patch profile XML to add SHA3-512 benchmark support
         self.patch_profile_for_sha3_512()
+
+        # Patch profile XML to add AES-128-CBC and AES-256-CBC benchmark support
+        self.patch_profile_for_aes_cbc()
 
         # Install benchmark once (not per thread count, since THFix_in_compile=false)
         install_status = get_install_status(self.benchmark_full, self.benchmark)
