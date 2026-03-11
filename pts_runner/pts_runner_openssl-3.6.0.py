@@ -654,13 +654,13 @@ class OpensslRunner:
             results_def_content = f.read()
 
         aes_parsers = """  <ResultsParser>
-    <OutputTemplate>aes-128-cbc      773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
-    <LineHint>aes-128-cbc</LineHint>
+    <OutputTemplate>AES-128-CBC      773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>AES-128-CBC</LineHint>
     <ResultScale>byte/s</ResultScale>
   </ResultsParser>
   <ResultsParser>
-    <OutputTemplate>aes-256-cbc      773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
-    <LineHint>aes-256-cbc</LineHint>
+    <OutputTemplate>AES-256-CBC      773058.94k  2674506.65k  #_RESULT_# 15092842.84k 20350306.99k 20835702.10k</OutputTemplate>
+    <LineHint>AES-256-CBC</LineHint>
     <ResultScale>byte/s</ResultScale>
   </ResultsParser>
 """
@@ -676,7 +676,7 @@ class OpensslRunner:
     <ResultScale>byte/s</ResultScale>
   </ResultsParser>
 """
-        if '<LineHint>aes-128-cbc</LineHint>' not in results_def_content:
+        if '<LineHint>AES-128-CBC</LineHint>' not in results_def_content:
             if sha3_parser_anchor in results_def_content:
                 results_def_content = results_def_content.replace(sha3_parser_anchor, sha3_parser_anchor + aes_parsers)
                 with open(results_def, 'w') as f:
