@@ -151,42 +151,40 @@ class PreSeedDownloader:
 
         return -1
 
-    def ensure_file(self, urls, filename):
-        """
-        Directly download file using aria2c (assumes size check passed).
-        Args:
-            urls: List of URLs or single URL string
-            filename: Target filename
-        """
+    def ensure_file(self, urls, filename, size_bytes=-1):
         target_path = self.cache_dir / filename
-
-        # Check if file exists in cache
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
-
+            if size_bytes > 0 and target_path.stat().st_size != size_bytes:
+                print(f"  [CACHE] Size mismatch for {filename}, re-downloading...")
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
         if isinstance(urls, str):
             urls = [urls]
-
-        # Need to download
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        print(f"  [ARIA2] Downloading {filename}...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # aria2c command - pass all URLs as separate arguments
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+        num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
         cmd = [
-            "aria2c", "-x", "16", "-s", "16",
-            "-d", str(self.cache_dir),
-            "-o", filename
+            "aria2c", f"-x{num_conn}", f"-s{num_conn}",
+            "--connect-timeout=30", "--timeout=120",
+            "--max-tries=2", "--retry-wait=5", "--continue=true",
+            "-d", str(self.cache_dir), "-o", filename
         ] + urls
-
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, timeout=5400)
+            print(f"  [aria2c] Download completed: {filename}")
+            return True
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] aria2c timed out downloading {filename}")
+            if target_path.exists():
+                target_path.unlink()
+            return False
         except subprocess.CalledProcessError as e:
             print(f"  [ERROR] aria2c download failed for {filename}: {e}")
+            if target_path.exists():
+                target_path.unlink()
             return False
-        return True
-
-
 class CompressLZ4BenchmarkRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         # Benchmark configuration
@@ -491,23 +489,26 @@ class CompressLZ4BenchmarkRunner:
         per_cpu_metrics = {cpu_id: {} for cpu_id in cpu_ids}
 
         # Parse perf stat output with flexible regex
-        with open(perf_stats_file, 'r') as f:
-            for line in f:
-                # Match: "CPU0  123,456  cycles" or "CPU0  <not supported>  cycles"
-                match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+)\s+([a-zA-Z0-9\-_]+)', line)
-                if match:
-                    cpu_num = int(match.group(1))
-                    value_str = match.group(2).strip()
-                    event = match.group(3)
-
-                    if cpu_num in per_cpu_metrics and '<not supported>' not in value_str:
-                        try:
-                            # Remove units like "msec" if present
-                            value_clean = value_str.split()[0]
-                            value = float(value_clean.replace(',', ''))
-                            per_cpu_metrics[cpu_num][event] = value
-                        except ValueError:
-                            continue
+        try:
+            with open(perf_stats_file, 'r') as f:
+                for line in f:
+                    # Match: "CPU0  123,456  cycles" or "CPU0  <not supported>  cycles"
+                    match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+)\s+([a-zA-Z0-9\-_]+)', line)
+                    if match:
+                        cpu_num = int(match.group(1))
+                        value_str = match.group(2).strip()
+                        event = match.group(3)
+    
+                        if cpu_num in per_cpu_metrics and '<not supported>' not in value_str:
+                            try:
+                                # Remove units like "msec" if present
+                                value_clean = value_str.split()[0]
+                                value = float(value_clean.replace(',', ''))
+                                per_cpu_metrics[cpu_num][event] = value
+                            except ValueError:
+                                continue
+        except FileNotFoundError:
+            print(f"  [INFO] Perf stats not found: {perf_stats_file} (likely disabled or missing)")
 
         return {'per_cpu_metrics': per_cpu_metrics, 'cpu_list': cpu_list}
 

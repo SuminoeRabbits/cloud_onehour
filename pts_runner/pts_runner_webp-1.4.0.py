@@ -120,7 +120,7 @@ class PreSeedDownloader:
                     if size_mb < threshold_mb:
                         continue
                     print(f"  [INFO] {filename} is large ({size_mb:.1f} MB), accelerating with aria2c...")
-                    self.ensure_file(url, filename)
+                    self.ensure_file(url, filename, size_bytes=size_bytes)
 
         except Exception as e:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
@@ -148,27 +148,56 @@ class PreSeedDownloader:
 
         return -1
 
-    def ensure_file(self, url, filename):
+    def ensure_file(self, url, filename, size_bytes=-1):
+        """
+        Directly download file using aria2c (assumes size check passed).
+        size_bytes: expected file size in bytes (-1 = unknown); used to detect
+                    partial/corrupt cache entries.
+        """
         target_path = self.cache_dir / filename
 
+        # Cache hit: verify size when known to catch partial downloads
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
+            if size_bytes > 0 and target_path.stat().st_size != size_bytes:
+                print(f"  [CACHE] Size mismatch for {filename} "
+                      f"(expected {size_bytes}, got {target_path.stat().st_size}), re-downloading...")
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
 
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        # Use fewer connections for very large files (>=10 GB) to avoid
+        # presigned-URL / thundering-herd stalls (e.g. HuggingFace XetHub CAS).
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+        num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
+        print(f"  [ARIA2] Downloading {filename} with {num_conn} connections...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
+        # --connect-timeout : abort if connection not established within 30s
+        # --timeout         : abort if no data received for 120s (stall guard)
+        # --max-tries       : retry twice on transient errors
+        # --continue=true   : resume partial downloads on retry
+        # subprocess timeout: hard ceiling of 90 min per file (prevents infinite hang)
         cmd = [
-            "aria2c", "-x", "16", "-s", "16",
+            "aria2c", f"-x{num_conn}", f"-s{num_conn}",
+            "--connect-timeout=30",
+            "--timeout=120",
+            "--max-tries=2",
+            "--retry-wait=5",
+            "--continue=true",
             "-d", str(self.cache_dir),
             "-o", filename,
             url
         ]
 
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, timeout=5400)  # 90 min hard ceiling
             print(f"  [aria2c] Download completed: {filename}")
             return True
+        except subprocess.TimeoutExpired:
+            print(f"  [WARN] aria2c timed out after 90 min for {filename}, falling back to PTS default")
+            if target_path.exists():
+                target_path.unlink()
+            return False
         except subprocess.CalledProcessError:
             print("  [WARN] aria2c download failed, falling back to PTS default")
             if target_path.exists():

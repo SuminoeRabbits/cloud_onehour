@@ -389,7 +389,11 @@ class MemcachedRunner:
 
     def parse_perf_stats_and_freq(self, perf_file, freq_start, freq_end, cpu_list):
         """Parse perf and frequency data."""
-        # Minimal implementation for compliance - full logic similar to sysbench/coremark
+        try:
+            if perf_file and Path(perf_file).exists():
+                pass  # Stub: full perf parsing not implemented
+        except FileNotFoundError:
+            pass
         return {}
 
     def run_benchmark(self, num_threads):

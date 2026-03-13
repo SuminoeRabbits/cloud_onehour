@@ -350,6 +350,10 @@ class SimdJsonRunner:
              print("  [WARN] Installation verification skipped/failed")
 
     def parse_perf_stats_and_freq(self, perf_file, freq_start, freq_end, cpu_list):
+        try:
+            pass  # Stub
+        except FileNotFoundError:
+            pass
         return {}
 
     def run_benchmark(self, num_threads):

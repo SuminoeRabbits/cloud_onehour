@@ -664,23 +664,26 @@ class RustlsRunner:
         per_cpu_metrics = {cpu_id: {} for cpu_id in cpu_ids}
 
         # Parse perf stat output with flexible regex
-        with open(perf_stats_file, 'r') as f:
-            for line in f:
-                # Match: "CPU0  123,456  cycles" or "CPU0  <not supported>  cycles"
-                match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+)\s+([a-zA-Z0-9\-_]+)', line)
-                if match:
-                    cpu_num = int(match.group(1))
-                    value_str = match.group(2).strip()
-                    event = match.group(3)
-
-                    if cpu_num in per_cpu_metrics and '<not supported>' not in value_str:
-                        try:
-                            # Remove units like "msec" if present (e.g. "123.45 msec" -> "123.45")
-                            value_clean = value_str.split()[0]
-                            value = float(value_clean.replace(',', ''))
-                            per_cpu_metrics[cpu_num][event] = value
-                        except ValueError:
-                            continue
+        try:
+            with open(perf_stats_file, 'r') as f:
+                for line in f:
+                    # Match: "CPU0  123,456  cycles" or "CPU0  <not supported>  cycles"
+                    match = re.match(r'CPU(\d+)\s+([\d,.<>a-zA-Z\s]+)\s+([a-zA-Z0-9\-_]+)', line)
+                    if match:
+                        cpu_num = int(match.group(1))
+                        value_str = match.group(2).strip()
+                        event = match.group(3)
+    
+                        if cpu_num in per_cpu_metrics and '<not supported>' not in value_str:
+                            try:
+                                # Remove units like "msec" if present (e.g. "123.45 msec" -> "123.45")
+                                value_clean = value_str.split()[0]
+                                value = float(value_clean.replace(',', ''))
+                                per_cpu_metrics[cpu_num][event] = value
+                            except ValueError:
+                                continue
+        except FileNotFoundError:
+            print(f"  [INFO] Perf stats not found: {perf_stats_file} (likely disabled or missing)")
 
         # Calculate metrics (IPC, frequency, utilization)
         # For simplicity, return the parsed data

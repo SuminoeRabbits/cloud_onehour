@@ -73,42 +73,40 @@ class PreSeedDownloader:
             
         return -1
 
-    def ensure_file(self, urls, filename):
-        """
-        Directly download file using aria2c (assumes size check passed).
-        Args:
-            urls: List of URLs or single URL string
-            filename: Target filename
-        """
+    def ensure_file(self, urls, filename, size_bytes=-1):
         target_path = self.cache_dir / filename
-        
-        # Check if file exists in cache
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
-
+            if size_bytes > 0 and target_path.stat().st_size != size_bytes:
+                print(f"  [CACHE] Size mismatch for {filename}, re-downloading...")
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
         if isinstance(urls, str):
             urls = [urls]
-
-        # Need to download
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        print(f"  [ARIA2] Downloading {filename}...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        # aria2c command - pass all URLs as separate arguments
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+        num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
         cmd = [
-            "aria2c", "-x", "16", "-s", "16", 
-            "-d", str(self.cache_dir), 
-            "-o", filename
+            "aria2c", f"-x{num_conn}", f"-s{num_conn}",
+            "--connect-timeout=30", "--timeout=120",
+            "--max-tries=2", "--retry-wait=5", "--continue=true",
+            "-d", str(self.cache_dir), "-o", filename
         ] + urls
-        
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, timeout=5400)
             print(f"  [aria2c] Download completed: {filename}")
+            return True
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] aria2c timed out downloading {filename}")
+            if target_path.exists():
+                target_path.unlink()
+            return False
         except subprocess.CalledProcessError as e:
             print(f"  [ERROR] aria2c download failed for {filename}: {e}")
+            if target_path.exists():
+                target_path.unlink()
             return False
-        return True
-
     def download_from_xml(self, benchmark_name, threshold_mb=96):
         """
         Parse downloads.xml for the benchmark and download large files.
@@ -964,31 +962,34 @@ fi
                         pass
 
         # Parse perf stat output
-        with open(perf_stats_file, 'r') as f:
-            for line in f:
-                # Match: "CPU0  123,456  cycles"
-                match = re.match(r'CPU(\d+)\s+([\d,.]+)\s+([a-zA-Z0-9\-_]+)', line.strip())
-                if match:
-                    cpu_num = int(match.group(1))
-                    if cpu_num in cpu_ids:
-                        value_str = match.group(2).strip()
-                        event = match.group(3)
-                        try:
-                            value = float(value_str.replace(',', ''))
-                            perf_summary["per_cpu_metrics"][cpu_num][event] = value
-                            
-                            # Update legacy aggregations
-                            if event == 'cycles':
-                                perf_summary["total_cycles"][str(cpu_num)] = int(value)
-                            elif event == 'instructions':
-                                perf_summary["total_instructions"][str(cpu_num)] = int(value)
-                        except ValueError:
-                            pass
-                
-                # Match elapsed time
-                elapsed_match = re.search(r'([\d,]+(?:\.\d+)?)\s+seconds time elapsed', line)
-                if elapsed_match:
-                     perf_summary["elapsed_time_sec"] = float(elapsed_match.group(1).replace(',', ''))
+        try:
+            with open(perf_stats_file, 'r') as f:
+                for line in f:
+                    # Match: "CPU0  123,456  cycles"
+                    match = re.match(r'CPU(\d+)\s+([\d,.]+)\s+([a-zA-Z0-9\-_]+)', line.strip())
+                    if match:
+                        cpu_num = int(match.group(1))
+                        if cpu_num in cpu_ids:
+                            value_str = match.group(2).strip()
+                            event = match.group(3)
+                            try:
+                                value = float(value_str.replace(',', ''))
+                                perf_summary["per_cpu_metrics"][cpu_num][event] = value
+                                
+                                # Update legacy aggregations
+                                if event == 'cycles':
+                                    perf_summary["total_cycles"][str(cpu_num)] = int(value)
+                                elif event == 'instructions':
+                                    perf_summary["total_instructions"][str(cpu_num)] = int(value)
+                            except ValueError:
+                                pass
+                    
+                    # Match elapsed time
+                    elapsed_match = re.search(r'([\d,]+(?:\.\d+)?)\s+seconds time elapsed', line)
+                    if elapsed_match:
+                         perf_summary["elapsed_time_sec"] = float(elapsed_match.group(1).replace(',', ''))
+        except FileNotFoundError:
+            print(f"  [INFO] Perf stats not found: {perf_stats_file} (likely disabled or missing)")
 
         # Calculate IPC
         for cpu_id in cpu_ids:

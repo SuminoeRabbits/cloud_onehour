@@ -150,40 +150,39 @@ class PreSeedDownloader:
             
         return -1
 
-    def ensure_file(self, url, filename):
-        """
-        Directly download file using aria2c (assumes size check passed).
-        """
+    def ensure_file(self, url, filename, size_bytes=-1):
         target_path = self.cache_dir / filename
-        
-        # Check if file exists in cache
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
+            if size_bytes > 0 and target_path.stat().st_size != size_bytes:
+                print(f"  [CACHE] Size mismatch for {filename}, re-downloading...")
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
 
-        # Need to download
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        print(f"  [ARIA2] Downloading {filename}...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        # aria2c command
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+        num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
         cmd = [
-            "aria2c", "-x", "16", "-s", "16", 
-            "-d", str(self.cache_dir), 
-            "-o", filename,
-            url
+            "aria2c", f"-x{num_conn}", f"-s{num_conn}",
+            "--connect-timeout=30", "--timeout=120",
+            "--max-tries=2", "--retry-wait=5", "--continue=true",
+            "-d", str(self.cache_dir), "-o", filename, url
         ]
-        
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, timeout=5400)
             print(f"  [aria2c] Download completed: {filename}")
             return True
-        except subprocess.CalledProcessError:
-            print("  [WARN] aria2c download failed, falling back to PTS default")
-            # Clean up partial download
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] aria2c timed out downloading {filename}")
             if target_path.exists():
                 target_path.unlink()
             return False
-
+        except subprocess.CalledProcessError:
+            print("  [WARN] aria2c download failed, falling back to PTS default")
+            if target_path.exists():
+                target_path.unlink()
+            return False
 class PmbenchRunner:
     def __init__(self, threads_arg=None, quick_mode=False, dry_run=False, force_arm64=False):
         """
@@ -1198,8 +1197,11 @@ eval "$REAL_CC" $ARGS
 
         # Parse perf stats
         if perf_stats_file.exists():
-            with open(perf_stats_file, 'r') as f:
-                perf_data = f.read()
+            try:
+                with open(perf_stats_file, 'r') as f:
+                    perf_data = f.read()
+            except FileNotFoundError:
+                perf_data = ""
 
             per_cpu_cycles = {}
             per_cpu_instructions = {}

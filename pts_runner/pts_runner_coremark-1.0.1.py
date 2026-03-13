@@ -54,39 +54,52 @@ class PreSeedDownloader:
             pass
         return 0
 
-    def ensure_file(self, filename, url, min_size_mb=0):
+    def ensure_file(self, filename, url, min_size_mb=0, size_bytes=-1):
         """
         Ensure file exists in PTS download cache.
-        If missing or matching expected size, download with aria2c.
+        If missing or size mismatch, download with aria2c.
         """
         self.download_cache.mkdir(parents=True, exist_ok=True)
         file_path = self.download_cache / filename
 
         should_download = True
         if file_path.exists():
-            # If size is specified/known, verify it
-            if min_size_mb > 0:
+            if size_bytes > 0:
+                if file_path.stat().st_size == size_bytes:
+                    print(f"  [CACHE] File {filename} exists and size matches ({size_bytes} bytes)")
+                    should_download = False
+                else:
+                    print(f"  [CACHE] File {filename} size mismatch, re-downloading...")
+            elif min_size_mb > 0:
                 size_mb = file_path.stat().st_size / (1024 * 1024)
-                if size_mb >= min_size_mb * 0.9: # 10% tolerance
+                if size_mb >= min_size_mb * 0.9:
                     print(f"  [CACHE] File {filename} exists and size is valid ({size_mb:.1f} MB)")
                     should_download = False
                 else:
                     print(f"  [CACHE] File {filename} exists but size mismatch ({size_mb:.1f} MB < {min_size_mb} MB)")
             else:
-                 print(f"  [CACHE] File {filename} exists (skipping verification)")
-                 should_download = False
+                print(f"  [CACHE] File {filename} exists (skipping verification)")
+                should_download = False
 
         if should_download:
             print(f"  [DOWNLOAD] Downloading {filename} with aria2c...")
-            # Use aria2c for faster multi-connection download
-            cmd = ['aria2c', '-x', '16', '-s', '16', '-k', '1M', '-d', str(self.download_cache), '-o', filename, url]
+            _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+            num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
+            cmd = [
+                "aria2c", f"-x{num_conn}", f"-s{num_conn}", "-k", "1M",
+                "--connect-timeout=30", "--timeout=120",
+                "--max-tries=2", "--retry-wait=5", "--continue=true",
+                "-d", str(self.download_cache), "-o", filename, url
+            ]
             try:
-                subprocess.run(cmd, check=True)
+                subprocess.run(cmd, check=True, timeout=5400)
                 print(f"  [OK] Download completed: {filename}")
+            except subprocess.TimeoutExpired:
+                print(f"  [ERROR] aria2c timed out downloading {filename}")
+                if file_path.exists():
+                    file_path.unlink()
             except subprocess.CalledProcessError:
                 print(f"  [ERROR] Download failed for {filename}")
-                # Don't exit, let PTS try its own download method as fallback
-
     def download_from_xml(self, benchmark_name, threshold_mb=96):
         """
         Parse downloads.xml for the benchmark and download files larger than threshold.

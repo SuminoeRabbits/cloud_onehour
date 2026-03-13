@@ -145,37 +145,39 @@ class PreSeedDownloader:
 
         return -1
 
-    def ensure_file(self, url, filename):
-        """
-        Directly download file using aria2c.
-        """
+    def ensure_file(self, url, filename, size_bytes=-1):
         target_path = self.cache_dir / filename
-
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
+            if size_bytes > 0 and target_path.stat().st_size != size_bytes:
+                print(f"  [CACHE] Size mismatch for {filename}, re-downloading...")
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
 
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        print(f"  [ARIA2] Downloading {filename}...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+        num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
         cmd = [
-            "aria2c", "-x", "16", "-s", "16",
-            "-d", str(self.cache_dir),
-            "-o", filename,
-            url
+            "aria2c", f"-x{num_conn}", f"-s{num_conn}",
+            "--connect-timeout=30", "--timeout=120",
+            "--max-tries=2", "--retry-wait=5", "--continue=true",
+            "-d", str(self.cache_dir), "-o", filename, url
         ]
-
         try:
-            subprocess.run(cmd, check=True)
-            print(f"  [OK] Download completed: {filename}")
+            subprocess.run(cmd, check=True, timeout=5400)
+            print(f"  [aria2c] Download completed: {filename}")
             return True
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] aria2c timed out downloading {filename}")
+            if target_path.exists():
+                target_path.unlink()
+            return False
         except subprocess.CalledProcessError:
             print("  [WARN] aria2c download failed, falling back to PTS default")
             if target_path.exists():
                 target_path.unlink()
             return False
-
-
 class CompressZstdRunner:
     def __init__(self, threads_arg=None, quick_mode=False):
         """

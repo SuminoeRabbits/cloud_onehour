@@ -150,28 +150,40 @@ class PreSeedDownloader:
             pass
         return -1
 
-    def _ensure_file(self, urls, filename):
+    def _ensure_file(self, urls, filename, size_bytes=-1):
         target_path = self.cache_dir / filename
         if target_path.exists():
-            print(f"  [CACHE] File found: {filename}")
-            return True
+            if size_bytes > 0 and target_path.stat().st_size != size_bytes:
+                print(f"  [CACHE] Size mismatch for {filename}, re-downloading...")
+            else:
+                print(f"  [CACHE] File found: {filename}")
+                return True
         if isinstance(urls, str):
             urls = [urls]
-        print(f"  [ARIA2] Downloading {filename} with 16 connections...")
+        print(f"  [ARIA2] Downloading {filename}...")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        cmd = ["aria2c", "-x", "16", "-s", "16", "-d", str(self.cache_dir), "-o", filename] + urls
+        _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024
+        num_conn = "4" if size_bytes >= _LARGE_FILE_THRESHOLD_BYTES else "16"
+        cmd = [
+            "aria2c", f"-x{num_conn}", f"-s{num_conn}",
+            "--connect-timeout=30", "--timeout=120",
+            "--max-tries=2", "--retry-wait=5", "--continue=true",
+            "-d", str(self.cache_dir), "-o", filename
+        ] + urls
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, timeout=5400)
+            print(f"  [aria2c] Download completed: {filename}")
+            return True
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] aria2c timed out downloading {filename}")
+            if target_path.exists():
+                target_path.unlink()
+            return False
         except subprocess.CalledProcessError as e:
             print(f"  [ERROR] aria2c download failed for {filename}: {e}")
+            if target_path.exists():
+                target_path.unlink()
             return False
-        return True
-
-
-# ---------------------------------------------------------------------------
-# SrsranRunner
-# ---------------------------------------------------------------------------
-
 class SrsranRunner:
     """PTS runner for pts/srsran-2.5.0 (5G PHY processor benchmark)."""
 
@@ -277,7 +289,7 @@ class SrsranRunner:
                 failed.append(num_threads)
 
         print('\n' + '=' * 80)
-        print(f">>> Exporting results")
+        print(">>> Exporting results")
         print('=' * 80)
         self.export_results()
 
@@ -289,7 +301,7 @@ class SrsranRunner:
             print(f"\n[WARN] Failed thread counts: {failed}")
         else:
             print('\n' + '=' * 80)
-            print(f"[SUCCESS] All benchmarks completed successfully")
+            print("[SUCCESS] All benchmarks completed successfully")
             print('=' * 80)
 
         # CRITICAL: Must return True for cloud_exec.py integration
@@ -390,7 +402,7 @@ class SrsranRunner:
         nproc = os.cpu_count() or 1
         install_cmd = (
             f'MAKEFLAGS="-j{nproc}" '
-            f'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 '
+            'BATCH_MODE=1 SKIP_ALL_PROMPTS=1 '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
         )
 
@@ -462,7 +474,7 @@ class SrsranRunner:
         if self.benchmark_full not in verify_result.stdout:
             print(f"  [WARN] {self.benchmark_full} may not be fully recognized by PTS")
 
-        print(f"  [OK] Installation completed and verified")
+        print("  [OK] Installation completed and verified")
 
     # ------------------------------------------------------------------
     # test-definition.xml patching
@@ -537,7 +549,7 @@ class SrsranRunner:
             # Restore from backup on error
             if bak_path.exists():
                 shutil.copy2(bak_path, xml_path)
-                print(f"  [INFO] Restored test-definition.xml from backup")
+                print("  [INFO] Restored test-definition.xml from backup")
             return False
 
     def restore_test_definition(self):
@@ -546,9 +558,9 @@ class SrsranRunner:
         bak_path = xml_path.with_suffix(".xml.bak")
         if bak_path.exists():
             shutil.copy2(bak_path, xml_path)
-            print(f"  [INFO] Restored test-definition.xml from backup")
+            print("  [INFO] Restored test-definition.xml from backup")
         else:
-            print(f"  [WARN] Backup not found; test-definition.xml may remain patched")
+            print("  [WARN] Backup not found; test-definition.xml may remain patched")
 
     # ------------------------------------------------------------------
     # Benchmark execution
@@ -591,7 +603,7 @@ class SrsranRunner:
             quick_env = "FORCE_TIMES_TO_RUN=1 " if self.quick_mode else ""
             batch_env = (
                 f"{quick_env}"
-                f"BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 "
+                "BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 "
                 f"TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads "
                 f"TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads "
                 f"TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads"
@@ -600,14 +612,14 @@ class SrsranRunner:
             if self.perf_events:
                 if self.perf_paranoid <= 0:
                     perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
-                    print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
+                    print("  [INFO] Running with perf monitoring (per-CPU mode)")
                 else:
                     perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
-                    print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+                    print("  [INFO] Running with perf monitoring (aggregated mode)")
                 pts_cmd = f"NUM_CPU_CORES={num_threads} {batch_env} {perf_cmd} {pts_base_cmd}"
             else:
                 pts_cmd = f"NUM_CPU_CORES={num_threads} {batch_env} {pts_base_cmd}"
-                print(f"  [INFO] Running without perf")
+                print("  [INFO] Running without perf")
 
             # Record CPU frequency before
             print("[INFO] Recording CPU frequency before benchmark...")
@@ -725,7 +737,7 @@ class SrsranRunner:
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print('\n' + '=' * 80)
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print('=' * 80)
 
         summary_log = self.results_dir / "summary.log"
@@ -992,7 +1004,7 @@ class SrsranRunner:
             )
             output = result.stdout + result.stderr
             if result.returncode == 0 and "<not supported>" not in output:
-                print(f"  [OK] Hardware PMU available")
+                print("  [OK] Hardware PMU available")
                 return hw_events
 
             sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
@@ -1001,7 +1013,7 @@ class SrsranRunner:
                 capture_output=True, text=True, timeout=3,
             )
             if result_sw.returncode == 0:
-                print(f"  [INFO] Using software-only perf events")
+                print("  [INFO] Using software-only perf events")
                 return sw_events
         except subprocess.TimeoutExpired:
             print("  [WARN] perf test timed out")
