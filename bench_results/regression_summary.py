@@ -597,10 +597,15 @@ def merge_machine(
         raise FileNotFoundError(f"Missing results directory: {results_path}")
     output_json = results_path / f"all_results_{csp_dir.name}.json"
     # If a valid all_results_*.json already exists (e.g. raw result dirs were removed after
-    # a previous run), skip regeneration and reuse it as-is.
+    # a previous run), skip regeneration only when no one_big_json_*.json is newer.
     if output_json.exists() and is_valid_one_big_json(output_json, csp_dir.name, target_major):
-        print(f"Skipping regeneration, existing file is valid -> {output_json}")
-        return
+        existing_inputs = sorted(results_path.glob("one_big_json_*.json"))
+        out_mtime = output_json.stat().st_mtime
+        newer = [j for j in existing_inputs if j.stat().st_mtime > out_mtime]
+        if not newer:
+            print(f"Skipping regeneration, existing file is valid and up-to-date -> {output_json}")
+            return
+        print(f"Regenerating due to updated source(s): {[j.name for j in newer]}")
     generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
     input_jsons = sorted(results_path.glob("one_big_json_*.json"))
     for json_file in input_jsons:
