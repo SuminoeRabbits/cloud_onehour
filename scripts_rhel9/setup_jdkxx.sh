@@ -73,9 +73,25 @@ echo "--- Maven Setup ---"
 # Maven is platform-independent tarball install, can mostly reuse
 TARGET_MVN_VERSION="3.9.13"
 if ! mvn -version 2>&1 | grep -q "$TARGET_MVN_VERSION"; then
-    MAVEN_URL="https://dlcdn.apache.org/maven/maven-3/${TARGET_MVN_VERSION}/binaries/apache-maven-${TARGET_MVN_VERSION}-bin.tar.gz"
+    MAVEN_PATH="maven/maven-3/${TARGET_MVN_VERSION}/binaries/apache-maven-${TARGET_MVN_VERSION}-bin.tar.gz"
+    MAVEN_URLS=(
+        "https://archive.apache.org/dist/${MAVEN_PATH}"
+        "https://downloads.apache.org/${MAVEN_PATH}"
+        "https://dlcdn.apache.org/${MAVEN_PATH}"
+    )
     sudo mkdir -p /opt/maven
-    wget --no-check-certificate "$MAVEN_URL" -O /tmp/maven.tar.gz
+    MAVEN_URL=""
+    for candidate in "${MAVEN_URLS[@]}"; do
+        echo "Trying Maven download: $candidate"
+        if wget --no-check-certificate "$candidate" -O /tmp/maven.tar.gz; then
+            MAVEN_URL="$candidate"
+            break
+        fi
+    done
+    if [ -z "$MAVEN_URL" ]; then
+        echo "[ERROR] Failed to download Apache Maven ${TARGET_MVN_VERSION} from all configured sources."
+        exit 1
+    fi
     sudo tar -xzf /tmp/maven.tar.gz -C /opt/maven
     sudo alternatives --install /usr/bin/mvn mvn "/opt/maven/apache-maven-${TARGET_MVN_VERSION}/bin/mvn" 300
     sudo alternatives --set mvn "/opt/maven/apache-maven-${TARGET_MVN_VERSION}/bin/mvn"

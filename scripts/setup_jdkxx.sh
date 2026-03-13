@@ -63,8 +63,13 @@ if [ "$CURRENT_MVN_VERSION" = "$TARGET_MVN_VERSION" ]; then
     echo "Apache Maven $TARGET_MVN_VERSION is already installed."
 else
     echo "Installing Apache Maven $TARGET_MVN_VERSION..."
-    
-    MAVEN_URL="https://dlcdn.apache.org/maven/maven-3/${TARGET_MVN_VERSION}/binaries/apache-maven-${TARGET_MVN_VERSION}-bin.tar.gz"
+
+    MAVEN_PATH="maven/maven-3/${TARGET_MVN_VERSION}/binaries/apache-maven-${TARGET_MVN_VERSION}-bin.tar.gz"
+    MAVEN_URLS=(
+        "https://archive.apache.org/dist/${MAVEN_PATH}"
+        "https://downloads.apache.org/${MAVEN_PATH}"
+        "https://dlcdn.apache.org/${MAVEN_PATH}"
+    )
     INSTALL_DIR="/opt/maven"
     TARGET_DIR="${INSTALL_DIR}/apache-maven-${TARGET_MVN_VERSION}"
     
@@ -78,8 +83,18 @@ else
     fi
     
     if [ ! -d "$TARGET_DIR" ]; then
-        echo "Downloading: $MAVEN_URL"
-        wget --no-check-certificate "$MAVEN_URL" -O /tmp/maven.tar.gz
+        MAVEN_URL=""
+        for candidate in "${MAVEN_URLS[@]}"; do
+            echo "Trying Maven download: $candidate"
+            if wget --no-check-certificate "$candidate" -O /tmp/maven.tar.gz; then
+                MAVEN_URL="$candidate"
+                break
+            fi
+        done
+        if [ -z "$MAVEN_URL" ]; then
+            echo "[ERROR] Failed to download Apache Maven $TARGET_MVN_VERSION from all configured sources."
+            exit 1
+        fi
         
         echo "Extracting..."
         sudo tar -xzf /tmp/maven.tar.gz -C "$INSTALL_DIR"
