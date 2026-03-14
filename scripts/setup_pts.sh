@@ -216,7 +216,7 @@ echo "=== Step 1.7: Installing build dependencies ==="
 echo "Installing essential build tools for benchmark compilation..."
 
 # Essential build tools required by most PTS benchmarks
-BUILD_DEPS="build-essential pkg-config autoconf automake libtool cmake git"
+BUILD_DEPS="build-essential pkg-config autoconf automake libtool cmake git libgtest-dev"
 
 # Linux kernel build requirements
 KERNEL_DEPS="flex bison bc libelf-dev libssl-dev"

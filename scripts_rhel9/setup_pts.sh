@@ -110,7 +110,7 @@ fi
 # 1.7. Install build dependencies
 echo "=== Step 1.7: Installing build dependencies ==="
 # RHEL9 equivalents for build-essential and others
-BUILD_DEPS="pkgconf-pkg-config autoconf automake libtool cmake git"
+BUILD_DEPS="pkgconf-pkg-config autoconf automake libtool cmake git gtest-devel"
 # Development Tools group is often safer for build-essential equivalent
 sudo dnf -y groupinstall "Development Tools"
 
