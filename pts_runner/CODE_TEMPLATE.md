@@ -9,7 +9,8 @@
 4. [環境適応型メソッド (WSL/Cloud対応)](#環境適応型メソッド-wslcloud対応)
 5. [トラブルシューティングパターン](#トラブルシューティングパターン)
 6. [エントリーポイント (main関数)](#エントリーポイント-main関数)
-7. [参考実装](#参考実装)
+7. [Runner Output Protocol (cloud_exec_para.py 連携)](#runner-output-protocol-cloud_exec_parapy-連携)
+8. [参考実装](#参考実装)
 
 ---
 
@@ -324,9 +325,11 @@ class BenchmarkRunner:
 
 ### メインフローメソッド (`run`)
 
-**CRITICAL**: `run()` メソッドは必ず `return True` を返す必要があります。
+**CRITICAL**: `run()` メソッドは必ず `bool` を返す必要があります。
 
-返り値を忘れると、`None` が返され、`main()` 関数で `sys.exit(1)` が実行され、cloud_exec.py がベンチマーク失敗と誤判定します。
+返り値を忘れると `None` が返され、`main()` で `sys.exit(0 if None else 1)` → `sys.exit(1)` となり、cloud_exec_para.py がベンチマーク失敗と誤判定します。
+
+また `run()` 内で `sys.exit(1)` を直接呼ぶことは **禁止** です。失敗はリストに収集し、末尾の Summary ブロックで出力してから `bool` を返してください（→ [Runner Output Protocol](#runner-output-protocol-cloud_exec_parapy-連携)）。
 
 ```python
 def run(self):
@@ -358,24 +361,14 @@ def run(self):
     # Install benchmark
     self.install_benchmark()
 
-    # Run benchmark for each thread count
+    # Run benchmark for each thread count — collect failures, do NOT sys.exit here
+    failed = []
     for num_threads in self.thread_list:
-        print(f"\n{'='*80}")
-        print(f">>> Running {self.benchmark} with {num_threads} thread(s)")
-        print(f"{'='*80}")
+        if not self.run_benchmark(num_threads):
+            failed.append(num_threads)
 
-        success = self.run_benchmark(num_threads)
-        if not success:
-            print(f"[ERROR] Benchmark failed for {num_threads} thread(s)")
-            sys.exit(1)
-
-    # Export results
-    print(f"\n{'='*80}")
-    print(f">>> Exporting results")
-    print(f"{'='*80}")
+    # Export results and generate summary
     self.export_results()
-
-    # Generate summary
     self.generate_summary()
 
     # Post-benchmark cleanup: remove installed test to free disk space.
@@ -384,12 +377,21 @@ def run(self):
     # Errors are non-fatal ([WARN] only).
     cleanup_pts_artifacts(self.benchmark)
 
+    # ── Runner Output Protocol (mandatory) ───────────────────────────────────
+    # cloud_exec_para.py scans this block for "Failed: N" (N > 0 = error).
+    # Do NOT rename or remove these lines.
     print(f"\n{'='*80}")
-    print(f"[SUCCESS] All benchmarks completed successfully")
+    print("Benchmark Summary")
     print(f"{'='*80}")
+    print(f"Total tests:  {len(self.thread_list)}")
+    print(f"Successful:   {len(self.thread_list) - len(failed)}")
+    print(f"Failed:       {len(failed)}")          # ← REQUIRED by protocol
+    if failed:
+        print(f"Failed thread counts: {failed}")
+    print(f"{'='*80}")
+    # ─────────────────────────────────────────────────────────────────────────
 
-    # CRITICAL: Must return True for cloud_exec.py integration
-    return True
+    return len(failed) == 0
 ```
 
 ### クリーンアップメソッド (`cleanup_pts_artifacts`)
@@ -1389,9 +1391,59 @@ Examples:
 if __name__ == "__main__":
     main()
 ```
- 
+
 ---
- 
+
+## Runner Output Protocol (cloud_exec_para.py 連携)
+
+cloud_exec_para.py はランナーの **exit code** と **stdout ログ** の両方でエラーを判定します。
+以下のルールは全ランナーで必ず守ること。
+
+### ルール1: exit code は成否を正確に反映する（MANDATORY）
+
+```python
+# main() の末尾
+success = runner.run()
+sys.exit(0 if success else 1)   # ← 必ずこの形式。変更禁止。
+```
+
+cloud_exec_para.py は nohup マーカーファイルでこの exit code を受け取ります：
+- exit 0 → `marker=SUCCESS`
+- exit 1 → `marker=FAILED` → エラーとして記録・ログ表示
+
+### ルール2: `run()` 末尾に Summary ブロックを必ず出力する（MANDATORY）
+
+```python
+# run() の末尾 — フォーマットを変更しないこと
+print(f"Failed:       {len(failed)}")   # N=0 でも省略禁止
+```
+
+**なぜ必要か**: PTS の `phoronix-test-suite batch-run` は内部でベンチマークが失敗しても
+**常に exit 0 を返す**。runner がこの失敗を `detect_pts_failure_from_log()` で検出して
+exit 1 にするのが唯一の伝達手段。さらに防御層として、cloud_exec_para.py は SUCCESS
+マーカーのワークロードでも runner ログの末尾 50 行を tail して `^Failed:\s+[1-9]` を
+スキャンし、N > 0 なら WARN を出す（exit code 伝達失敗への防御）。
+
+### ルール3: stdout/stderr は `/tmp/pts_runner_<name>.log` にリダイレクトされる前提
+
+cloud_config.json のコマンド形式：
+```bash
+./pts_runner/pts_runner_<name>.py [args] > /tmp/pts_runner_<name>.log 2>&1
+```
+
+このパスが cloud_exec_para.py のログ取得対象となるため、ランナー名とログパスを
+一致させること。
+
+### 実装チェック（3点セット）
+
+| 確認項目 | コード | 場所 |
+|---------|--------|------|
+| Summary `Failed: N` を出力 | `print(f"Failed:       {len(failed)}")` | `run()` 末尾 |
+| exit code を伝達 | `sys.exit(0 if success else 1)` | `main()` 末尾 |
+| `run()` が `bool` を返す | `return len(failed) == 0` | `run()` 末尾 |
+
+---
+
 ## 参考実装
 
 完全な実装例は以下を参照:
@@ -1418,13 +1470,19 @@ if __name__ == "__main__":
 - [ ] WSL環境（perf未導入）
 - [ ] Cloud VM環境（SW events only）
 
+### Runner Output Protocol チェック（CRITICAL）
+- [ ] **`run()` 末尾に `print(f"Failed:       {len(failed)}")` が存在するか（N=0でも省略禁止）**
+- [ ] **`run()` が `return len(failed) == 0` （または同等の `bool`）を返すか**
+- [ ] **`main()` が `sys.exit(0 if success else 1)` で終わるか**
+- [ ] **`run()` 内で直接 `sys.exit(1)` を呼んでいないか（install失敗除く）**
+- [ ] ログ末尾 50 行に `Failed: N` が含まれるか実行して確認
+
 ### 機能テスト
-- [ ] **`run()` メソッドが `return True` を返すか確認（CRITICAL）**
 - [ ] `--quick`フラグで正常動作
 - [ ] TEST_RESULTS_NAMEに `{self.benchmark}` を使用しているか確認
 - [ ] ドット付きベンチマーク名でexport成功
 - [ ] summary.json生成成功
-- [ ] cloud_exec.py でベンチマーク成功と判定されるか確認
+- [ ] cloud_exec_para.py でベンチマーク成功と判定されるか確認（marker=SUCCESS, Failed: 0）
 - [ ] perf無効時もエラーなく完走
 - [ ] コンパイラパッチの冪等性確認
 - [ ] **`cleanup_pts_artifacts(self.benchmark)` が `generate_summary()` の後に呼ばれるか確認**

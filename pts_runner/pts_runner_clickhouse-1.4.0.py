@@ -196,18 +196,18 @@ class ClickHouseRunner:
         self.machine_name = os.environ.get('MACHINE_NAME', os.uname().nodename)
         self.os_name = self.get_os_name()
 
-        # ClickHouse manages its own threading — always single-pass
-        if threads_arg is not None and threads_arg != 1:
-            print(f"[WARN] ClickHouse manages CPU cores internally. Ignoring threads={threads_arg}, running single-pass.")
-        self.thread_list = [self.vcpu_count]
+        if threads_arg is None:
+            n_4 = self.vcpu_count // 4
+            self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
+            self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
+        else:
+            n = min(threads_arg, self.vcpu_count)
+            self.thread_list = [n]
 
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
-        self.results_dir = (
-            self.project_root / "results" / self.machine_name / self.os_name
-            / self.test_category_dir / self.benchmark
-        )
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         self.quick_mode = quick_mode
 
@@ -464,7 +464,8 @@ class ClickHouseRunner:
 
         process.wait()
         returncode = process.returncode
-        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(install_log)
+        log_file = install_log
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if log_f:
             log_f.close()
 
@@ -623,11 +624,13 @@ class ClickHouseRunner:
 
         # Check for PTS failures
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
-        full_output = ''.join(output_lines)
 
-        if returncode != 0 or pts_test_failed:
+        if returncode != 0:
             reason = pts_failure_reason or f"exit code {returncode}"
             print(f"  [ERROR] Benchmark failed: {reason}")
+            return False
+        if returncode == 0 and pts_test_failed:
+            print(f"  [ERROR] PTS reported failure: {pts_failure_reason}")
             return False
 
         print(f"  [OK] Benchmark completed successfully")

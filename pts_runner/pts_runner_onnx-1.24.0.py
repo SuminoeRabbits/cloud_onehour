@@ -58,15 +58,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from runner_common import (
-    cleanup_pts_artifacts,
-    detect_pts_failure_from_log,
-    get_install_status,
-    get_pts_download_cache_dir,
-    get_pts_home,
-    get_pts_installed_dir,
-    get_pts_profile_dir,
-)
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, get_pts_download_cache_dir, get_pts_home, get_pts_installed_dir, get_pts_profile_dir
 
 
 # ---------------------------------------------------------------------------

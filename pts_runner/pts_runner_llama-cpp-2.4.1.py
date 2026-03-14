@@ -209,7 +209,7 @@ class LlamaCppRunner:
         self.benchmark = "llama-cpp-2.4.1"
         self.benchmark_full = f"pts/{self.benchmark}"
         self.test_category = "AI"
-        self.test_category_dir = self.test_category
+        self.test_category_dir = self.test_category.replace(' ', '_')
 
         # System info
         self.vcpu_count = os.cpu_count() or 1
@@ -228,11 +228,7 @@ class LlamaCppRunner:
         # Directories
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
-        self.results_dir = (
-            self.project_root / "results"
-            / self.machine_name / self.os_name
-            / self.test_category_dir / self.benchmark
-        )
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         self.quick_mode = quick_mode
         self.skip_optional = skip_optional
@@ -445,7 +441,8 @@ class LlamaCppRunner:
             print(f"  [WARN] Could not write install log: {e}")
 
         full_output = "".join(install_output)
-        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(install_log)
+        log_file = install_log
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
         install_failed = False
         if returncode != 0:

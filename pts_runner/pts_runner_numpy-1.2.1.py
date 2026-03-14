@@ -6,23 +6,25 @@ Source: https://openbenchmarking.org/test/pts/numpy
 AppVersion: NumPy (latest compatible, installed via pip into isolated venv)
 
 System Dependencies:
-- python : python3 (system Python for venv creation only)
+- python : python3 (system default interpreter for venv creation)
 
 Venv isolation design (special exception: this runner manages its own venv):
 - venv created in /tmp/pts-numpy-1.2.1-<random>/
-- Packages: numpy scipy
+- Python: system default interpreter used to launch the runner
+- Packages: numpy==2.4.2, scipy==1.17.1
 - Deleted on exit (atexit, SIGTERM, SIGHUP)
 - System Python packages are NEVER modified
 - PTS batch-install is run with the venv's bin/ prepended to PATH so that
   install.sh's "pip install scipy numpy" installs into the venv, not the system.
 
 Test Characteristics:
-- Multi-threaded     : No (Python-level single-threaded; OMP/MKL/OpenBLAS set to 1)
+- Multi-threaded     : Yes (BLAS/OpenMP backend threads controlled via env vars)
 - THFix_in_compile  : false
-- THChange_at_runtime: false
-  numpy is single-threaded at the Python level. The benchmark suite runs 30+
+- THChange_at_runtime: true
+  Thread count is injected at runtime via OMP_NUM_THREADS / MKL_NUM_THREADS /
+  OPENBLAS_NUM_THREADS / NUMEXPR_NUM_THREADS. The benchmark suite runs 30+
   scientific kernels (serge-sans-paille/numpy-benchmarks) and reports a
-  geometric mean score. Runner executes once, labeled with vcpu_count.
+  geometric mean score.
 
 Result Scale : Geometric Mean Score (Higher Is Better)
 TimesToRun   : 1 (30+ sub-kernels are run internally; geometric mean reported)
@@ -38,6 +40,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status
@@ -61,13 +64,11 @@ BENCHMARK      = "numpy-1.2.1"
 BENCHMARK_FULL = f"pts/{BENCHMARK}"
 TEST_CATEGORY  = "AI"
 
-# Packages to install into the isolated venv.
+# Pinned packages to install into the isolated venv.
 # PTS install.sh also runs "pip install scipy numpy"; since venv/bin is prepended
 # to PATH during batch-install, those pip calls land in this same venv.
-VENV_PACKAGES = [
-    "numpy",
-    "scipy",
-]
+REQUIREMENTS_FILE = Path(__file__).with_name("requirements_numpy-1.2.1.txt")
+WHEELHOUSE_DIR = Path(__file__).with_name("wheelhouse") / "numpy-1.2.1"
 
 # Primary result line emitted by PTS numpy result_parser.py
 RESULT_RE = re.compile(r"Geometric mean score:\s*([\d.]+)")
@@ -151,15 +152,11 @@ class NumpyBenchmarkRunner:
         self.machine_name = os.environ.get("MACHINE_NAME", os.uname().nodename)
         self.os_name      = self.get_os_name()
 
-        # Thread list — 4-point scaling pattern (template compliance).
-        # numpy is single-threaded at the Python level; thread count is a label only.
-        # The 4-point scaling code is required by the template for checker compliance.
+        # Thread list — 4-point scaling pattern.
         if threads_arg is None:
             n_4 = self.vcpu_count // 4
             self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
             self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
-            # numpy is single-threaded: run once, labeled with all-CPUs count
-            self.thread_list = [self.vcpu_count]
         else:
             n = min(threads_arg, self.vcpu_count)
             self.thread_list = [n]
@@ -170,6 +167,7 @@ class NumpyBenchmarkRunner:
         self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         self.quick_mode = quick_mode
+        self.venv_python = sys.executable
 
         # Venv (created in install_benchmark → setup_venv)
         self.venv_mgr = VenvManager()
@@ -221,7 +219,7 @@ class NumpyBenchmarkRunner:
         )
         return env
 
-    def _build_venv_env(self) -> dict:
+    def _build_venv_env(self, num_threads: int = 1) -> dict:
         """
         Return clean env with this Runner's venv/bin prepended to PATH.
         Used for every test subprocess call so that 'python' and 'pip' resolve
@@ -231,11 +229,11 @@ class NumpyBenchmarkRunner:
         venv_bin = str(self.venv_mgr.venv_dir / "bin")
         env["PATH"]        = f"{venv_bin}:{env['PATH']}"
         env["VIRTUAL_ENV"] = str(self.venv_mgr.venv_dir)
-        # Suppress background BLAS threading for deterministic single-threaded results
-        env["OMP_NUM_THREADS"]     = "1"
-        env["MKL_NUM_THREADS"]     = "1"
-        env["OPENBLAS_NUM_THREADS"] = "1"
-        env["NUMEXPR_NUM_THREADS"]  = "1"
+        # Runtime thread scaling for NumPy/SciPy and common BLAS/OpenMP backends.
+        env["OMP_NUM_THREADS"]      = str(num_threads)
+        env["MKL_NUM_THREADS"]      = str(num_threads)
+        env["OPENBLAS_NUM_THREADS"] = str(num_threads)
+        env["NUMEXPR_NUM_THREADS"]  = str(num_threads)
         return env
 
     # ── Venv setup ────────────────────────────────────────────────────────────
@@ -245,10 +243,11 @@ class NumpyBenchmarkRunner:
         print(f"\n{'='*80}")
         print(">>> Setting up isolated venv for numpy")
         print(f"{'='*80}")
+        print(f"  [INFO] venv interpreter : {self.venv_python}")
 
         # Verify python3-venv module is available
         check = subprocess.run(
-            [sys.executable, "-m", "venv", "--help"],
+            [self.venv_python, "-m", "venv", "--help"],
             capture_output=True,
         )
         if check.returncode != 0:
@@ -260,9 +259,13 @@ class NumpyBenchmarkRunner:
         venv_dir = self.venv_mgr.create()
         print(f"  [INFO] venv path : {venv_dir}")
 
+        if not REQUIREMENTS_FILE.exists():
+            print(f"  [ERROR] requirements file not found: {REQUIREMENTS_FILE}")
+            sys.exit(1)
+
         # Create venv
         result = subprocess.run(
-            [sys.executable, "-m", "venv", str(venv_dir)],
+            [self.venv_python, "-m", "venv", str(venv_dir)],
             capture_output=True,
             text=True,
         )
@@ -277,10 +280,33 @@ class NumpyBenchmarkRunner:
             capture_output=True,
         )
 
-        # Install numpy and scipy into the venv
-        print(f"  [INFO] Installing: {', '.join(VENV_PACKAGES)}")
+        self.install_pinned_requirements()
+
+    def install_pinned_requirements(self) -> None:
+        """Install exact pinned package versions into the isolated venv via wheelhouse."""
+        if not WHEELHOUSE_DIR.exists():
+            print(f"  [ERROR] wheelhouse directory not found: {WHEELHOUSE_DIR}")
+            print("  [ERROR] Provide pre-downloaded wheels for numpy-1.2.1 dependencies.")
+            sys.exit(1)
+
+        wheel_files = sorted(WHEELHOUSE_DIR.glob("*.whl"))
+        if not wheel_files:
+            print(f"  [ERROR] No wheel files found in wheelhouse: {WHEELHOUSE_DIR}")
+            print("  [ERROR] Expected local wheels for pinned requirements.")
+            sys.exit(1)
+
+        print(f"  [INFO] Installing from requirements: {REQUIREMENTS_FILE}")
+        print(f"  [INFO] Using wheelhouse: {WHEELHOUSE_DIR}")
         result = subprocess.run(
-            [str(self.venv_mgr.pip), "install"] + VENV_PACKAGES,
+            [
+                str(self.venv_mgr.pip),
+                "install",
+                "--no-index",
+                "--find-links",
+                str(WHEELHOUSE_DIR),
+                "-r",
+                str(REQUIREMENTS_FILE),
+            ],
             capture_output=True,
             text=True,
         )
@@ -289,15 +315,18 @@ class NumpyBenchmarkRunner:
             sys.exit(1)
         print("  [OK]   Packages installed")
 
-        # Quick smoke-test
         verify = subprocess.run(
-            [str(self.venv_mgr.python), "-c", "import numpy; import scipy; print(numpy.__version__)"],
+            [
+                str(self.venv_mgr.python),
+                "-c",
+                "import numpy, scipy; print(f'numpy={numpy.__version__} scipy={scipy.__version__}')",
+            ],
             capture_output=True, text=True,
         )
         if verify.returncode != 0:
-            print(f"  [ERROR] numpy import check failed:\n{verify.stderr}")
+            print(f"  [ERROR] numpy/scipy import check failed:\n{verify.stderr}")
             sys.exit(1)
-        print(f"  [OK]   numpy {verify.stdout.strip()} ready in venv")
+        print(f"  [OK]   {verify.stdout.strip()} ready in venv")
 
     # ── Benchmark installation ────────────────────────────────────────────────
 
@@ -388,6 +417,10 @@ class NumpyBenchmarkRunner:
                     lf.write(f"[INSTALL] Test script: {test_script}\n")
                     lf.write("[INSTALL] Complete\n")
 
+            # Re-apply pinned versions after PTS install.sh potentially ran
+            print("  [INFO] Re-applying pinned Python package versions after PTS install")
+            self.install_pinned_requirements()
+
             # PTS recognition check (informational; venv-based runners are not registered in PTS)
             pts_test_installed = subprocess.run(
                 ["phoronix-test-suite", "test-installed", self.benchmark_full],
@@ -404,6 +437,9 @@ class NumpyBenchmarkRunner:
                 sys.exit(1)
         else:
             print(f"[INFO] Benchmark already installed, skipping: {self.benchmark_full}")
+            if self.venv_mgr.venv_dir is None:
+                print("[INFO] Recreating isolated venv for existing installation")
+                self.setup_venv()
 
     # ── Test script discovery ─────────────────────────────────────────────────
 
@@ -463,6 +499,7 @@ class NumpyBenchmarkRunner:
             float | None: Geometric mean score, or None on failure.
         """
         log_file = self.results_dir / f"{num_threads}threads_run{run_idx}.log"
+        pts_log_file = self.results_dir / f"{num_threads}threads_run{run_idx}_pts.log"
 
         # TEST_RESULTS_NAME / TEST_RESULTS_DESCRIPTION: compliance reference.
         # numpy is run directly (not via PTS batch-run), so these are env vars
@@ -471,9 +508,10 @@ class NumpyBenchmarkRunner:
             f"TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads "
             f"TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads"
         )
-        env = self._build_venv_env()   # venv/bin in PATH + OMP/MKL=1
+        env = self._build_venv_env(num_threads)   # venv/bin in PATH + runtime thread env
         env["TEST_RESULTS_NAME"]        = f"{self.benchmark}-{num_threads}threads"
         env["TEST_RESULTS_DESCRIPTION"] = f"{self.benchmark}-{num_threads}threads"
+        env["LOG_FILE"] = str(pts_log_file)
 
         # Remove previous PTS result artifacts (safety measure)
         sanitized = self.benchmark.replace(".", "")
@@ -484,53 +522,72 @@ class NumpyBenchmarkRunner:
                 capture_output=True, text=True, check=False,
             )
 
-        # Determine command: shell script (numpy wrapper) or Python script
-        if test_script.suffix == ".py":
-            cmd = [str(self.venv_mgr.python), str(test_script)]
-        else:
-            # Shell wrapper — ensure it's executable, then run via bash
-            cmd = ["bash", str(test_script)]
+        with self._prepare_writable_test_tree(test_script) as runnable_script:
+            # Determine command: shell script (numpy wrapper) or Python script
+            if runnable_script.suffix == ".py":
+                cmd = [str(self.venv_mgr.python), str(runnable_script)]
+            else:
+                # Shell wrapper — ensure it's executable, then run via bash
+                cmd = ["bash", str(runnable_script)]
 
-        print(f"  cmd: {' '.join(str(c) for c in cmd)}")
+            print(f"  cmd: {' '.join(str(c) for c in cmd)}")
 
-        with open(log_file, "w") as log_f:
-            log_f.write(f"[COMMAND] {' '.join(str(c) for c in cmd)}\n")
-            log_f.write(f"[BATCH_ENV] {batch_env}\n\n")
+            with open(log_file, "w") as log_f:
+                log_f.write(f"[COMMAND] {' '.join(str(c) for c in cmd)}\n")
+                log_f.write(f"[BATCH_ENV] {batch_env}\n\n")
+                log_f.write(f"[CWD] {runnable_script.parent}\n")
+                log_f.write(f"[LOG_FILE] {pts_log_file}\n\n")
 
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                env=env,
-            )
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                    cwd=str(runnable_script.parent),
+                )
 
-            lines: list[str] = []
-            for line in process.stdout:
-                print(line, end="")
-                log_f.write(line)
-                log_f.flush()
-                lines.append(line)
+                lines: list[str] = []
+                for line in process.stdout:
+                    print(line, end="")
+                    log_f.write(line)
+                    log_f.flush()
+                    lines.append(line)
 
-            process.wait()
-            returncode = process.returncode
-            log_f.write(f"\n[EXIT CODE] {returncode}\n")
+                process.wait()
+                returncode = process.returncode
+                log_f.write(f"\n[EXIT CODE] {returncode}\n")
+                if pts_log_file.exists():
+                    log_f.write("\n[PTS LOG FILE]\n")
+                    try:
+                        log_f.write(pts_log_file.read_text())
+                    except OSError as e:
+                        log_f.write(f"[WARN] Failed to read PTS LOG_FILE output: {e}\n")
 
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if pts_test_failed:
             print(f"  [WARN] Failure marker detected in log: {pts_failure_reason}")
 
         if returncode == 0 and not pts_test_failed:
+            parse_sources = list(lines)
+            if pts_log_file.exists():
+                try:
+                    parse_sources.extend(
+                        pts_log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                    )
+                except OSError:
+                    pass
+
             # Primary: "Geometric mean score: X.XXXXXX"
-            for line in reversed(lines):
+            for line in reversed(parse_sources):
                 m = RESULT_RE.search(line)
                 if m:
                     value = float(m.group(1))
                     print(f"  [RESULT] run{run_idx}: geometric mean = {value:.6f}")
                     return value
             # Fallback: bare float on its own line
-            for line in reversed(lines):
+            for line in reversed(parse_sources):
                 m = RESULT_BARE_RE.search(line.strip())
                 if m:
                     value = float(m.group(1))
@@ -543,10 +600,25 @@ class NumpyBenchmarkRunner:
             print(f"  [WARN] run{run_idx} failed: {reason}")
             return None
 
+    @contextmanager
+    def _prepare_writable_test_tree(self, test_script: Path):
+        """
+        Copy the PTS numpy test tree into /tmp so the wrapper can create
+        numpy_log and other scratch files even when the original installed-tests
+        tree is read-only or sandboxed.
+        """
+        source_dir = test_script.parent
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"pts-{self.benchmark}-run-"))
+        work_dir = tmp_dir / source_dir.name
+        try:
+            shutil.copytree(source_dir, work_dir)
+            yield work_dir / test_script.name
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def run_benchmark(self, num_threads: int) -> bool:
         """
-        Run the numpy benchmark suite for the given thread label.
-        num_threads is a result label only (numpy is single-threaded).
+        Run the numpy benchmark suite for the given thread count.
         Returns True if a result was produced.
         """
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -959,8 +1031,7 @@ class NumpyBenchmarkRunner:
         # Step 1 — Install (create venv + run PTS batch-install)
         self.install_benchmark()
 
-        # Step 2 — Run benchmark for each thread label
-        # numpy is single-threaded; thread_list always has exactly one element
+        # Step 2 — Run benchmark for each thread count
         for num_threads in self.thread_list:
             # Clean only thread-specific files (preserve other threads' results)
             self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -1015,8 +1086,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  %(prog)s            # Run numpy benchmark (venv auto-created)\n"
-            "  %(prog)s 288        # Thread count accepted as label (single-threaded)\n"
+            "  %(prog)s            # Run numpy benchmark with 4-point thread scaling\n"
+            "  %(prog)s 288        # Run with min(288, vcpu_count) threads\n"
             "  %(prog)s --quick    # Quick mode (fewer iterations if supported)\n\n"
             "Venv design:\n"
             "  numpy/scipy are installed into an isolated /tmp venv.\n"
@@ -1028,12 +1099,12 @@ def main() -> None:
         "threads_pos",
         nargs="?",
         type=int,
-        help="Number of threads (optional; used as result label only)",
+        help="Number of threads (optional; applied to runtime BLAS/OpenMP env vars)",
     )
     parser.add_argument(
         "--threads",
         type=int,
-        help="Run with specified thread label (1 to CPU count)",
+        help="Run with specified runtime thread count (1 to CPU count)",
     )
     parser.add_argument(
         "--quick",
@@ -1049,8 +1120,7 @@ def main() -> None:
         if threads < 1:
             print(f"[ERROR] Thread count must be >= 1 (got: {threads})")
             sys.exit(1)
-        print("[INFO] Thread count accepted "
-              "(numpy is single-threaded; used as result label only)")
+        print("[INFO] Thread count accepted for runtime BLAS/OpenMP scaling")
 
     if args.quick:
         print("[INFO] Quick mode enabled")
