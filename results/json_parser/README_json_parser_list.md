@@ -23,6 +23,8 @@
 | `json_parser_memcached-1.2.0.py` | C (JSON) | - | 全機種でテスト失敗 (FORCE_TIMES_TO_RUN=1エラー)。出力は {} |
 | `json_parser_nginx-3.0.1.py` | C (JSON) | 複数 (6〜7) | `<N>-thread.json` から取得 (Connections数で変化) |
 | `json_parser_numpy-1.2.1.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
+| `json_parser_onnx-1.24.0.py` | C (JSON + model logs) | 複数 | `<N>-thread.json` から取得し、`*_run*.log` から model ごとの実行時間を補完 |
+| `json_parser_pytorch-1.2.0.py` | C (JSON + workload logs) | 複数 | `<N>-thread.json` から取得し、`*threads_*_run*.log` から workload ごとの実行時間を補完 |
 | `json_parser_openssl-3.6.0.py` | C (JSON) | 7 | `<N>-thread.json` から取得 (SHA256/SHA512/RSA4096 等) |
 | `json_parser_perf-bench-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_pgbench-1.11.1.py` | B (ログ複数) | 2 (TPS × Mode) | ログから `Average: X TPS` を抽出。TPS_RE バグ修正済み（neo55sGen6 で検証） |
@@ -45,6 +47,7 @@
 | `json_parser_x265-1.5.0.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Bosphorus 4K / 1080p) |
 | `json_parser_svt-av1-2.17.0.py` | C (JSON) | 12 | `<N>-thread.json` から取得 (Preset 3/5/8/13 × Bosphorus 4K/1080p/Beauty 4K 10-bit)。neo55sGen6 で検証済み |
 | `json_parser_srsran-2.5.0.py` | C (JSON) | 4 | `<N>-thread.json` から取得 (PDSCH/PUSCH × Total/Thread)。neo55sGen6 で検証済み |
+| `json_parser_llama-cpp-2.4.1.py` | C (JSON) | 複数 | `<N>-thread.json` から取得。`test_run_times` は PTS JSON を利用 |
 
 ## 現在実行ログがなく未検証（動作未確認）のパーサーリスト
 
@@ -64,6 +67,9 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_cpuminer-opt-1.8.0.py` — OK (12 tests: Algorithm 別)
 - `json_parser_ffmpeg-7.0.1.py` — OK (8 tests: Encoder × Scenario)
 - `json_parser_numpy-1.2.1.py` — OK (1 test)
+- `json_parser_onnx-1.24.0.py` — OK (7 tests: model 別、run log から実行時間補完)
+- `json_parser_pytorch-1.2.0.py` — OK (18 tests: model × batch-size、run log から実行時間補完)
+- `json_parser_llama-cpp-2.4.1.py` — OK (値あり 29 tests、PTS JSON の test_run_times を利用)
 - `json_parser_pgbench-1.11.1.py` — OK after fix (2 tests: Read Only / Read Write TPS)。TPS_RE を `Average: X TPS` 形式に修正
 - `json_parser_svt-av1-2.17.0.py` — OK (12 tests: Preset 3/5/8/13 × 3 入力)（新規作成）
 - `json_parser_pmbench-1.0.2.py` — OK (20 tests)
