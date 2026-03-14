@@ -202,8 +202,6 @@ class PreSeedDownloader:
 class KvazaarRunner:
     # Time-reduction: keep only the two fastest presets
     _KEEP_PRESETS: frozenset = frozenset({"veryfast", "ultrafast"})
-    # Cap frame count for each input to limit per-run duration
-    _FRAMES_LIMIT: int = 480
 
     def __init__(self, threads_arg=None, quick_mode=False, diag_mode=True):
         """
@@ -615,7 +613,6 @@ class KvazaarRunner:
         """
         Patch test-definition.xml to reduce benchmark runtime:
         - Remove preset entries not in _KEEP_PRESETS (slow, medium, superfast)
-        - Append -f <_FRAMES_LIMIT> to each video input value to cap frame count
 
         Returns True if the file was successfully patched (backup exists).
         Restores original on any error and returns False.
@@ -664,22 +661,10 @@ class KvazaarRunner:
                             menu.remove(entry)
                             print(f"  [PATCH] Removed preset entry: {val}")
 
-                elif identifier == "video":
-                    # Append -f <limit> to each input value if not already present
-                    frames_suffix = f" -f {self._FRAMES_LIMIT}"
-                    for entry in menu.findall("Entry"):
-                        value_el = entry.find("Value")
-                        if value_el is None:
-                            continue
-                        current = (value_el.text or "").strip()
-                        if "-f " not in current:
-                            value_el.text = current + frames_suffix
-                            print(f"  [PATCH] Added frames limit to: {current}")
-
             tree.write(xml_path, encoding="utf-8", xml_declaration=True)
             print(
                 f"[INFO] test-definition.xml patched: "
-                f"presets={sorted(self._KEEP_PRESETS)}, frames<={self._FRAMES_LIMIT}"
+                f"presets={sorted(self._KEEP_PRESETS)}"
             )
             return True
 

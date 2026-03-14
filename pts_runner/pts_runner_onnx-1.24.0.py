@@ -20,7 +20,7 @@ System Dependencies (from test-definition.xml ExternalDependencies):
 Build Notes:
 - install.sh clones https://github.com/microsoft/onnxruntime at tag v1.24.1
 - Built with -O3 -march=native and --cmake_extra_defines onnxruntime_BUILD_FOR_NATIVE_MACHINE=ON
-- --parallel flag uses all available cores; no install.sh patching required
+- --parallel flag uses all available cores
 - Binary location after install:
     ~/.phoronix-test-suite/installed-tests/pts/onnx-1.24.0/
         onnxruntime/build/Linux/Release/onnxruntime_perf_test
@@ -53,30 +53,40 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status
+from runner_common import (
+    cleanup_pts_artifacts,
+    detect_pts_failure_from_log,
+    get_install_status,
+    get_pts_download_cache_dir,
+    get_pts_home,
+    get_pts_installed_dir,
+    get_pts_profile_dir,
+)
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-# Models defined in test-definition.xml; paths are relative to home directory.
-# install.sh extracts archives to ~ (cd ~ && tar -xf ...) so paths below are ~/...
+# Model paths used by the upstream PTS profile. This runner resolves them
+# dynamically from stable PTS-owned locations rather than assuming HOME layout.
 ONNX_MODELS = [
-    {"name": "yolov4",              "path": "yolov4/yolov4.onnx"},
-    {"name": "super-resolution-10", "path": "super_resolution/super_resolution.onnx"},
-    {"name": "bertsquad-12",        "path": "bertsquad-12/bertsquad-12.onnx"},
-    {"name": "gpt2-10",             "path": "GPT2/model.onnx"},
-    {"name": "arcfaceresnet100-8",  "path": "resnet100/resnet100.onnx"},
-    {"name": "resnet50-v1-12-int8", "path": "resnet50-v1-12-int8/resnet50-v1-12-int8.onnx"},
-    {"name": "caffenet-12-int8",    "path": "caffenet-12-int8/caffenet-12-int8.onnx"},
-    {"name": "faster-rcnn-12-int8", "path": "FasterRCNN-12-int8/FasterRCNN-12-int8.onnx"},
-    {"name": "t5-encoder-12",       "path": "t5-encoder/t5-encoder.onnx"},
-    {"name": "zfnet512-12",         "path": "zfnet512-12/zfnet512-12.onnx"},
-    {"name": "resnet101-duc-7",     "path": "ResNet101-DUC-7/ResNet101-DUC-7.onnx"},
+    {"name": "yolov4",              "path": "yolov4/yolov4.onnx",                             "archive": "yolov4.tar.gz"},
+    {"name": "super-resolution-10", "path": "super_resolution/super_resolution.onnx",         "archive": "super-resolution-10.tar.gz"},
+    {"name": "bertsquad-12",        "path": "bertsquad-12/bertsquad-12.onnx",                 "archive": "bertsquad-12.tar.gz"},
+    {"name": "gpt2-10",             "path": "GPT2/model.onnx",                                 "archive": "gpt2-10.tar.gz"},
+    {"name": "arcfaceresnet100-8",  "path": "resnet100/resnet100.onnx",                        "archive": "arcfaceresnet100-8.tar.gz"},
+    {"name": "resnet50-v1-12-int8", "path": "resnet50-v1-12-int8/resnet50-v1-12-int8.onnx",   "archive": "resnet50-v1-12-int8.tar.gz"},
+    {"name": "caffenet-12-int8",    "path": "caffenet-12-int8/caffenet-12-int8.onnx",         "archive": "caffenet-12-int8.tar.gz"},
+    {"name": "faster-rcnn-12-int8", "path": "FasterRCNN-12-int8/FasterRCNN-12-int8.onnx",     "archive": "FasterRCNN-12-int8.tar.gz"},
+    {"name": "t5-encoder-12",       "path": "t5-encoder/t5-encoder.onnx",                      "archive": "t5-encoder-12.tar.gz"},
+    {"name": "zfnet512-12",         "path": "zfnet512-12/zfnet512-12.onnx",                    "archive": "zfnet512-12.tar.gz"},
+    {"name": "resnet101-duc-7",     "path": "ResNet101-DUC-7/ResNet101-DUC-7.onnx",            "archive": "ResNet101-DUC-7.tar.gz"},
 ]
 
 # Primary result: "Number of inferences per second: X.XX"
@@ -89,6 +99,32 @@ TIMES_TO_RUN = 3
 _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
 
 
+def normalize_onnx_download_url(url):
+    marker = "https://github.com/onnx/models/blob/"
+    if url.startswith(marker):
+        return f"https://raw.githubusercontent.com/onnx/models/{url[len(marker):]}"
+    return url
+
+
+def probe_download_url(url, timeout=20):
+    normalized = normalize_onnx_download_url(url)
+    requests = [
+        urllib.request.Request(normalized, method="HEAD"),
+        urllib.request.Request(normalized, method="GET"),
+    ]
+
+    for request in requests:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                content_type = response.headers.get("Content-Type", "").lower()
+                if "text/html" in content_type:
+                    return None
+                return normalized
+        except Exception:
+            continue
+    return None
+
+
 # ---------------------------------------------------------------------------
 # PreSeedDownloader
 # ---------------------------------------------------------------------------
@@ -96,12 +132,14 @@ _LARGE_FILE_THRESHOLD_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
 class PreSeedDownloader:
     """Pre-download large test files into PTS download cache using aria2c."""
 
-    def __init__(self, cache_dir=None):
+    def __init__(self, cache_dir=None, pts_home=None):
+        self.pts_home = Path(pts_home) if pts_home else get_pts_home()
         if cache_dir:
             self.cache_dir = Path(cache_dir)
         else:
-            self.cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+            self.cache_dir = get_pts_download_cache_dir()
         self.aria2_available = shutil.which("aria2c") is not None
+        self._validated_urls = {}
 
     def is_aria2_available(self):
         return self.aria2_available
@@ -111,13 +149,7 @@ class PreSeedDownloader:
         if not self.aria2_available:
             return False
 
-        profile_path = (
-            Path.home()
-            / ".phoronix-test-suite"
-            / "test-profiles"
-            / benchmark_name
-            / "downloads.xml"
-        )
+        profile_path = self.pts_home / "test-profiles" / benchmark_name / "downloads.xml"
         if not profile_path.exists():
             print(f"  [WARN] downloads.xml not found at {profile_path}")
             print(f"  [INFO] Fetching test profile via phoronix-test-suite info {benchmark_name}...")
@@ -154,10 +186,11 @@ class PreSeedDownloader:
                             filename_hint = filename_node.text.strip() if filename_node.text else "(unknown)"
                             print(f"  [SKIP] Optional package skipped: {filename_hint}")
                             continue
-                urls = [u.strip() for u in url_node.text.split(",")]
+                urls = self._get_alive_urls(url_node.text)
                 url = urls[0] if urls else None
                 filename = filename_node.text.strip()
                 if not url:
+                    print(f"  [SKIP] No live download URL: {filename}")
                     continue
                 size_bytes = -1
                 if filesize_node is not None and filesize_node.text:
@@ -176,6 +209,16 @@ class PreSeedDownloader:
             print(f"  [ERROR] Failed to parse downloads.xml: {e}")
             return False
         return True
+
+    def _get_alive_urls(self, raw_urls):
+        alive_urls = []
+        for raw_url in [u.strip() for u in raw_urls.split(",") if u.strip()]:
+            if raw_url not in self._validated_urls:
+                self._validated_urls[raw_url] = probe_download_url(raw_url)
+            live_url = self._validated_urls[raw_url]
+            if live_url:
+                alive_urls.append(live_url)
+        return alive_urls
 
     def _get_remote_file_size(self, url):
         try:
@@ -259,6 +302,14 @@ class OnnxRuntimeRunner:
         # Directories (single-line pattern required by compliance checker)
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
+        self.home_dir = Path.home()
+        self.pts_home = get_pts_home()
+        self.pts_profile_dir = get_pts_profile_dir(self.benchmark_full)
+        self.pts_installed_dir = get_pts_installed_dir(self.benchmark)
+        self.pts_download_cache_dir = get_pts_download_cache_dir()
+        self.model_extract_dir = self.pts_installed_dir / "models"
+        self._download_package_map = None
+        self._download_url_cache = {}
         self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         self.quick_mode = quick_mode
@@ -300,6 +351,8 @@ class OnnxRuntimeRunner:
         print(f"Thread List: {self.thread_list}")
         print(f"Quick Mode: {self.quick_mode}")
         print(f"Parallel Executor: {self.parallel_executor}")
+        print(f"PTS Home: {self.pts_home}")
+        print(f"Installed Test Dir: {self.pts_installed_dir}")
         print(f"Results Directory: {self.results_dir}")
         print("=" * 80)
 
@@ -392,41 +445,232 @@ class OnnxRuntimeRunner:
 
     def find_perf_test_binary(self):
         """Locate onnxruntime_perf_test binary installed by PTS."""
-        pts_installed_dir = (
-            Path.home()
-            / ".phoronix-test-suite"
-            / "installed-tests"
-            / "pts"
-            / self.benchmark
-        )
         # Primary location (as built by install.sh)
         candidates = [
-            pts_installed_dir / "onnxruntime" / "build" / "Linux" / "Release" / "onnxruntime_perf_test",
+            self.pts_installed_dir / "onnxruntime" / "build" / "Linux" / "Release" / "onnxruntime_perf_test",
         ]
         for candidate in candidates:
             if candidate.exists() and os.access(str(candidate), os.X_OK):
                 return candidate
 
         # Fallback: recursive search under installed dir
-        print(f"  [INFO] Searching for onnxruntime_perf_test under {pts_installed_dir} ...")
-        for found in pts_installed_dir.rglob("onnxruntime_perf_test"):
+        print(f"  [INFO] Searching for onnxruntime_perf_test under {self.pts_installed_dir} ...")
+        for found in self.pts_installed_dir.rglob("onnxruntime_perf_test"):
             if os.access(str(found), os.X_OK):
                 print(f"  [OK] Found binary: {found}")
                 return found
 
-        print(f"  [WARN] Binary not found under {pts_installed_dir}")
+        print(f"  [WARN] Binary not found under {self.pts_installed_dir}")
         return None
 
+    def patch_install_script(self):
+        """Patch install.sh to extract model archives from the installed test directory."""
+        install_sh_path = self.pts_profile_dir / "install.sh"
+        if not install_sh_path.exists():
+            print(f"  [WARN] install.sh not found at {install_sh_path}")
+            return False
+
+        try:
+            content = install_sh_path.read_text()
+            if 'MODEL_ARCHIVE_DIR="${MODEL_ARCHIVE_DIR:-$PWD}"' in content:
+                print("  [INFO] install.sh already patched for model archive resolution")
+                return True
+
+            archive_block = (
+                'MODEL_ARCHIVE_DIR="${MODEL_ARCHIVE_DIR:-$PWD}"\n'
+                'cd "${HOME}"\n'
+                'for archive in \\\n'
+                '  yolov4.tar.gz \\\n'
+                '  fcn-resnet101-11.tar.gz \\\n'
+                '  super-resolution-10.tar.gz \\\n'
+                '  bertsquad-12.tar.gz \\\n'
+                '  gpt2-10.tar.gz \\\n'
+                '  arcfaceresnet100-8.tar.gz \\\n'
+                '  resnet50-v1-12-int8.tar.gz \\\n'
+                '  caffenet-12-int8.tar.gz \\\n'
+                '  FasterRCNN-12-int8.tar.gz \\\n'
+                '  t5-encoder-12.tar.gz \\\n'
+                '  zfnet512-12.tar.gz \\\n'
+                '  ResNet101-DUC-7.tar.gz\n'
+                'do\n'
+                '  if [ -f "${MODEL_ARCHIVE_DIR}/${archive}" ]; then\n'
+                '    tar -xf "${MODEL_ARCHIVE_DIR}/${archive}"\n'
+                '  elif [ -f "${HOME}/${archive}" ]; then\n'
+                '    tar -xf "${HOME}/${archive}"\n'
+                '  else\n'
+                '    echo "[WARN] Optional model archive not found: ${archive}"\n'
+                '  fi\n'
+                'done\n'
+            )
+            original_block = (
+                "cd ~\n"
+                "tar -xf yolov4.tar.gz\n"
+                "tar -xf fcn-resnet101-11.tar.gz\n"
+                "tar -xf super-resolution-10.tar.gz\n"
+                "tar -xf bertsquad-12.tar.gz\n"
+                "tar -xf gpt2-10.tar.gz\n"
+                "tar -xf arcfaceresnet100-8.tar.gz\n"
+                "tar -xf resnet50-v1-12-int8.tar.gz\n"
+                "tar -xf caffenet-12-int8.tar.gz\n"
+                "tar -xf FasterRCNN-12-int8.tar.gz\n"
+                "tar -xf t5-encoder-12.tar.gz\n"
+                "tar -xf zfnet512-12.tar.gz\n"
+                "tar -xf ResNet101-DUC-7.tar.gz\n"
+            )
+
+            if original_block not in content:
+                print("  [WARN] Could not find archive extraction block to patch in install.sh")
+                return False
+
+            install_sh_path.write_text(content.replace(original_block, archive_block))
+            print(f"  [OK] install.sh patched: {install_sh_path}")
+            return True
+        except Exception as e:
+            print(f"  [WARN] Failed to patch install.sh: {e}")
+            return False
+
+    def _get_alive_urls(self, raw_urls):
+        alive_urls = []
+        for raw_url in [u.strip() for u in raw_urls.split(",") if u.strip()]:
+            if raw_url not in self._download_url_cache:
+                self._download_url_cache[raw_url] = probe_download_url(raw_url)
+            live_url = self._download_url_cache[raw_url]
+            if live_url:
+                alive_urls.append(live_url)
+        return alive_urls
+
+    def _load_download_package_map(self):
+        if self._download_package_map is not None:
+            return self._download_package_map
+
+        package_map = {}
+        downloads_xml = self.pts_profile_dir / "downloads.xml"
+        if not downloads_xml.exists():
+            self._download_package_map = package_map
+            return package_map
+
+        try:
+            root = ET.parse(downloads_xml).getroot()
+            for package in root.findall("./Downloads/Package"):
+                filename_node = package.find("FileName")
+                url_node = package.find("URL")
+                if filename_node is None or url_node is None:
+                    continue
+                if not filename_node.text or not url_node.text:
+                    continue
+                urls = self._get_alive_urls(url_node.text)
+                if urls:
+                    package_map[filename_node.text.strip()] = urls
+                else:
+                    print(f"  [SKIP] No live download URL: {filename_node.text.strip()}")
+        except Exception as e:
+            print(f"  [WARN] Failed to parse downloads.xml: {e}")
+
+        self._download_package_map = package_map
+        return package_map
+
+    def _download_archive(self, archive_name, destination):
+        urls = self._load_download_package_map().get(archive_name, [])
+        if not urls:
+            return False
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = destination.with_suffix(destination.suffix + ".tmp")
+        for url in urls:
+            try:
+                print(f"  [INFO] Downloading archive: {archive_name}")
+                with urllib.request.urlopen(url, timeout=300) as response, open(tmp_path, "wb") as out:
+                    shutil.copyfileobj(response, out)
+                tmp_path.replace(destination)
+                return True
+            except Exception as e:
+                print(f"  [WARN] Download failed for {archive_name} from {url}: {e}")
+                if tmp_path.exists():
+                    tmp_path.unlink()
+        return False
+
+    def _model_search_roots(self):
+        return [
+            self.model_extract_dir,
+            self.home_dir,
+            self.pts_installed_dir,
+        ]
+
+    def _locate_model_file(self, model):
+        for root in self._model_search_roots():
+            candidate = root / model["path"]
+            if candidate.exists():
+                return candidate
+        return None
+
+    def extract_model_archives(self):
+        """Extract valid model archives into the installed test directory for stable lookup."""
+        self.model_extract_dir.mkdir(parents=True, exist_ok=True)
+        extracted = 0
+
+        for model in ONNX_MODELS:
+            target_path = self.model_extract_dir / model["path"]
+            if target_path.exists():
+                extracted += 1
+                continue
+
+            archive_candidates = [
+                self.pts_installed_dir / model["archive"],
+                self.pts_download_cache_dir / model["archive"],
+                self.home_dir / model["archive"],
+            ]
+            archive_path = next((p for p in archive_candidates if p.exists()), None)
+            if archive_path is None:
+                repaired_path = self.pts_download_cache_dir / model["archive"]
+                if self._download_archive(model["archive"], repaired_path):
+                    archive_path = repaired_path
+                else:
+                    continue
+
+            for attempt in range(2):
+                try:
+                    with tarfile.open(archive_path, "r:*") as tar:
+                        for member in tar.getmembers():
+                            member_path = (self.model_extract_dir / member.name).resolve()
+                            if not str(member_path).startswith(str(self.model_extract_dir.resolve())):
+                                raise tarfile.TarError(f"path traversal detected: {member.name}")
+                        tar.extractall(self.model_extract_dir)
+                    if target_path.exists():
+                        extracted += 1
+                        print(f"  [OK] Extracted model archive: {model['archive']} -> {target_path}")
+                    else:
+                        print(f"  [WARN] Extracted {model['archive']} but missing expected file: {target_path}")
+                    break
+                except (tarfile.TarError, OSError) as e:
+                    repaired_path = self.pts_download_cache_dir / model["archive"]
+                    if attempt == 0 and self._download_archive(model["archive"], repaired_path):
+                        archive_path = repaired_path
+                        continue
+                    print(f"  [WARN] Skipping invalid model archive {archive_path}: {e}")
+                    break
+
+        return extracted
+
     def get_available_models(self):
-        """Return list of model dicts whose .onnx files exist under home dir."""
-        home = Path.home()
+        """Return list of model dicts whose .onnx files exist in known PTS locations."""
         available = []
         for model in ONNX_MODELS:
-            model_path = home / model["path"]
-            if model_path.exists():
+            model_path = self._locate_model_file(model)
+            if model_path is not None and model_path.exists():
+                available.append({**model, "abs_path": model_path})
+        if available:
+            return available
+
+        print(f"  [INFO] No extracted models found under {', '.join(str(p) for p in self._model_search_roots())}")
+        self.extract_model_archives()
+
+        for model in ONNX_MODELS:
+            model_path = self._locate_model_file(model)
+            if model_path is not None and model_path.exists():
                 available.append({**model, "abs_path": model_path})
             else:
-                print(f"  [SKIP] Model not found (optional): {model['name']} ({model_path})")
+                expected = self.model_extract_dir / model["path"]
+                print(f"  [SKIP] Model not found (optional): {model['name']} ({expected})")
         return available
 
     # ------------------------------------------------------------------
@@ -440,7 +684,7 @@ class OnnxRuntimeRunner:
         print("=" * 80)
 
         # Pre-seed model downloads with aria2c (all models are Optional in downloads.xml)
-        downloader = PreSeedDownloader()
+        downloader = PreSeedDownloader(pts_home=self.pts_home)
         if downloader.is_aria2_available():
             print("  [INFO] Pre-seeding model downloads with aria2c...")
             downloader.download_from_xml(
@@ -457,6 +701,8 @@ class OnnxRuntimeRunner:
             ["bash", "-c", remove_cmd],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+
+        self.patch_install_script()
 
         # Resolve install log path
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
@@ -526,13 +772,7 @@ class OnnxRuntimeRunner:
                 print(f"    {line}", end="")
             sys.exit(1)
 
-        install_dir = (
-            Path.home()
-            / ".phoronix-test-suite"
-            / "installed-tests"
-            / "pts"
-            / self.benchmark
-        )
+        install_dir = self.pts_installed_dir
         if not install_dir.exists():
             print(f"  [ERROR] Installation directory not found: {install_dir}")
             sys.exit(1)
@@ -1039,7 +1279,7 @@ class OnnxRuntimeRunner:
 
     def ensure_upload_disabled(self):
         """Ensure PTS result upload is disabled."""
-        config_path = Path.home() / ".phoronix-test-suite" / "user-config.xml"
+        config_path = self.pts_home / "user-config.xml"
         if not config_path.exists():
             return
         try:

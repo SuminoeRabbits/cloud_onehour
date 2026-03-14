@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import re
 import shutil
 import subprocess
@@ -8,6 +9,26 @@ from pathlib import Path
 
 def _strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text or "")
+
+
+def get_pts_home() -> Path:
+    pts_user_path = os.environ.get("PTS_USER_PATH", "").strip()
+    if pts_user_path:
+        return Path(pts_user_path).expanduser()
+    return Path.home() / ".phoronix-test-suite"
+
+
+def get_pts_profile_dir(benchmark_full: str) -> Path:
+    namespace, benchmark = benchmark_full.split("/", 1)
+    return get_pts_home() / "test-profiles" / namespace / benchmark
+
+
+def get_pts_installed_dir(benchmark: str, namespace: str = "pts") -> Path:
+    return get_pts_home() / "installed-tests" / namespace / benchmark
+
+
+def get_pts_download_cache_dir() -> Path:
+    return get_pts_home() / "download-cache"
 
 
 def detect_pts_failure_from_log(log_file: Path) -> tuple[bool, str]:
