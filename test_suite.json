@@ -33,6 +33,16 @@
                     "sve2_support": true,
                     "notes": "Uses --threads=$NUM_CPU_CORES runtime CLI argument",
                     "exe_time_v8cpu": "20.0"
+                },
+                "pts/pyperformance-1.1.0": {
+                    "enabled": false,
+                    "test_snippet": "pyperformance-1.11",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "Single-threaded",
+                    "sve2_support": false,
+                    "notes": "Pure-Python single-threaded benchmark suite (17 sub-benchmarks). Runs outside phoronix-test-suite via isolated /tmp venv (pyperformance==1.11). venv is deleted on exit. Internet required at runtime for pip install.",
+                    "exe_time_v8cpu": "10.0"
                 }
             }
         },
@@ -490,24 +500,44 @@
                     "exe_time_v8cpu": "20.0"
                 },
                 "pts/numpy-1.2.1": {
-                    "enabled": false,
+                    "enabled": true,
                     "test_snippet": "Numpy Benchmark-1.2.1",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "Dependencies with Python/Numpy/scipy version. Need to revisit",
-                    "exe_time_v8cpu": "0.5"
+                    "exe_time_v8cpu": "1.0"
+                },
+                "pts/pytorch-1.2.0": {
+                    "enabled": true,
+                    "test_snippet": "PyTorch-2.6",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "PyTorch benchmark via isolated venv. Default config is CPU / batch-size=1 / model=resnet50. Thread count is applied at runtime with torch.set_num_threads and BLAS/OpenMP env vars.",
+                    "exe_time_v8cpu": "100.0"
                 },
                 "pts/llama-cpp-2.4.1": {
-                    "enabled": false,
-                    "test_snippet": "Llama.cpp",
+                    "enabled": true,
+                    "test_snippet": "Llama.cpp-b8121",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": true,
                     "notes": "LLM inference benchmark using OpenBLAS CPU backend. Tests: Prompt Processing and Text Generation (tokens/sec, higher is better). LLAMA_OPENBLAS=1 set at build time.",
-                    "exe_time_v8cpu": "400.0"
+                    "exe_time_v8cpu": "100.0"
+                },
+                "pts/onnx-1.24.0": {
+                    "enabled": true,
+                    "test_snippet": "ONNX Runtime-1.24.1",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "ONNX Runtime inference benchmark (Microsoft). Builds onnxruntime v1.24.1 from source (-O3 -march=native). Runs 11 optional ONNX models (yolov4, bertsquad-12, GPT-2, ResNet50-int8, etc.) via onnxruntime_perf_test -t 60 -x NUM_CPU_CORES. Result: Inferences Per Second (HIB). Models are all Optional; missing models are skipped.",
+                    "exe_time_v8cpu": "20.0"
                 }
             }
         }
