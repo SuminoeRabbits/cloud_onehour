@@ -64,9 +64,9 @@ BENCHMARK      = "numpy-1.2.1"
 BENCHMARK_FULL = f"pts/{BENCHMARK}"
 TEST_CATEGORY  = "AI"
 
-# Pinned packages to install into the isolated venv.
-# PTS install.sh also runs "pip install scipy numpy"; since venv/bin is prepended
-# to PATH during batch-install, those pip calls land in this same venv.
+# Pinned packages — single source of truth embedded in the runner.
+# The runner writes REQUIREMENTS_FILE at runtime; no static file needed in git.
+_PINNED_PACKAGES = "numpy==2.4.2\nscipy==1.17.1\n"
 REQUIREMENTS_FILE = Path(__file__).with_name("requirements_numpy-1.2.1.txt")
 WHEELHOUSE_DIR = Path(__file__).with_name("wheelhouse") / "numpy-1.2.1"
 
@@ -259,9 +259,9 @@ class NumpyBenchmarkRunner:
         venv_dir = self.venv_mgr.create()
         print(f"  [INFO] venv path : {venv_dir}")
 
-        if not REQUIREMENTS_FILE.exists():
-            print(f"  [ERROR] requirements file not found: {REQUIREMENTS_FILE}")
-            sys.exit(1)
+        # Generate requirements file from embedded constant (no static file needed in git)
+        REQUIREMENTS_FILE.write_text(_PINNED_PACKAGES)
+        print(f"  [INFO] requirements written : {REQUIREMENTS_FILE}")
 
         # Create venv
         result = subprocess.run(
@@ -283,30 +283,33 @@ class NumpyBenchmarkRunner:
         self.install_pinned_requirements()
 
     def install_pinned_requirements(self) -> None:
-        """Install exact pinned package versions into the isolated venv via wheelhouse."""
-        if not WHEELHOUSE_DIR.exists():
-            print(f"  [ERROR] wheelhouse directory not found: {WHEELHOUSE_DIR}")
-            print("  [ERROR] Provide pre-downloaded wheels for numpy-1.2.1 dependencies.")
-            sys.exit(1)
+        """Install exact pinned package versions into the isolated venv.
 
-        wheel_files = sorted(WHEELHOUSE_DIR.glob("*.whl"))
-        if not wheel_files:
-            print(f"  [ERROR] No wheel files found in wheelhouse: {WHEELHOUSE_DIR}")
-            print("  [ERROR] Expected local wheels for pinned requirements.")
-            sys.exit(1)
+        Uses the local wheelhouse (pre-downloaded by build_numpy_wheelhouse.sh) when
+        available.  Falls back to PyPI download if the wheelhouse is absent or empty.
+        """
+        wheel_files = sorted(WHEELHOUSE_DIR.glob("*.whl")) if WHEELHOUSE_DIR.exists() else []
 
-        print(f"  [INFO] Installing from requirements: {REQUIREMENTS_FILE}")
-        print(f"  [INFO] Using wheelhouse: {WHEELHOUSE_DIR}")
-        result = subprocess.run(
-            [
+        if wheel_files:
+            print(f"  [INFO] Installing from wheelhouse: {WHEELHOUSE_DIR}")
+            print(f"  [INFO] Requirements: {REQUIREMENTS_FILE}")
+            cmd = [
                 str(self.venv_mgr.pip),
                 "install",
                 "--no-index",
-                "--find-links",
-                str(WHEELHOUSE_DIR),
-                "-r",
-                str(REQUIREMENTS_FILE),
-            ],
+                "--find-links", str(WHEELHOUSE_DIR),
+                "-r", str(REQUIREMENTS_FILE),
+            ]
+        else:
+            print(f"  [INFO] Wheelhouse not found; installing from PyPI: {REQUIREMENTS_FILE}")
+            cmd = [
+                str(self.venv_mgr.pip),
+                "install",
+                "-r", str(REQUIREMENTS_FILE),
+            ]
+
+        result = subprocess.run(
+            cmd,
             capture_output=True,
             text=True,
         )
