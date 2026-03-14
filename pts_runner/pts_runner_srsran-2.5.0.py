@@ -15,6 +15,7 @@ System Dependencies:
 - libsctp            : libsctp-dev (Ubuntu) / lksctp-tools-devel (RHEL)
 - yaml-cpp           : libyaml-cpp-dev (Ubuntu) / yaml-cpp-devel (RHEL)
 - libgtest           : libgtest-dev (Ubuntu) / gtest-devel (RHEL)
+  These must be provisioned by scripts/setup_srs.sh or scripts_rhel9/setup_srs.sh.
 
 - Environment Size : ~294 MB
 - Test Type        : Processor (5G PHY layer benchmark)
@@ -308,55 +309,47 @@ class SrsranRunner:
         return len(failed) == 0
 
     # ------------------------------------------------------------------
-    # System dependency installation
+    # System dependency verification
     # ------------------------------------------------------------------
 
-    def install_system_deps(self):
-        """Install OS-specific build and library dependencies for srsRAN."""
-        print("\n>>> Installing system dependencies for srsRAN...")
+    def check_system_deps(self) -> bool:
+        """Verify required host tools are already provisioned."""
+        required_cmds = ["cmake", "pkg-config"]
+        missing_cmds = [cmd for cmd in required_cmds if shutil.which(cmd) is None]
 
-        # Detect package manager
-        has_apt = shutil.which("apt-get") is not None
-        has_dnf = shutil.which("dnf") is not None
-        has_yum = shutil.which("yum") is not None
+        missing_paths = []
+        shared_lib_candidates = {
+            "libfftw3.so": [
+                "/usr/lib/x86_64-linux-gnu/libfftw3.so",
+                "/usr/lib64/libfftw3.so",
+                "/usr/lib/libfftw3.so",
+            ],
+            "libsctp.so": [
+                "/usr/lib/x86_64-linux-gnu/libsctp.so",
+                "/usr/lib64/libsctp.so",
+                "/usr/lib/libsctp.so",
+            ],
+            "libyaml-cpp.so": [
+                "/usr/lib/x86_64-linux-gnu/libyaml-cpp.so",
+                "/usr/lib64/libyaml-cpp.so",
+                "/usr/lib/libyaml-cpp.so",
+            ],
+        }
+        for soname, candidates in shared_lib_candidates.items():
+            if not any(Path(candidate).exists() for candidate in candidates):
+                missing_paths.append(soname)
 
-        if has_apt:
-            pkgs = [
-                "build-essential", "cmake",
-                "libfftw3-dev", "libboost-all-dev",
-                "libconfig++-dev", "libmbedtls-dev",
-                "libsctp-dev", "libyaml-cpp-dev",
-                "libgtest-dev",
-            ]
-            cmd = ["sudo", "apt-get", "install", "-y"] + pkgs
-        elif has_dnf:
-            pkgs = [
-                "gcc", "gcc-c++", "make", "cmake",
-                "fftw-devel", "boost-devel",
-                "libconfig-devel", "mbedtls-devel",
-                "lksctp-tools-devel", "yaml-cpp-devel",
-                "gtest-devel",
-            ]
-            cmd = ["sudo", "dnf", "install", "-y"] + pkgs
-        elif has_yum:
-            pkgs = [
-                "gcc", "gcc-c++", "make", "cmake",
-                "fftw-devel", "boost-devel",
-                "libconfig-devel",
-                "lksctp-tools-devel",
-                "gtest-devel",
-            ]
-            cmd = ["sudo", "yum", "install", "-y"] + pkgs
-        else:
-            print("  [WARN] No supported package manager found; skipping system dep install")
-            return
+        if not missing_cmds and not missing_paths:
+            print("  [OK] srsRAN host dependencies appear to be provisioned")
+            return True
 
-        print(f"  [INFO] Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=False)
-        if result.returncode != 0:
-            print(f"  [WARN] System dependency install returned {result.returncode}; continuing anyway")
-        else:
-            print("  [OK] System dependencies installed")
+        print("  [ERROR] Missing host dependencies for srsRAN:")
+        for cmd in missing_cmds:
+            print(f"    - command not found: {cmd}")
+        for item in missing_paths:
+            print(f"    - library not found: {item}")
+        print("  [ERROR] Provision dependencies via scripts/setup_srs.sh or scripts_rhel9/setup_srs.sh")
+        return False
 
     # ------------------------------------------------------------------
     # Benchmark installation
@@ -368,8 +361,8 @@ class SrsranRunner:
         print(f">>> Installing {self.benchmark_full}")
         print('=' * 80)
 
-        # Install system libraries first
-        self.install_system_deps()
+        if not self.check_system_deps():
+            sys.exit(1)
 
         # Pre-seed large downloads via aria2c
         downloader = PreSeedDownloader()

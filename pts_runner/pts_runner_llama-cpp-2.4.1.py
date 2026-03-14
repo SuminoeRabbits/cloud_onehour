@@ -12,6 +12,7 @@ System Dependencies:
 - blas-dev         : libopenblas-dev (Ubuntu) / openblas-devel (RHEL)
 - gfortran         : gfortran (Ubuntu) / gcc-gfortran (RHEL)
 - pkg-config       : pkg-config (Ubuntu) / pkgconf-pkg-config (RHEL)
+  These must be provisioned by scripts/setup_llama.sh or scripts_rhel9/setup_llama.sh.
 
 Runtime shared libraries (built by PTS install.sh):
 - libllama.so.0, libggml.so.0, libggml-base.so.0
@@ -461,52 +462,36 @@ class LlamaCppRunner:
             print(f"[ERROR] Failed to restore test-definition.xml: {exc}")
 
     # ------------------------------------------------------------------
-    # System dependency installation
+    # System dependency verification
     # ------------------------------------------------------------------
 
-    def install_system_deps(self):
-        """Install OS-specific build dependencies for llama.cpp."""
-        print("\n>>> Installing system dependencies for llama.cpp...")
+    def check_system_deps(self) -> bool:
+        """Verify required host tools are already provisioned."""
+        required_cmds = ["cmake", "curl", "pkg-config", "gfortran"]
+        missing_cmds = [cmd for cmd in required_cmds if shutil.which(cmd) is None]
 
-        has_apt = shutil.which("apt-get") is not None
-        has_dnf = shutil.which("dnf") is not None
-        has_yum = shutil.which("yum") is not None
-
-        if has_apt:
-            pkgs = [
-                "build-essential", "cmake", "curl",
-                "libopenblas-dev", "gfortran", "pkg-config",
-            ]
-            cmd = ["sudo", "apt-get", "install", "-y"] + pkgs
-        elif has_dnf:
-            pkgs = [
-                "gcc", "gcc-c++", "make", "cmake",
-                "gcc-gfortran", "pkgconf-pkg-config", "openblas-devel",
-            ]
-            # Avoid curl vs curl-minimal conflict
-            import subprocess as _sp
-            r = _sp.run(["rpm", "-q", "curl-minimal"], capture_output=True)
-            if r.returncode != 0:
-                r2 = _sp.run(["rpm", "-q", "curl"], capture_output=True)
-                if r2.returncode != 0:
-                    pkgs.append("curl")
-            cmd = ["sudo", "dnf", "install", "-y"] + pkgs
-        elif has_yum:
-            pkgs = [
-                "gcc", "gcc-c++", "make", "cmake",
-                "gcc-gfortran", "pkgconfig", "openblas-devel", "curl",
-            ]
-            cmd = ["sudo", "yum", "install", "-y"] + pkgs
+        missing_paths = []
+        for candidate in (
+            "/usr/lib/x86_64-linux-gnu/libopenblas.so",
+            "/usr/lib64/libopenblas.so",
+            "/usr/lib/libopenblas.so",
+        ):
+            if Path(candidate).exists():
+                break
         else:
-            print("  [WARN] No supported package manager found; skipping system dep install")
-            return
+            missing_paths.append("libopenblas.so")
 
-        print(f"  [INFO] Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=False)
-        if result.returncode != 0:
-            print(f"  [WARN] System dependency install returned {result.returncode}; continuing anyway")
-        else:
-            print("  [OK] System dependencies installed")
+        if not missing_cmds and not missing_paths:
+            print("  [OK] llama.cpp host dependencies appear to be provisioned")
+            return True
+
+        print("  [ERROR] Missing host dependencies for llama.cpp:")
+        for cmd in missing_cmds:
+            print(f"    - command not found: {cmd}")
+        for item in missing_paths:
+            print(f"    - library not found: {item}")
+        print("  [ERROR] Provision dependencies via scripts/setup_llama.sh or scripts_rhel9/setup_llama.sh")
+        return False
 
     # ------------------------------------------------------------------
     # Benchmark installation
@@ -518,7 +503,8 @@ class LlamaCppRunner:
         print(f">>> Installing {self.benchmark_full}")
         print('=' * 80)
 
-        self.install_system_deps()
+        if not self.check_system_deps():
+            sys.exit(1)
 
         downloader = PreSeedDownloader()
         if downloader.is_aria2_available():

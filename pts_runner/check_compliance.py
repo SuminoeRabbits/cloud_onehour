@@ -145,6 +145,9 @@ class ComplianceChecker:
         self.check_aria2_size_verification()
         self.check_aria2_connection_tuning()
 
+        # Host environment safety (new 2026-03)
+        self.check_no_host_package_install()
+
         # Informational checks
         self.find_hardcoded_thread_lists()
 
@@ -240,6 +243,36 @@ class ComplianceChecker:
             self.warnings.append(
                 f"⚠️  WARNING: Could not verify Python 3.10 syntax compatibility: {str(e)}"
             )
+
+    def check_no_host_package_install(self):
+        """Detect OS package installation commands inside runner scripts."""
+        patterns = [
+            r'\[\s*"sudo"\s*,\s*"(?:apt-get|apt|dnf|yum|pacman|zypper|brew)"\s*,\s*"install"',
+            r'\b(?:apt-get|apt|dnf|yum|pacman|zypper|brew)\s+install\b',
+            r'\badd-apt-repository\b',
+            r'\brpm\s+-i\b',
+            r'\bdpkg\s+-i\b',
+        ]
+
+        matches = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, self.content):
+                line_no = self.content[:match.start()].count("\n") + 1
+                snippet = self.content.splitlines()[line_no - 1].strip()
+                matches.append((line_no, snippet))
+
+        if matches:
+            formatted = "\n".join(
+                f"   line {line_no}: {snippet}" for line_no, snippet in matches[:8]
+            )
+            self.warnings.append(
+                "⚠️  WARNING: Runner appears to install host OS packages directly.\n"
+                "   Benchmark runners should not mutate the OS at runtime; move dependency\n"
+                "   provisioning to scripts/ or scripts_rhel9/ setup flows.\n"
+                f"{formatted}"
+            )
+        else:
+            self.passed.append("✅ No host OS package installation commands detected in runner")
 
 
 
