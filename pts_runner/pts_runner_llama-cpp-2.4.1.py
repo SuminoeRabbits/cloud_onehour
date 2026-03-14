@@ -23,9 +23,13 @@ Runtime shared libraries (built by PTS install.sh):
 - Supported Platforms: Linux (x86_64, ARMv8 64-bit)
 - Backends tested  : CPU BLAS (OpenBLAS)
 
-Test Options:
-  1. Prompt Processing  (tokens/sec, higher is better)
-  2. Text Generation    (tokens/sec, higher is better)
+Test Options (active subset via patch_test_definition):
+  Backend : CPU BLAS only (Vulkan / CUDA / ROCm excluded)
+  Models  : granite-3.0-3b-a800m-instruct-Q8_0
+            Qwen3-8B-Q8_0
+            DeepSeek-R1-Distill-Llama-8B-Q8_0
+  Tests   : Text Generation 128  (tokens/sec, higher is better)
+            Prompt Processing 512 (tokens/sec, higher is better)
 
 Result Scale: Tokens/Second (Higher Is Better)
 TimesToRun  : 3
@@ -204,6 +208,16 @@ class PreSeedDownloader:
 class LlamaCppRunner:
     """PTS runner for pts/llama-cpp-2.4.1 (LLM inference benchmark)."""
 
+    # Subset of test-definition.xml entries to keep (others are removed at patch time).
+    # Identifiers match the <Identifier> tags in test-definition.xml.
+    _KEEP_BACKENDS: frozenset = frozenset({"BLAS"})
+    _KEEP_MODELS: frozenset = frozenset({
+        "granite-3.0-3b-a800m-instruct-Q8_0.gguf",
+        "Qwen3-8B-Q8_0.gguf",
+        "DeepSeek-R1-Distill-Llama-8B-Q8_0.gguf",
+    })
+    _KEEP_TESTS: frozenset = frozenset({"-n 128 -p 0", "-n 0 -p 512"})
+
     def __init__(self, threads_arg=None, quick_mode=False, skip_optional=False):
         # Benchmark identification
         self.benchmark = "llama-cpp-2.4.1"
@@ -274,6 +288,8 @@ class LlamaCppRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results")
 
+        self.patch_test_definition()
+
         install_status = get_install_status(self.benchmark_full, self.benchmark)
         info_installed = install_status["info_installed"]
         test_installed_ok = install_status["test_installed_ok"]
@@ -312,6 +328,7 @@ class LlamaCppRunner:
 
         self.generate_summary()
 
+        self.restore_test_definition()
         cleanup_pts_artifacts(self.benchmark)
 
         if failed:
@@ -322,6 +339,126 @@ class LlamaCppRunner:
             print('=' * 80)
 
         return len(failed) == 0
+
+    # ------------------------------------------------------------------
+    # Test-definition patching (model / backend / test-type filter)
+    # ------------------------------------------------------------------
+
+    def patch_test_definition(self) -> bool:
+        """
+        Patch test-definition.xml to reduce benchmark runtime:
+        - Keep only backends in _KEEP_BACKENDS  (removes CUDA / ROCm / Vulkan)
+        - Keep only models   in _KEEP_MODELS    (removes large / slow models)
+        - Keep only tests    in _KEEP_TESTS     (removes PP 1024 / PP 2048)
+
+        Returns True if patched successfully (backup created).
+        Restores original on any error and returns False.
+        """
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "test-definition.xml"
+        )
+        bak_path = xml_path.with_suffix(".xml.bak")
+
+        if not xml_path.exists():
+            print(f"[WARN] test-definition.xml not found, skipping patch: {xml_path}")
+            return False
+
+        try:
+            import shutil as _shutil
+            _shutil.copy2(xml_path, bak_path)
+
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+
+            test_settings = root.find("TestSettings")
+            if test_settings is None:
+                raise ValueError("TestSettings element not found")
+
+            for option in test_settings.findall("Option"):
+                identifier_el = option.find("Identifier")
+                if identifier_el is None:
+                    continue
+                identifier = (identifier_el.text or "").strip()
+
+                menu = option.find("Menu")
+                if menu is None:
+                    continue
+
+                if identifier == "backend":
+                    for entry in menu.findall("Entry"):
+                        value_el = entry.find("Value")
+                        val = (value_el.text or "").strip() if value_el is not None else ""
+                        # Value for CPU BLAS is "BLAS"; others contain extra flags
+                        backend_key = val.split()[0] if val else ""
+                        if backend_key not in self._KEEP_BACKENDS:
+                            menu.remove(entry)
+                            print(f"  [PATCH] Removed backend entry: {val!r}")
+
+                elif identifier == "model":
+                    for entry in menu.findall("Entry"):
+                        value_el = entry.find("Value")
+                        val = (value_el.text or "").strip() if value_el is not None else ""
+                        if val not in self._KEEP_MODELS:
+                            menu.remove(entry)
+                            name_el = entry.find("Name")
+                            name = (name_el.text or val) if name_el is not None else val
+                            print(f"  [PATCH] Removed model entry: {name!r}")
+
+                elif identifier == "test":
+                    for entry in menu.findall("Entry"):
+                        value_el = entry.find("Value")
+                        val = (value_el.text or "").strip() if value_el is not None else ""
+                        if val not in self._KEEP_TESTS:
+                            menu.remove(entry)
+                            name_el = entry.find("Name")
+                            name = (name_el.text or val) if name_el is not None else val
+                            print(f"  [PATCH] Removed test entry: {name!r}")
+
+            tree.write(xml_path, encoding="utf-8", xml_declaration=True)
+            print(
+                f"[INFO] test-definition.xml patched: "
+                f"backends={sorted(self._KEEP_BACKENDS)}, "
+                f"models={sorted(self._KEEP_MODELS)}, "
+                f"tests={sorted(self._KEEP_TESTS)}"
+            )
+            return True
+
+        except Exception as exc:
+            print(f"[WARN] Failed to patch test-definition.xml ({exc}), restoring backup")
+            if bak_path.exists():
+                import shutil as _shutil
+                _shutil.copy2(bak_path, xml_path)
+                bak_path.unlink()
+            return False
+
+    def restore_test_definition(self) -> None:
+        """Restore test-definition.xml from backup created by patch_test_definition."""
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "test-definition.xml"
+        )
+        bak_path = xml_path.with_suffix(".xml.bak")
+
+        if not bak_path.exists():
+            print("[WARN] test-definition.xml.bak not found, cannot restore")
+            return
+
+        try:
+            import shutil as _shutil
+            _shutil.copy2(bak_path, xml_path)
+            bak_path.unlink()
+            print("[INFO] test-definition.xml restored from backup")
+        except Exception as exc:
+            print(f"[ERROR] Failed to restore test-definition.xml: {exc}")
 
     # ------------------------------------------------------------------
     # System dependency installation
