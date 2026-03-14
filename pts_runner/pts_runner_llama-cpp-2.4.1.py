@@ -289,48 +289,51 @@ class LlamaCppRunner:
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results")
 
-        self.patch_test_definition()
+        failed = []
+        try:
+            self.patch_test_definition()
+            self.patch_downloads_xml()
 
-        install_status = get_install_status(self.benchmark_full, self.benchmark)
-        info_installed = install_status["info_installed"]
-        test_installed_ok = install_status["test_installed_ok"]
-        installed_dir_exists = install_status["installed_dir_exists"]
-        already_installed = install_status["already_installed"]
+            install_status = get_install_status(self.benchmark_full, self.benchmark)
+            info_installed = install_status["info_installed"]
+            test_installed_ok = install_status["test_installed_ok"]
+            installed_dir_exists = install_status["installed_dir_exists"]
+            already_installed = install_status["already_installed"]
 
-        print(
-            f"[INFO] Install check -> info:{info_installed}, "
-            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
-        )
-
-        if not already_installed and installed_dir_exists:
             print(
-                f"[WARN] Existing install directory found but PTS does not report "
-                f"'{self.benchmark_full}' as installed. Treating as broken install and reinstalling."
+                f"[INFO] Install check -> info:{info_installed}, "
+                f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
             )
 
-        if not already_installed:
-            self.install_benchmark()
-        else:
-            print(f"[INFO] Benchmark already installed, skipping: {self.benchmark_full}")
+            if not already_installed and installed_dir_exists:
+                print(
+                    f"[WARN] Existing install directory found but PTS does not report "
+                    f"'{self.benchmark_full}' as installed. Treating as broken install and reinstalling."
+                )
 
-        failed = []
-        for num_threads in self.thread_list:
+            if not already_installed:
+                self.install_benchmark()
+            else:
+                print(f"[INFO] Benchmark already installed, skipping: {self.benchmark_full}")
+
+            for num_threads in self.thread_list:
+                print('\n' + '=' * 80)
+                print(f">>> Running {self.benchmark} with {num_threads} thread(s)")
+                print('=' * 80)
+                if not self.run_benchmark(num_threads):
+                    print(f"[ERROR] Benchmark failed for {num_threads} thread(s)")
+                    failed.append(num_threads)
+
             print('\n' + '=' * 80)
-            print(f">>> Running {self.benchmark} with {num_threads} thread(s)")
+            print(f">>> Exporting results")
             print('=' * 80)
-            if not self.run_benchmark(num_threads):
-                print(f"[ERROR] Benchmark failed for {num_threads} thread(s)")
-                failed.append(num_threads)
+            self.export_results()
 
-        print('\n' + '=' * 80)
-        print(f">>> Exporting results")
-        print('=' * 80)
-        self.export_results()
-
-        self.generate_summary()
-
-        self.restore_test_definition()
-        cleanup_pts_artifacts(self.benchmark)
+            self.generate_summary()
+        finally:
+            self.restore_downloads_xml()
+            self.restore_test_definition()
+            cleanup_pts_artifacts(self.benchmark)
 
         if failed:
             print(f"\n[WARN] Failed thread counts: {failed}")
@@ -460,6 +463,95 @@ class LlamaCppRunner:
             print("[INFO] test-definition.xml restored from backup")
         except Exception as exc:
             print(f"[ERROR] Failed to restore test-definition.xml: {exc}")
+
+    def patch_downloads_xml(self) -> bool:
+        """Patch downloads.xml to keep only source tarball, kept models, and needed runtime packages."""
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "downloads.xml"
+        )
+        bak_path = xml_path.with_suffix(".xml.bak")
+
+        if not xml_path.exists():
+            print(f"[WARN] downloads.xml not found, skipping patch: {xml_path}")
+            return False
+
+        keep_filenames = set(self._KEEP_MODELS) | {
+            "llama.cpp-b8121.tar.gz",
+        }
+
+        try:
+            import shutil as _shutil
+            _shutil.copy2(xml_path, bak_path)
+
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            downloads_node = root.find("Downloads")
+            if downloads_node is None:
+                raise ValueError("Downloads element not found")
+
+            removed = 0
+            kept = 0
+            for package in list(downloads_node.findall("Package")):
+                filename_el = package.find("FileName")
+                platform_el = package.find("PlatformSpecific")
+                filename = (filename_el.text or "").strip() if filename_el is not None else ""
+                platform = (platform_el.text or "").strip() if platform_el is not None else ""
+
+                keep_package = False
+                if filename in keep_filenames:
+                    keep_package = True
+                elif platform and platform.lower() != "linux":
+                    keep_package = False
+                elif filename.endswith(".gguf"):
+                    keep_package = filename in self._KEEP_MODELS
+
+                if keep_package:
+                    kept += 1
+                    continue
+
+                downloads_node.remove(package)
+                removed += 1
+                print(f"  [PATCH] Removed download package: {filename!r}")
+
+            tree.write(xml_path, encoding="utf-8", xml_declaration=True)
+            print(f"[INFO] downloads.xml patched: kept={kept}, removed={removed}")
+            return True
+        except Exception as exc:
+            print(f"[WARN] Failed to patch downloads.xml ({exc}), restoring backup")
+            if bak_path.exists():
+                import shutil as _shutil
+                _shutil.copy2(bak_path, xml_path)
+                bak_path.unlink()
+            return False
+
+    def restore_downloads_xml(self) -> None:
+        """Restore downloads.xml from backup created by patch_downloads_xml."""
+        xml_path = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "downloads.xml"
+        )
+        bak_path = xml_path.with_suffix(".xml.bak")
+
+        if not bak_path.exists():
+            print("[WARN] downloads.xml.bak not found, cannot restore")
+            return
+
+        try:
+            import shutil as _shutil
+            _shutil.copy2(bak_path, xml_path)
+            bak_path.unlink()
+            print("[INFO] downloads.xml restored from backup")
+        except Exception as exc:
+            print(f"[ERROR] Failed to restore downloads.xml: {exc}")
 
     # ------------------------------------------------------------------
     # System dependency verification
