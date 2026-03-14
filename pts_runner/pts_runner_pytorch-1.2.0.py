@@ -44,11 +44,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-from runner_common import (
-    cleanup_pts_artifacts,
-    detect_pts_failure_from_log,
-    get_pts_profile_dir,
-)
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, get_pts_profile_dir
 
 
 BENCHMARK = "pytorch-1.2.0"
@@ -129,7 +125,7 @@ class PyTorchBenchmarkRunner:
         threads_arg: int | None = None,
         quick_mode: bool = False,
     ) -> None:
-        self.benchmark = BENCHMARK
+        self.benchmark = "pytorch-1.2.0"
         self.benchmark_full = BENCHMARK_FULL
         self.test_category = TEST_CATEGORY
         self.test_category_dir = self.test_category.replace(" ", "_")
@@ -141,7 +137,7 @@ class PyTorchBenchmarkRunner:
         if threads_arg is None:
             n_4 = self.vcpu_count // 4
             self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
-            self.thread_list = sorted({t for t in self.thread_list if t > 0})
+            self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
         else:
             self.thread_list = [min(threads_arg, self.vcpu_count)]
 
@@ -158,14 +154,7 @@ class PyTorchBenchmarkRunner:
 
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
-        self.results_dir = (
-            self.project_root
-            / "results"
-            / self.machine_name
-            / self.os_name
-            / self.test_category_dir
-            / self.benchmark
-        )
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
 
         self.profile_dir = get_pts_profile_dir(self.benchmark_full)
 
@@ -208,6 +197,11 @@ class PyTorchBenchmarkRunner:
         env["OPENBLAS_NUM_THREADS"] = str(num_threads)
         env["NUMEXPR_NUM_THREADS"] = str(num_threads)
         env["TORCH_NUM_THREADS"] = str(num_threads)
+        # PTS prompt suppression (avoids interactive prompts):
+        # TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads
+        # TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads
+        env["TEST_RESULTS_NAME"] = f"{self.benchmark}-{num_threads}threads"
+        env["TEST_RESULTS_DESCRIPTION"] = f"{self.benchmark}-{num_threads}threads"
         return env
 
     def setup_venv(self) -> None:
@@ -296,16 +290,27 @@ class PyTorchBenchmarkRunner:
     def install_benchmark(self) -> None:
         self.results_dir.mkdir(parents=True, exist_ok=True)
         install_log = self.results_dir / "install.log"
-        with open(install_log, "w") as lf:
-            lf.write("[INSTALL] Starting pytorch venv setup\n")
 
-        self.ensure_profile_present()
-        self.setup_venv()
+        install_status = get_install_status(self.benchmark_full, self.benchmark)
+        already_installed = install_status["already_installed"]
+        installed_dir_exists = install_status["installed_dir_exists"]
 
-        with open(install_log, "a") as lf:
-            lf.write("[INSTALL] Profile metadata available\n")
-            lf.write("[INSTALL] venv setup complete\n")
-            lf.write("[INSTALL] Complete\n")
+        if not already_installed and installed_dir_exists:
+            print(f"  [WARN] Incomplete PTS install detected for {self.benchmark_full}, proceeding with venv setup")
+
+        if not already_installed:
+            with open(install_log, "w") as lf:
+                lf.write("[INSTALL] Starting pytorch venv setup\n")
+
+            self.ensure_profile_present()
+            self.setup_venv()
+
+            with open(install_log, "a") as lf:
+                lf.write("[INSTALL] Profile metadata available\n")
+                lf.write("[INSTALL] venv setup complete\n")
+                lf.write("[INSTALL] Complete\n")
+        else:
+            print(f"  [INFO] {self.benchmark_full} already installed via PTS, skipping venv setup")
 
     def _workload_key(self, model: str, batch_size: int) -> str:
         return f"{self.device}-batch{batch_size}-{model}"
@@ -403,19 +408,18 @@ class PyTorchBenchmarkRunner:
         if pts_test_failed:
             print(f"  [WARN] Failure marker detected in log: {pts_failure_reason}")
 
-        if returncode != 0 or pts_test_failed:
-            reason = pts_failure_reason or f"returncode={returncode}"
-            print(f"  [WARN] run{run_idx} failed: {reason}")
+        if returncode == 0 and not pts_test_failed:
+            for line in reversed(lines):
+                m = RESULT_MEAN_RE.search(line)
+                if m:
+                    value = float(m.group(1))
+                    print(f"  [RESULT] run{run_idx}: {workload_key} = {value:.6f} batches/sec")
+                    return value
+            print(f"  [WARN] No parseable result found in run{run_idx} output")
             return None
 
-        for line in reversed(lines):
-            m = RESULT_MEAN_RE.search(line)
-            if m:
-                value = float(m.group(1))
-                print(f"  [RESULT] run{run_idx}: {workload_key} = {value:.6f} batches/sec")
-                return value
-
-        print(f"  [WARN] No parseable result found in run{run_idx} output")
+        reason = pts_failure_reason or f"returncode={returncode}"
+        print(f"  [WARN] run{run_idx} failed: {reason}")
         return None
 
     def run_benchmark(self, num_threads: int) -> bool:
