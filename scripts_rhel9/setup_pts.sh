@@ -123,6 +123,7 @@ echo "Installing: $BUILD_DEPS $LIB_DEPS"
 for pkg in $BUILD_DEPS $LIB_DEPS; do
     install_required_from_candidates "$pkg" "$pkg"
 done
+install_required_from_candidates "gmock-devel" "gmock-devel,googletest-devel"
 
 # 2. Install PTS
 echo "=== Step 2: Installing Phoronix Test Suite ${VERSION} ==="
