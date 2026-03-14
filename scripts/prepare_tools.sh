@@ -160,6 +160,10 @@ log_step "Setup srsRAN dependencies"
 log_step "Setup llama.cpp dependencies"
 ./setup_llama.sh
 
+# build offline wheelhouse for numpy runner
+log_step "Build numpy wheelhouse"
+./build_numpy_wheelhouse.sh
+
 # Verify libxml2-dev is installed (for pmbench xmlgen build)
 log_step "Ensure libxml2-dev"
 if ! dpkg -s libxml2-dev >/dev/null 2>&1; then
