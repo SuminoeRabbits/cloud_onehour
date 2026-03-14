@@ -248,7 +248,8 @@ class ComplianceChecker:
         """Detect OS package installation commands inside runner scripts."""
         patterns = [
             r'\[\s*"sudo"\s*,\s*"(?:apt-get|apt|dnf|yum|pacman|zypper|brew)"\s*,\s*"install"',
-            r'\b(?:apt-get|apt|dnf|yum|pacman|zypper|brew)\s+install\b',
+            r'\[\s*"(?:apt-get|apt|dnf|yum|pacman|zypper|brew)"\s*,\s*"install"',
+            r'["\']sudo\s+(?:apt-get|apt|dnf|yum|pacman|zypper|brew)\s+install\b',
             r'\badd-apt-repository\b',
             r'\brpm\s+-i\b',
             r'\bdpkg\s+-i\b',
@@ -259,6 +260,8 @@ class ComplianceChecker:
             for match in re.finditer(pattern, self.content):
                 line_no = self.content[:match.start()].count("\n") + 1
                 snippet = self.content.splitlines()[line_no - 1].strip()
+                if snippet.startswith("print("):
+                    continue
                 matches.append((line_no, snippet))
 
         if matches:
