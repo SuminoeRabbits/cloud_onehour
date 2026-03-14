@@ -1330,7 +1330,7 @@ def build_oci_lvm_userdata():
     userdata = (
         "#cloud-config\n"
         "bootcmd:\n"
-        f"  - bash -c '{bootcmd_script}'\n"
+        f"  - bash -lc {shlex.quote(bootcmd_script)}\n"
     )
     return userdata  # raw YAML; OCI CLI --user-data-file will base64-encode on upload
 
@@ -3781,7 +3781,7 @@ def process_instance(
                 "sudo pvresize \"$PV\" 2>/dev/null || true; "
                 "sudo lvextend -r -l +100%FREE /dev/mapper/ocivolume-root 2>/dev/null || true"
             )
-            lvm_cmd = ssh_prefix + f"'{lvm_fallback}'"
+            lvm_cmd = ssh_prefix + shlex.quote(lvm_fallback)
             try:
                 result = run_cmd(lvm_cmd, timeout=60, ignore=True, logger=logger)
                 if result is not None:
