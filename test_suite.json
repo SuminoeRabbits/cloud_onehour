@@ -253,6 +253,16 @@
                     "sve2_support": false,
                     "notes": "N/A - single-threaded benchmark only",
                     "exe_time_v8cpu": "2.0"
+                },
+                "pts/apache-siege-1.1.0": {
+                    "enabled": false,
+                    "test_snippet": "Apache Siege-2.4.62",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "cpu-affinity limited; upstream concurrent-user cases are fixed at 10/50/100/200/500/1000",
+                    "sve2_support": false,
+                    "notes": "Apache HTTPD + Siege benchmark. Runner uses PTS batch-run and scales by limiting available CPUs with taskset. Results are Transactions Per Second across 6 concurrent-user cases.",
+                    "exe_time_v8cpu": "20.0"
                 }
             }
         },

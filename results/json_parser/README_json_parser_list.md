@@ -6,6 +6,7 @@
 | スクリプト | パターン | テスト数 | 備考 |
 |---|---|---|---|
 | `json_parser_apache-3.0.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
+| `json_parser_apache-siege-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得。`value=None` の失敗ケースは自動スキップ |
 | `json_parser_build-gcc-1.5.0.py` | D (ビルド系) | 単一 | time = values |
 | `json_parser_build-linux-kernel-1.17.1.py` | D (ビルド系) | 複数 | ログ内複数ビルド設定 |
 | `json_parser_build-llvm-1.6.0.py` | D (ビルド系) | 複数 | ログ内複数ビルドシステム |
@@ -67,6 +68,7 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_cpuminer-opt-1.8.0.py` — OK (12 tests: Algorithm 別)
 - `json_parser_ffmpeg-7.0.1.py` — OK (8 tests: Encoder × Scenario)
 - `json_parser_numpy-1.2.1.py` — OK (1 test)
+- `json_parser_apache-siege-1.1.0.py` — OK (5 tests: Concurrent Users 50/100/200/500/1000。10 は run failed のため skip)
 - `json_parser_onnx-1.24.0.py` — OK (7 tests: model 別、run log から実行時間補完)
 - `json_parser_pytorch-1.2.0.py` — OK (18 tests: model × batch-size、run log から実行時間補完)
 - `json_parser_llama-cpp-2.4.1.py` — OK (値あり 29 tests、PTS JSON の test_run_times を利用)
