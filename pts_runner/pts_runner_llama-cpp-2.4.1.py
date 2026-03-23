@@ -51,7 +51,12 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import (
+    cleanup_pts_artifacts,
+    detect_pts_failure_from_log,
+    get_install_status,
+    get_pts_profile_dir,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +296,7 @@ class LlamaCppRunner:
 
         failed = []
         try:
+            self.ensure_test_profile_present()
             self.patch_test_definition()
             self.patch_downloads_xml()
 
@@ -343,6 +349,35 @@ class LlamaCppRunner:
             print('=' * 80)
 
         return len(failed) == 0
+
+    def ensure_test_profile_present(self) -> bool:
+        """Materialize the PTS profile locally so XML patching works on fresh systems."""
+        profile_dir = get_pts_profile_dir(self.benchmark_full)
+        test_definition = profile_dir / "test-definition.xml"
+        downloads_xml = profile_dir / "downloads.xml"
+
+        if test_definition.exists() and downloads_xml.exists():
+            print(f"[INFO] PTS profile already present: {profile_dir}")
+            return True
+
+        print(f"[INFO] Materializing PTS profile via 'phoronix-test-suite info {self.benchmark_full}'")
+        result = subprocess.run(
+            ["phoronix-test-suite", "info", self.benchmark_full],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"[WARN] Failed to materialize PTS profile (returncode={result.returncode})")
+            if result.stderr.strip():
+                print(result.stderr.strip())
+
+        if test_definition.exists() and downloads_xml.exists():
+            print(f"[OK] PTS profile ready: {profile_dir}")
+            return True
+
+        print(f"[WARN] PTS profile still incomplete: {profile_dir}")
+        return False
 
     # ------------------------------------------------------------------
     # Test-definition patching (model / backend / test-type filter)
@@ -669,6 +704,19 @@ class LlamaCppRunner:
         elif "ERROR" in full_output or "FAILED" in full_output:
             install_failed = True
 
+        if "There is not enough space" in full_output:
+            install_failed = True
+            if not pts_failure_reason:
+                pts_failure_reason = "Insufficient disk space for PTS install"
+
+        install_check = get_install_status(self.benchmark_full, self.benchmark)
+        install_recognized = install_check["already_installed"]
+
+        if not install_recognized:
+            install_failed = True
+            if not pts_failure_reason:
+                pts_failure_reason = "PTS did not recognize the test as installed"
+
         if install_failed:
             print(f"\n  [ERROR] Installation failed (returncode={returncode})")
             if pts_failure_reason:
@@ -687,13 +735,6 @@ class LlamaCppRunner:
         if not install_dir.exists():
             print(f"  [ERROR] Installation directory not found: {install_dir}")
             sys.exit(1)
-
-        verify_result = subprocess.run(
-            ["phoronix-test-suite", "test-installed", self.benchmark_full],
-            capture_output=True, text=True,
-        )
-        if self.benchmark_full not in verify_result.stdout:
-            print(f"  [WARN] {self.benchmark_full} may not be fully recognized by PTS")
 
         print(f"  [OK] Installation completed and verified")
 
