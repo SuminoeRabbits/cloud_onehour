@@ -555,20 +555,21 @@ class SparkRunner:
 
     def upgrade_pyspark_cloudpickle(self):
         """
-        Replace PySpark 3.3.0's bundled cloudpickle 2.2.0 with cloudpickle 2.2.1+.
+        Patch cloudpickle inside pyspark.zip to version 2.2.1+.
 
-        Root cause of PicklingError on Python 3.11/3.12:
-          Python 3.11 added co_qualname to code objects; CloudPickle 2.2.0 does not
-          handle this → _pickle.PicklingError: Could not serialize object:
-          IndexError: tuple index out of range
+        ROOT CAUSE (confirmed by diagnose_spark_setup()):
+          Java's PythonUtils.sparkPythonPath adds ONLY pyspark.zip and py4j.zip to
+          Python's sys.path — ${SPARK_HOME}/python is NOT included. Therefore extracting
+          pyspark.zip to ${SPARK_HOME}/python/ is ineffective; pyspark.zip always wins.
+          pyspark.cloudpickle.__file__ points inside pyspark.zip.
 
-        Mechanism (no system Python modification):
-          Spark PYTHONPATH: ${SPARK_HOME}/python:${SPARK_HOME}/python/lib/pyspark.zip
-          Python searches directories before zip files, so extracting pyspark.zip to
-          ${SPARK_HOME}/python/ creates a real pyspark/ directory that takes precedence
-          over the bundled zip. We then replace pyspark/cloudpickle/ with 2.2.1+.
+          CloudPickle 2.2.0 (bundled in pyspark.zip) does not handle Python 3.11's
+          co_qualname code object attribute → PicklingError: IndexError: tuple index
+          out of range.
 
-        Idempotent: marker file .cloudpickle_upgraded prevents repeat work.
+        Fix: rewrite pyspark.zip with cloudpickle 3.x replacing the bundled 2.2.0.
+        Backup saved as pyspark.zip.orig for recovery.
+        Idempotent: marker .cloudpickle_zip_upgraded prevents repeat work.
         """
         spark_home = self.find_spark_home()
         if spark_home is None:
@@ -580,32 +581,19 @@ class SparkRunner:
             print(f"  [WARN] upgrade_pyspark_cloudpickle: pyspark.zip not found: {pyspark_zip}")
             return
 
-        spark_python_dir = spark_home / 'python'
-        marker = spark_python_dir / '.cloudpickle_upgraded'
+        # New marker (zip-based). Old marker (.cloudpickle_upgraded) guarded the now-obsolete
+        # directory-extraction approach and is intentionally ignored here.
+        marker = pyspark_zip.parent / '.cloudpickle_zip_upgraded'
         if marker.exists():
-            print("  [INFO] upgrade_pyspark_cloudpickle: already upgraded (marker found)")
+            print("  [INFO] upgrade_pyspark_cloudpickle: pyspark.zip already patched (marker found)")
             return
 
-        print(f"\n>>> Upgrading bundled PySpark cloudpickle (Python {sys.version_info.major}.{sys.version_info.minor} compat)")
+        print(f"\n>>> Patching pyspark.zip with cloudpickle 2.2.1+ (Python {sys.version_info.major}.{sys.version_info.minor} compat)")
+        print(f"  [INFO] pyspark.zip: {pyspark_zip}")
 
-        # Step 1: Extract pyspark.zip → spark_home/python/pyspark/
-        # This makes pyspark/ directory take precedence over pyspark.zip in PYTHONPATH.
-        pyspark_extracted = spark_python_dir / 'pyspark'
-        if not pyspark_extracted.exists():
-            print(f"  [INFO] Extracting {pyspark_zip} → {spark_python_dir}/")
-            try:
-                with zipfile.ZipFile(pyspark_zip, 'r') as zf:
-                    zf.extractall(str(spark_python_dir))
-                print("  [OK] Extracted pyspark.zip")
-            except Exception as e:
-                print(f"  [ERROR] Failed to extract pyspark.zip: {e}")
-                return
-        else:
-            print(f"  [INFO] {pyspark_extracted} already exists, skipping extract")
-
-        # Step 2: pip install cloudpickle>=2.2.1 into a temp directory
         with tempfile.TemporaryDirectory() as tmpdir:
-            print(f"  [INFO] pip install cloudpickle>=2.2.1 --target {tmpdir}")
+            # Step 1: pip install cloudpickle>=2.2.1 to temp dir
+            print(f"  [INFO] pip install cloudpickle>=2.2.1 --no-deps --target {tmpdir}")
             pip_result = subprocess.run(
                 [sys.executable, '-m', 'pip', 'install',
                  'cloudpickle>=2.2.1', '--target', tmpdir,
@@ -617,39 +605,78 @@ class SparkRunner:
                 print(pip_result.stderr.strip())
                 return
 
-            # Step 3: Find the installed cloudpickle package dir
             installed_cp = Path(tmpdir) / 'cloudpickle'
             if not installed_cp.exists():
                 print(f"  [ERROR] cloudpickle dir not found in pip target: {tmpdir}")
                 return
 
-            # Verify version
-            version_file = Path(tmpdir) / 'cloudpickle' / '__init__.py'
-            cp_version = 'unknown'
-            if version_file.exists():
-                for vline in version_file.read_text().splitlines():
-                    if '__version__' in vline:
-                        cp_version = vline.strip()
-                        break
+            # Read version
+            cp_version = '(unknown)'
+            for vline in (installed_cp / '__init__.py').read_text().splitlines():
+                if '__version__' in vline and '=' in vline and not vline.strip().startswith('#'):
+                    cp_version = vline.strip()
+                    break
+            print(f"  [INFO] New cloudpickle: {cp_version}")
 
-            # Step 4: Replace pyspark/cloudpickle/ with the upgraded version
-            dest_cp = pyspark_extracted / 'cloudpickle'
-            if dest_cp.exists():
-                # Clear __pycache__ to prevent Python from using stale bytecode
-                # (Python validates .pyc against source mtime, but being explicit is safer)
-                cache_dir = dest_cp / '__pycache__'
-                if cache_dir.exists():
-                    shutil.rmtree(str(cache_dir))
-                    print("  [OK] Cleared pyspark/cloudpickle/__pycache__")
-                shutil.rmtree(str(dest_cp))
-            shutil.copytree(str(installed_cp), str(dest_cp))
-            print(f"  [OK] Replaced pyspark/cloudpickle/ with upgraded version ({cp_version})")
-            # Show what files were installed
-            installed_files = sorted(f.name for f in dest_cp.iterdir())
-            print(f"  [OK] cloudpickle files: {installed_files}")
+            # Build mapping: zip entry path → new file content
+            # e.g. "pyspark/cloudpickle/__init__.py" → bytes from cloudpickle 3.x
+            new_cp_entries = {}
+            for src_file in sorted(installed_cp.rglob('*.py')):
+                if '__pycache__' in src_file.parts:
+                    continue
+                rel = src_file.relative_to(Path(tmpdir))
+                zip_entry = 'pyspark/' + '/'.join(rel.parts)
+                new_cp_entries[zip_entry] = src_file.read_bytes()
+            print(f"  [INFO] New entries: {sorted(new_cp_entries.keys())}")
 
-        # Step 5: Write marker for idempotency
-        marker.write_text(f"cloudpickle upgraded for Python {sys.version_info.major}.{sys.version_info.minor}\n")
+            # Step 2: Backup original pyspark.zip (once only)
+            backup = pyspark_zip.with_suffix('.zip.orig')
+            if not backup.exists():
+                shutil.copy2(str(pyspark_zip), str(backup))
+                print(f"  [OK] Backup: {backup.name}")
+
+            # Step 3: Build patched zip — copy everything except old cloudpickle,
+            # then insert new cloudpickle files
+            new_zip = pyspark_zip.with_suffix('.zip.new')
+            replaced, dropped, added = [], [], []
+
+            with zipfile.ZipFile(pyspark_zip, 'r') as zin:
+                orig_names = {item.filename for item in zin.infolist()}
+                with zipfile.ZipFile(new_zip, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
+                    # Copy non-cloudpickle entries unchanged
+                    for item in zin.infolist():
+                        if item.filename.startswith('pyspark/cloudpickle/'):
+                            if item.filename in new_cp_entries:
+                                # Replace with new version
+                                zout.writestr(item, new_cp_entries[item.filename])
+                                replaced.append(item.filename)
+                            else:
+                                # Old file not in new package (e.g. compat.py) — drop
+                                dropped.append(item.filename)
+                        else:
+                            zout.writestr(item, zin.read(item.filename))
+                    # Add new entries that were not in the original zip
+                    for zip_entry, content in new_cp_entries.items():
+                        if zip_entry not in orig_names:
+                            zout.writestr(zip_entry, content)
+                            added.append(zip_entry)
+
+            print(f"  [OK] Replaced {len(replaced)} entries: {replaced}")
+            if dropped:
+                print(f"  [INFO] Dropped old-only: {dropped}")
+            if added:
+                print(f"  [OK] Added new entries: {added}")
+
+            # Step 4: Atomically replace original zip
+            os.replace(str(new_zip), str(pyspark_zip))
+            print("  [OK] pyspark.zip patched in-place")
+
+        # Step 5: Write marker
+        marker.write_text(
+            f"cloudpickle patched in pyspark.zip\n"
+            f"Python: {sys.version_info.major}.{sys.version_info.minor}\n"
+            f"{cp_version}\n"
+        )
         print("  [OK] upgrade_pyspark_cloudpickle complete")
 
     # ------------------------------------------------------------------
@@ -695,35 +722,22 @@ class SparkRunner:
             try:
                 import pyspark.cloudpickle as cp
                 print("[SPARK-DIAG] pyspark.cloudpickle.__file__:", cp.__file__)
-                # Try reading version from cloudpickle.py
-                import os
-                cp_dir = os.path.dirname(cp.__file__)
-                cp_main = os.path.join(cp_dir, "cloudpickle.py")
-                version_found = "(version unknown)"
-                try:
-                    with open(cp_main) as f:
-                        for line in f:
-                            if "__version__" in line and "=" in line and not line.strip().startswith("#"):
-                                version_found = line.strip()
-                                break
-                except Exception as ve:
-                    version_found = f"(read error: {ve})"
-                print("[SPARK-DIAG] cloudpickle version:", version_found)
-                # List files in cloudpickle dir
-                files = sorted(os.listdir(cp_dir))
-                print("[SPARK-DIAG] cloudpickle dir files:", files)
-                # Test pickling a lambda (the actual operation that fails)
+                # Use __version__ attribute (works for both zip and dir imports)
+                version_found = getattr(cp, "__version__", "(no __version__ attr)")
+                print("[SPARK-DIAG] cloudpickle.__version__:", version_found)
+                # Test pickling a lambda (the actual operation that fails in production)
                 fn = lambda x: x * 2
                 data = cp.dumps(fn)
                 print("[SPARK-DIAG] cp.dumps(lambda): OK ({} bytes)".format(len(data)))
                 import pickle
                 result = pickle.loads(data)
                 print("[SPARK-DIAG] pickle.loads + call: OK (result={})".format(result(21)))
+                print("[SPARK-DIAG] PICKLING OK — cloudpickle is functional")
             except ImportError as e:
                 print("[SPARK-DIAG] ImportError:", e)
             except Exception as e:
                 import traceback
-                print("[SPARK-DIAG] ERROR:", type(e).__name__, str(e))
+                print("[SPARK-DIAG] PICKLING FAILED:", type(e).__name__, str(e))
                 traceback.print_exc()
         """))
 
@@ -1010,14 +1024,22 @@ class SparkRunner:
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
 
-        # Python 3.12+ compatibility: override PYSPARK_PYTHON
+        # Python 3.12+ compatibility: override PYSPARK_PYTHON.
+        # Also pin SPARK_HOME to the installation we patched: if SPARK_HOME is
+        # set in the user's shell env to a different location, spark-submit would
+        # load unpatched cloudpickle 2.2.0 from that path instead of our 3.x.
         python_exec_env = ''
+        _sh = self.find_spark_home()
+        spark_home_fragment = f'SPARK_HOME={_sh} ' if _sh else ''
         if self.spark_python_exec:
             python_exec_env = (
                 f'PYSPARK_PYTHON={self.spark_python_exec} '
                 f'PYSPARK_DRIVER_PYTHON={self.spark_python_exec} '
+                f'{spark_home_fragment}'
             )
             print(f"[INFO] Spark Python override: {self.spark_python_exec}")
+        elif spark_home_fragment:
+            python_exec_env = spark_home_fragment
 
         # JDK17 + Spark 3.3 compatibility: --add-opens flags via JDK_JAVA_OPTIONS
         java_env = f'JDK_JAVA_OPTIONS="{_SPARK_JAVA_OPTS}" SPARK_JAVA_OPTS="{_SPARK_JAVA_OPTS}" '
@@ -1091,6 +1113,7 @@ class SparkRunner:
         # Failure detection
         pts_test_failed = False
         failure_reason = ""
+        pickling_error_detected = False
         if log_file.exists():
             log_content = log_file.read_text(errors='ignore')
             failure_patterns = [
@@ -1098,12 +1121,16 @@ class SparkRunner:
                 ("The following tests failed", "PTS reported test execution failure"),
                 ("quit with a non-zero exit status", "PTS benchmark subprocess failed"),
                 ("failed to properly run", "PTS benchmark did not run properly"),
+                ("did not produce a result", "PTS: test run did not produce a result"),
+                ("PicklingError", "Spark cloudpickle serialization error"),
             ]
             for pattern, reason in failure_patterns:
                 if pattern.lower() in log_content.lower():
                     pts_test_failed = True
                     failure_reason = reason
                     break
+            if "PicklingError" in log_content or "pickling" in log_content.lower():
+                pickling_error_detected = True
 
         if returncode == 0 and not pts_test_failed:
             print("\n[OK] Benchmark completed successfully")
@@ -1121,6 +1148,47 @@ class SparkRunner:
         else:
             print("\n[ERROR] Benchmark failed")
             print(f"  Reason: {failure_reason or f'returncode={returncode}'}")
+
+            # On PicklingError: search for PTS test result logs which contain
+            # the full Spark output (spark-submit stdout/stderr via $LOG_FILE).
+            if pickling_error_detected:
+                print("\n  [DEBUG] PicklingError detected — searching for Spark output logs...")
+                pts_results_dir = Path.home() / '.phoronix-test-suite' / 'test-results'
+                try:
+                    import time as _time
+                    all_logs = list(pts_results_dir.glob('**/*.log'))
+                    # Find logs modified in the last 10 minutes
+                    recent = [
+                        f for f in all_logs
+                        if _time.time() - f.stat().st_mtime < 600
+                    ]
+                    recent.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+                    for spark_log in recent[:3]:
+                        content = spark_log.read_text(errors='ignore')
+                        if 'PicklingError' in content or 'spark' in content.lower():
+                            print(f"\n  [SPARK LOG] {spark_log}")
+                            # Show surrounding context around PicklingError
+                            lines = content.splitlines()
+                            for i, line in enumerate(lines):
+                                if 'PicklingError' in line or 'Error' in line:
+                                    start = max(0, i - 5)
+                                    end = min(len(lines), i + 10)
+                                    for l in lines[start:end]:
+                                        print(f"    {l}")
+                                    print("    ...")
+                                    break
+                except Exception as e:
+                    print(f"  [WARN] Could not search PTS result logs: {e}")
+
+                # Also show spark-defaults.conf to confirm settings were applied
+                spark_home = self.find_spark_home()
+                if spark_home:
+                    conf_file = spark_home / 'conf' / 'spark-defaults.conf'
+                    if conf_file.exists():
+                        print(f"\n  [DEBUG] {conf_file}:")
+                        for line in conf_file.read_text().splitlines():
+                            print(f"    {line}")
+
             return False
 
     # ------------------------------------------------------------------
@@ -1306,6 +1374,11 @@ class SparkRunner:
         # This replaces pyspark/cloudpickle/ inside the extracted pyspark directory,
         # which takes precedence over pyspark.zip in Spark's PYTHONPATH. (idempotent)
         self.upgrade_pyspark_cloudpickle()
+
+        # Diagnostic: run spark-submit directly to verify Python/cloudpickle environment.
+        # Prints which Python the driver uses and whether cp.dumps(lambda) succeeds.
+        # Saves full output to results/_spark_diagnostic.log for post-mortem.
+        self.diagnose_spark_setup()
 
         # Run benchmark for each thread count
         failed = []
