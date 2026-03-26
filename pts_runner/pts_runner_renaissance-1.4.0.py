@@ -773,16 +773,77 @@ class RenaissanceRunner:
         marker.write_text('patched\n')
         print(f"  [OK] Wrapper patched: {wrapper}")
 
+    def patch_renaissance_profile(self):
+        """Remove excluded benchmarks from test-definition.xml (PRIMARY fix).
+
+        PTS reads test-definition.xml to determine which sub-tests to schedule.
+        Removing excluded <Entry> nodes prevents PTS from ever attempting to run
+        those benchmarks, so no failure is recorded — regardless of wrapper behavior.
+
+        Source: test-definition.xml <Option><Menu><Entry> structure
+          <Entry>
+            <Name>Apache Spark ALS</Name>
+            <Value>als</Value>      ← this Value is passed as $@ to the wrapper
+          </Entry>
+
+        Location: ~/.phoronix-test-suite/test-profiles/pts/renaissance-1.4.0/
+        test-profiles are intentionally NOT cleaned between runs, so this patch
+        only needs to be applied once (marker persists across runs).
+        """
+        import xml.etree.ElementTree as ET
+
+        profile_dir = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark
+        test_def = profile_dir / 'test-definition.xml'
+        marker = profile_dir / '.renaissance_profile_patched'
+
+        if marker.exists():
+            print("  [INFO] patch_renaissance_profile: already patched (marker found)")
+            return
+
+        if not test_def.exists():
+            print(f"  [WARN] patch_renaissance_profile: {test_def} not found (not yet downloaded)")
+            return
+
+        excluded_values = set(self.EXCLUDED_SUBTESTS.keys())
+
+        print("\n>>> Patching renaissance test-definition.xml to remove excluded benchmarks...")
+        print(f"  [INFO] Removing entries with Value in: {excluded_values}")
+
+        tree = ET.parse(test_def)
+        root = tree.getroot()
+
+        removed = []
+        for option in root.iter('Option'):
+            menu = option.find('Menu')
+            if menu is None:
+                continue
+            for entry in list(menu.findall('Entry')):
+                value_node = entry.find('Value')
+                if value_node is not None and value_node.text in excluded_values:
+                    name_node = entry.find('Name')
+                    display = name_node.text if name_node is not None else value_node.text
+                    menu.remove(entry)
+                    removed.append(display)
+
+        if removed:
+            tree.write(str(test_def), encoding='utf-8', xml_declaration=True)
+            print(f"  [OK] Removed entries: {removed}")
+        else:
+            print(f"  [INFO] No excluded entries found in {test_def} (may already be absent)")
+
+        marker.write_text('patched\n')
+        print(f"  [OK] Marker written: {marker}")
+
     def _parse_pts_failed_subtests(self, log_file):
         """Parse PTS log to extract display names of sub-tests that failed.
 
-        PTS outputs a section like:
+        PTS outputs a section like (note the blank line after the header):
             The following tests failed to properly run:
+
                 - pts/renaissance-1.4.0: Test: Apache Spark ALS
 
         Each entry is in the form "<profile>: Test: <DisplayName>".
-        We extract <DisplayName> (the part after "Test: ") for comparison
-        against EXCLUDED_SUBTESTS values.
+        We extract <DisplayName> for comparison against EXCLUDED_SUBTESTS values.
 
         Returns:
             set[str]: Display names of failed sub-tests (e.g. {'Apache Spark ALS'}).
@@ -793,21 +854,25 @@ class RenaissanceRunner:
         except Exception:
             return failed
 
-        match = re.search(
-            r'the following tests failed[^\n]*\n((?:[ \t]*-[ \t]*.+\n?)*)',
-            content,
-            re.IGNORECASE,
-        )
-        if match:
-            for line in match.group(1).splitlines():
-                raw = line.strip().lstrip('-').strip()
-                if not raw:
-                    continue
-                # PTS format: "pts/renaissance-1.4.0: Test: Apache Spark ALS"
-                # Extract display name after "Test: "
-                m = re.search(r'Test:\s*(.+)$', raw, re.IGNORECASE)
-                name = m.group(1).strip() if m else raw
-                failed.add(name)
+        idx = content.lower().find('the following tests failed')
+        if idx < 0:
+            return failed
+
+        # Scan lines after the header; skip blank lines; stop at first non-list line
+        for line in content[idx:].split('\n')[1:]:
+            stripped = line.strip()
+            if not stripped:
+                continue  # blank lines between header and list (PTS inserts one)
+            if not stripped.startswith('-'):
+                break  # end of the failure list
+            raw = stripped.lstrip('-').strip()
+            if not raw:
+                continue
+            # PTS format: "pts/renaissance-1.4.0: Test: Apache Spark ALS"
+            m = re.search(r'Test:\s*(.+)$', raw, re.IGNORECASE)
+            name = m.group(1).strip() if m else raw
+            failed.add(name)
+
         return failed
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
@@ -1379,7 +1444,10 @@ class RenaissanceRunner:
         else:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
 
-        # Patch wrapper to skip known-broken benchmarks (e.g. als: ValidationException on Zen4)
+        # PRIMARY: Remove excluded benchmarks from test-definition.xml so PTS never schedules them
+        self.patch_renaissance_profile()
+
+        # SECONDARY: Patch wrapper to exit 0 for excluded benchmarks (belt-and-suspenders)
         self.patch_renaissance_wrapper()
 
         # Run for each thread count
