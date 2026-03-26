@@ -225,7 +225,7 @@
             "enabled": true,
             "items": {
                 "pts/apache-3.0.0": {
-                    "enabled": true,
+                    "enabled": false,
                     "test_snippet": "Apache HTTP Server-2.4.56",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": false,
@@ -255,7 +255,7 @@
                     "exe_time_v8cpu": "2.0"
                 },
                 "pts/apache-siege-1.1.0": {
-                    "enabled": false,
+                    "enabled": true,
                     "test_snippet": "Apache Siege-2.4.62",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
