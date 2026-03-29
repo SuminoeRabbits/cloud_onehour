@@ -355,6 +355,65 @@ class SrsranRunner:
     # Benchmark installation
     # ------------------------------------------------------------------
 
+    def _patch_profile_for_oom_fix(self):
+        """Patch PTS install.sh to reduce linker peak memory via --no-keep-memory.
+
+        GNU ld (BFD) caches symbol-table data across passes by default.
+        -Wl,--no-keep-memory disables that cache, cutting peak linker RSS by
+        30-50% at the cost of extra I/O re-reads.  The resulting binary is
+        bit-for-bit identical, so benchmark results are unaffected.
+
+        This helps both x86 (AVX-512 object files are very large) and ARM64
+        (smaller objects, but still beneficial at -j 16).
+        """
+        profile_install_sh = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "test-profiles"
+            / "pts"
+            / self.benchmark
+            / "install.sh"
+        )
+
+        # Ensure profile exists (PreSeedDownloader may have fetched it already)
+        if not profile_install_sh.exists():
+            print("  [INFO] Fetching PTS profile to apply OOM patch...")
+            subprocess.run(
+                ["phoronix-test-suite", "info", self.benchmark_full],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        if not profile_install_sh.exists():
+            print("  [WARN] install.sh not found; skipping OOM patch")
+            return
+
+        content = profile_install_sh.read_text()
+
+        _LINKER_OOM_FLAGS = (
+            '-DCMAKE_EXE_LINKER_FLAGS="-Wl,--no-keep-memory"'
+            ' -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-keep-memory"'
+        )
+        if _LINKER_OOM_FLAGS in content:
+            print("  [INFO] install.sh already patched for OOM fix; skipping")
+            return
+
+        # Insert flags before the trailing ` ..` of the cmake invocation
+        patched = re.sub(
+            r"(cmake\b.*?)(\s+\.\.)(\s*$)",
+            rf"\1 {_LINKER_OOM_FLAGS}\2\3",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if patched == content:
+            print("  [WARN] Could not locate cmake call in install.sh; skipping OOM patch")
+            return
+
+        profile_install_sh.write_text(patched)
+        print("  [INFO] Patched install.sh: added -Wl,--no-keep-memory linker flags")
+
     def install_benchmark(self):
         """Install pts/srsran-2.5.0 via phoronix-test-suite batch-install."""
         print('\n' + '=' * 80)
@@ -371,6 +430,9 @@ class SrsranRunner:
             downloader.download_from_xml(self.benchmark_full)
         else:
             print("  [INFO] aria2c not found; PTS will handle download")
+
+        # Patch PTS install.sh to limit linker peak memory (OOM fix)
+        self._patch_profile_for_oom_fix()
 
         # Remove previous installation
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
