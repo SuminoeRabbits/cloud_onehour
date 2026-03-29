@@ -414,17 +414,25 @@ class DacapoBenchRunner:
 
         profile_dir = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark
         test_def = profile_dir / "test-definition.xml"
-        marker = profile_dir / ".dacapo_profile_patched"
-
-        if marker.exists():
-            print("  [INFO] patch_dacapo_profile: already patched (marker found)")
-            return
+        marker = profile_dir / ".dacapo_profile_patched_v2"
 
         if not test_def.exists():
             print(f"  [WARN] patch_dacapo_profile: {test_def} not found")
             return
 
         excluded_values = set(self.EXCLUDED_SUBTESTS.keys())
+
+        # Re-apply patch whenever any excluded subtest is still present in the profile.
+        if marker.exists():
+            try:
+                current_text = test_def.read_text(encoding="utf-8")
+                if not any(f"<Value>{value}</Value>" in current_text for value in excluded_values):
+                    print("  [INFO] patch_dacapo_profile: already patched (marker found)")
+                    return
+                print("  [INFO] patch_dacapo_profile: marker found but excluded entries remain; re-patching")
+            except Exception:
+                pass
+
         print("\n>>> Patching dacapobench test-definition.xml to remove excluded benchmarks...")
         print(f"  [INFO] Removing entries with Value in: {excluded_values}")
 
