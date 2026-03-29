@@ -435,16 +435,7 @@ class MemcachedRunner:
 
         cleanup_stale_memcached_processes()
         time.sleep(1)
-        
-        # Remove existing PTS result to avoid interactive prompts
-        sanitized_benchmark = self.benchmark.replace('.', '')
-        remove_cmds = [
-            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
-            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
-        ]
-        for cmd in remove_cmds:
-            subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
+
         batch_env = f'{quick_env}NUM_CPU_CORES={num_threads} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
         
         pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
@@ -489,7 +480,16 @@ class MemcachedRunner:
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
 
         cleanup_stale_memcached_processes()
-            
+
+        # Remove PTS result after run to clean up for next invocation
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        remove_cmds = [
+            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
+            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+        ]
+        for cmd in remove_cmds:
+            subprocess.run(['bash', '-c', cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         # Record end freq (cross-platform: x86_64, ARM64, cloud VMs)
         self.record_cpu_frequency(freq_end_file)
         
