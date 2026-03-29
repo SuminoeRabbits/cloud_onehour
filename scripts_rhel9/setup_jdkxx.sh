@@ -3,6 +3,8 @@ set -e
 
 TARGET_VERSION=${1:-17}
 echo "--- Java Version Check Process (Target: OpenJDK $TARGET_VERSION) ---"
+# Generic JVM provisioning entry point for Java-based runners such as
+# pts/java-jmh-1.0.1, pts/renaissance-1.4.0, and pts/dacapobench-1.1.0.
 
 CURRENT_VERSION=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1 | cut -d'-' -f1) || CURRENT_VERSION=""
 echo "Current Java Default Version: ${CURRENT_VERSION:-Not Installed}"

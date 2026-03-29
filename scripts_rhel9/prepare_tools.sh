@@ -154,6 +154,9 @@ log_step "Setup Rust"
 log_step "Setup srsRAN dependencies"
 "$SCRIPT_DIR/setup_srs.sh"
 
+log_step "Setup memcached dependencies"
+"$SCRIPT_DIR/setup_memcached.sh"
+
 log_step "Setup llama.cpp dependencies"
 "$SCRIPT_DIR/setup_llama.sh"
 
