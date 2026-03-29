@@ -162,6 +162,7 @@ class PreSeedDownloader:
 class DacapoBenchRunner:
     EXCLUDED_SUBTESTS = {
         "cassandra": "Apache Cassandra",
+        "h2o": "H2O In-Memory Platform For Machine Learning",
     }
 
     def __init__(self, threads_arg=None, quick_mode=False):
@@ -453,10 +454,10 @@ class DacapoBenchRunner:
         print(f"  [OK] Marker written: {marker}")
 
     def patch_dacapo_wrapper(self):
-        """Guard installed wrapper against excluded benchmarks as a fallback."""
+        """Guard excluded benchmarks and persist per-subtest detailed logs."""
         installed_dir = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark
         wrapper = installed_dir / "dacapobench"
-        marker = installed_dir / ".dacapo_wrapper_patched"
+        marker = installed_dir / ".dacapo_wrapper_patched_v2"
 
         if marker.exists():
             print("  [INFO] patch_dacapo_wrapper: already patched (marker found)")
@@ -465,10 +466,6 @@ class DacapoBenchRunner:
         if not wrapper.exists():
             print(f"  [WARN] patch_dacapo_wrapper: {wrapper} not found")
             return
-
-        original = wrapper.read_text()
-        lines = original.splitlines()
-        shebang_idx = next((i for i, line in enumerate(lines) if line.startswith("#!")), 0)
 
         case_entries = []
         for jar_name, display_name in self.EXCLUDED_SUBTESTS.items():
@@ -480,19 +477,33 @@ class DacapoBenchRunner:
                 f'        ;;'
             )
 
-        skip_block = (
-            '# Auto-patched by pts_runner: skip excluded benchmarks gracefully\n'
+        wrapper_text = (
+            "#!/bin/sh\n"
+            "# Auto-patched by pts_runner: skip excluded benchmarks and save per-subtest logs\n"
             '_bench="$1"\n'
             'case "$_bench" in\n'
             + "\n".join(case_entries)
-            + '\n'
-            'esac\n'
+            + "\n"
+            "esac\n"
+            'DETAIL_DIR="$(dirname "$0")/subtest-logs"\n'
+            'mkdir -p "$DETAIL_DIR"\n'
+            'SAFE_BENCH=$(printf "%s" "$_bench" | tr "/ :" "___")\n'
+            'DETAIL_LOG="$DETAIL_DIR/${SAFE_BENCH}.log"\n'
+            'printf "[INFO] benchmark=%s\\n" "$_bench" > "$DETAIL_LOG"\n'
+            'printf "[INFO] command=java -jar dacapo-23.11-chopin.jar -n 3 --window 5 %s\\n" "$*" >> "$DETAIL_LOG"\n'
+            'java -jar dacapo-23.11-chopin.jar -n 3 --window 5 "$@" >> "$DETAIL_LOG" 2>&1\n'
+            'status=$?\n'
+            'if [ -n "$LOG_FILE" ]; then\n'
+            '    printf "\\n[SUBTEST DETAIL] %s\\n" "$_bench" >> "$LOG_FILE"\n'
+            '    cat "$DETAIL_LOG" >> "$LOG_FILE"\n'
+            'fi\n'
+            'echo "$status" > ~/test-exit-status\n'
         )
-
-        new_lines = lines[: shebang_idx + 1] + ["", skip_block.rstrip()] + lines[shebang_idx + 1 :]
-        wrapper.write_text("\n".join(new_lines) + "\n")
+        wrapper.write_text(wrapper_text, encoding="utf-8")
+        wrapper.chmod(0o755)
         marker.write_text("patched\n")
         print(f"  [OK] Wrapper patched: {wrapper}")
+        print(f"  [OK] Detailed subtest logs directory: {installed_dir / 'subtest-logs'}")
 
     def install_benchmark(self):
         print(f"\n>>> Installing {self.benchmark_full}...")
@@ -661,11 +672,31 @@ class DacapoBenchRunner:
         else:
             print("  [WARN] CPU frequency not available")
 
+        self.archive_subtest_logs(num_threads)
+
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         if returncode == 0 and pts_test_failed:
             print(f"[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
             return False
         return returncode == 0
+
+    def archive_subtest_logs(self, num_threads):
+        """Copy installed-test subtest logs into results_dir before cleanup."""
+        installed_dir = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark
+        source_dir = installed_dir / "subtest-logs"
+        if not source_dir.exists():
+            print(f"  [INFO] No subtest-logs directory found to archive: {source_dir}")
+            return
+
+        target_dir = self.results_dir / f"{num_threads}-thread_subtest_logs"
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+
+        try:
+            shutil.copytree(source_dir, target_dir)
+            print(f"  [OK] Archived subtest logs: {target_dir}")
+        except Exception as exc:
+            print(f"  [WARN] Failed to archive subtest logs: {exc}")
 
     def export_results(self):
         for num_threads in self.thread_list:

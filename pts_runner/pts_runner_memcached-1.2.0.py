@@ -364,20 +364,31 @@ class MemcachedRunner:
         if log_f:
             log_f.close()
         
-        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+        # Always write install log so detect_pts_failure_from_log can read it
+        try:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+            with open(install_log, 'w') as f:
+                f.writelines(output)
+        except Exception as e:
+            print(f"  [WARN] Could not write install log: {e}")
+
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(install_log)
         install_failed = False
         full_output = ''.join(output)
         if process.returncode != 0:
             install_failed = True
         elif pts_test_failed:
             install_failed = True
-        elif 'FAILED' in full_output:
+        elif 'exited with a non-zero exit status' in full_output.lower():
+            install_failed = True
+        elif 'FAILED' in full_output or 'ERROR:' in full_output:
             install_failed = True
 
         if install_failed:
             print("  [ERROR] Installation failed")
-            if use_install_log:
-                print(f"  [INFO] Install log: {install_log}")
+            if pts_failure_reason:
+                print(f"  [ERROR] Reason: {pts_failure_reason}")
+            print(f"  [INFO] Install log: {install_log}")
             sys.exit(1)
             
         # Verify
@@ -437,15 +448,18 @@ class MemcachedRunner:
         batch_env = f'{quick_env}NUM_CPU_CORES={num_threads} BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
         
         pts_base_cmd = f'phoronix-test-suite batch-run {self.benchmark_full}'
-        
+
         if self.perf_events:
-             pts_cmd = f'{batch_env} perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
+            inner_cmd = f'perf stat -e {self.perf_events} -o {perf_stats_file} {pts_base_cmd}'
         else:
-             pts_cmd = f'{batch_env} {pts_base_cmd}'
+            inner_cmd = pts_base_cmd
 
         timeout_cmd = shutil.which('timeout')
         if timeout_cmd:
-            pts_cmd = f'{timeout_cmd} --signal=TERM --kill-after=30s {thread_timeout}s {pts_cmd}'
+            # env vars must precede the timeout binary, not be passed as its argument
+            pts_cmd = f'{batch_env} {timeout_cmd} --signal=TERM --kill-after=30s {thread_timeout}s {inner_cmd}'
+        else:
+            pts_cmd = f'{batch_env} {inner_cmd}'
 
         # Record start freq (cross-platform: x86_64, ARM64, cloud VMs)
         self.record_cpu_frequency(freq_start_file)
