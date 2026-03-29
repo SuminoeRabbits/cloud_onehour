@@ -156,6 +156,10 @@ log_step "Setup Rust"
 log_step "Setup srsRAN dependencies"
 ./setup_srs.sh
 
+# setup memcached/memtier_benchmark dependencies
+log_step "Setup memcached dependencies"
+./setup_memcached.sh
+
 # setup llama.cpp dependencies
 log_step "Setup llama.cpp dependencies"
 ./setup_llama.sh
