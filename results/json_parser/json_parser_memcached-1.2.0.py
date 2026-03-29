@@ -3,18 +3,23 @@
 
 `cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
 データ構造（抜粋）で Memory_Access/memcached-1.2.0 のみを抽出する。
+
+データソースパターン: B（ログのみ・複数テスト）
+  - <N>-thread.json は存在しない
+  - <N>-thread.log 内の各テストセクションから値を抽出
+  - テストバリアント: Set To Get Ratio 1:1 / 1:5 / 5:1 / 1:10 / 1:100
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import py_compile
 import re
 import statistics
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
-import py_compile
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
@@ -27,13 +32,20 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Benchmark-specific placeholders
+# [2] ベンチマーク定数・正規表現
 # ---------------------------------------------------------------------------
 
 BENCHMARK_NAME = "memcached-1.2.0"
 TESTCATEGORY_HINT = "Memory_Access"
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+
+# ログ内の各テストセクションを抽出:
+#   [Set To Get Ratio: 1:1] ... Average: 863162.76 Ops/sec
+SECTION_RE = re.compile(
+    r"\[Set To Get Ratio:\s*([\d:]+)\].*?Average:\s+([\d.]+)\s+Ops/sec",
+    re.DOTALL,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +82,7 @@ def _read_freq_file(freq_file: Path) -> Dict[str, int]:
 
 
 def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
-    """Return iterable of thread identifiers."""
+    """Return iterable of thread identifiers from <N>-thread.log files."""
     log_threads = sorted(benchmark_dir.glob("*-thread.log"))
     for file_path in log_threads:
         thread_prefix = file_path.stem.split("-", 1)[0]
@@ -78,46 +90,36 @@ def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
             yield thread_prefix
 
 
-def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
+def _find_machine_info_in_hierarchy(
+    benchmark_dir: Path, search_root: Path
+) -> "tuple[str, str, str, Dict[str, Any]]":
     """Find valid machinename by traversing up from benchmark_dir.
-    
+
     Returns: (machinename, os_name, category_name, machine_info)
     """
     category_dir = benchmark_dir.parent
     category_name = category_dir.name
-    
-    # Start from os_dir and traverse upward toward search_root
+
     current = category_dir.parent
-    
-    # Track hierarchy from benchmark up to find valid machine
-    path_parts = []
+
     while current != search_root.parent and current != current.parent:
-        path_parts.append((current.name, current))
-        
-        # Try this directory name as machinename via LUT lookup
         machine_info = get_machine_info(current.name)
-        
-        # Valid machine found if get_machine_info returns non-empty dict with valid CSP
+
+        # CRITICAL: Must check CSP != "unknown" to avoid false positives
         if machine_info and machine_info.get("CSP") and machine_info.get("CSP") != "unknown":
             machinename = current.name
-            
-            # Determine os_name: directory immediately above testcategory
+
             try:
                 rel_path = category_dir.parent.relative_to(current)
                 parts = rel_path.parts
-                
-                # Extract the final component (os_name directory)
-                if len(parts) >= 1:
-                    os_name = parts[-1]
-                else:
-                    os_name = category_dir.parent.name
+                os_name = parts[-1] if len(parts) >= 1 else category_dir.parent.name
             except (ValueError, IndexError):
                 os_name = category_dir.parent.name
-            
+
             return machinename, os_name, category_name, machine_info
-        
+
         current = current.parent
-    
+
     # No valid machinename found in hierarchy, use fallback
     os_dir = category_dir.parent
     machine_dir = os_dir.parent
@@ -125,80 +127,41 @@ def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> t
 
 
 # ---------------------------------------------------------------------------
-# Benchmark-specific extraction hooks
+# [4] ベンチマーク固有抽出（パターンB: ログのみ・複数テスト）
 # ---------------------------------------------------------------------------
-
-def _load_thread_json(benchmark_dir: Path, thread_num: str) -> list[tuple[str, dict]]:
-    """Load <N>-thread.json and return list of (test_key, test_data) tuples."""
-    json_file = benchmark_dir / f"{thread_num}-thread.json"
-    if not json_file.exists():
-        return []
-    
-    try:
-        data = json.loads(json_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-
-    entries = []
-    for _hash, entry in data.get("results", {}).items():
-        title = entry.get("title", "")
-        description = entry.get("description", "")
-        scale = entry.get("scale", "")
-        
-        for _sys_id, sys_data in entry.get("results", {}).items():
-            test_key = f"{title} - {description}" if description else title
-            
-            test_info = {
-                "description": description or title,
-                "value": sys_data.get("value"),
-                "raw_values": sys_data.get("raw_values", []),
-                "test_run_times": sys_data.get("test_run_times", []),
-                "scale": scale,
-            }
-            entries.append((test_key, test_info))
-    
-    return entries
-
 
 def _collect_thread_payload(
     benchmark_dir: Path,
     thread_num: str,
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
-    """Extract benchmark results for a specific thread count."""
-    
-    entries = _load_thread_json(benchmark_dir, thread_num)
-    if not entries:
+    """Extract benchmark results for a specific thread count from log."""
+    log_file = benchmark_dir / f"{thread_num}-thread.log"
+    if not log_file.exists():
         return None
-    
+
+    content = _strip_ansi(log_file.read_text(encoding="utf-8"))
     test_payload: Dict[str, Any] = {}
-    
-    for test_key, test_info in entries:
-        value = test_info.get("value")
-        raw_values = test_info.get("raw_values", [])
-        test_run_times = test_info.get("test_run_times", [])
-        scale = test_info.get("scale", "")
-        description = test_info.get("description", "")
-        
-        # Calculate time
-        if test_run_times and len(test_run_times) > 0:
-            time = statistics.median(test_run_times)
-        else:
-            time = 0.0
-        
-        # Calculate cost
-        cost = round(cost_hour * time / 3600, 6) if time > 0 else 0.0
-        
-        test_payload[test_key] = {
+
+    for match in SECTION_RE.finditer(content):
+        ratio = match.group(1)        # "1:1", "1:5", "5:1", "1:10", "1:100"
+        value = float(match.group(2))
+        description = f"Set To Get Ratio: {ratio}"
+        key = f"Memcached - {description} [Ops/sec]"
+
+        test_payload[key] = {
             "description": description,
-            "values": value if value is not None else 0.0,
-            "raw_values": raw_values,
-            "unit": scale,
-            "time": time,
-            "test_run_times": test_run_times,
-            "cost": cost,
+            "values": value,
+            "raw_values": [value],
+            "unit": "Ops/sec",
+            "time": "N/A",
+            "test_run_times": "N/A",
+            "cost": 0.0,
         }
-    
+
+    if not test_payload:
+        return None
+
     # perf_stat 構築
     start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
     end_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_end.txt")
@@ -207,7 +170,7 @@ def _collect_thread_payload(
         perf_stat["start_freq"] = start_freq
     if end_freq:
         perf_stat["end_freq"] = end_freq
-    
+
     return {"perf_stat": perf_stat, "test_name": test_payload}
 
 
@@ -225,15 +188,14 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
         if not benchmark_dir.is_dir():
             continue
 
-        # Robust machinename detection supporting nested and various structures
         machinename, os_name, category_name, machine_info = _find_machine_info_in_hierarchy(
             benchmark_dir, search_root
         )
-        
+
         # Fallback if machine_info is empty
         if not machine_info:
             machine_info = get_machine_info(machinename)
-        
+
         cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
 
         thread_nodes: Dict[str, Any] = {}
