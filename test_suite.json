@@ -218,6 +218,16 @@
                     "sve2_support": true,
                     "notes": "JMH uses -t max to utilize all available threads. SVE2 is supported after OpenJDK9.",
                     "exe_time_v8cpu": "10.5"
+                },
+                "pts/dacapobench-1.1.0": {
+                    "enabled": true,
+                    "test_snippet": "DaCapo Benchmark-23.11",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "taskset cpu-affinity / jvm-internal",
+                    "sve2_support": true,
+                    "notes": "Upstream PTS profile declares only a generic Java dependency. This runner keeps OS-specific provisioning out of the runner and relies on setup_jdkxx.sh on RHEL9 when needed.",
+                    "exe_time_v8cpu": "30.0"
                 }
             }
         },
@@ -488,8 +498,8 @@
                     "enabled": true,
                     "test_snippet": "CacheBench-1.2.0",
                     "THFix_in_compile": false,
-                    "THChange_at_runtime": true,
-                    "TH_scaling": "linear by scaling.",
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "single-threaded",
                     "sve2_support": true,
                     "notes": "Uses -threads $NUM_CPU_CORES runtime option.",
                     "exe_time_v8cpu": "20.0"
