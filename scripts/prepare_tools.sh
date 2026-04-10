@@ -144,6 +144,9 @@ log_step "Build zlib"
 log_step "Setup PTS"
 ./setup_pts.sh
 
+log_step "Setup FPU benchmark dependencies"
+./setup_fpu.sh
+
 # build others
 log_step "Setup init tools"
 ./setup_init.sh
