@@ -161,6 +161,31 @@
                 }
             }
         },
+        "FPU": {
+            "enabled": true,
+            "items": {
+                "pts/c-ray-2.0.0": {
+                    "enabled": true,
+                    "test_snippet": "C-Ray-2.0",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Multi-threaded CPU raytracer. c-ray-fast auto-detects visible CPUs at runtime; runner scales by limiting available CPUs with taskset rather than passing an explicit thread-count option.",
+                    "exe_time_v8cpu": "20.0"
+                },
+                "pts/vkpeak-1.3.0": {
+                    "enabled": true,
+                    "test_snippet": "vkpeak-20250531",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "single-threaded",
+                    "sve2_support": false,
+                    "notes": "Vulkan compute benchmark for FP16/FP32/FP64/INT throughput. Execution is GPU/driver-controlled, so CPU thread count does not scale the workload; runner performs a single effective configuration.",
+                    "exe_time_v8cpu": "6.0"
+                }
+            }
+        },
         "Cryptography and TLS": {
             "enabled": true,
             "items": {
