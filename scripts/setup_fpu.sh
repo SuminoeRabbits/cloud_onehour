@@ -12,6 +12,8 @@
 #                           Requires: Vulkan dev, cmake, fftw3-dev, libpng-dev
 #   pts/c-ray-2.0.0       : Multi-threaded CPU raytracer
 #                           Requires: build-essential (covered by setup_pts.sh)
+#   pts/cp2k-1.5.0        : CP2K molecular dynamics (CPU/MPI)
+#                           Requires: Fortran toolchain, OpenMPI, MPI HDF5, BLAS/LAPACK
 #   pts/ospray-1.0.3      : Intel OSPray ray-tracing (x86_64 pre-built binary)
 #                           Requires: unzip, bzip2 (covered by setup_pts.sh)
 #
@@ -85,11 +87,34 @@ CMAKE_PACKAGES=(
     cmake
 )
 
+# ---------------------------------------------------------------------------
+# Group 5: CP2K toolchain/runtime
+#   gfortran-14          : keep Fortran major in sync with gcc-14/g++-14 setup
+#   libgfortran-14-dev   : provides libgfortran.so linker symlink for GCC 14 toolchain
+#   openmpi-bin          : mpirun/mpiexec
+#   libopenmpi-dev       : mpicc/mpifort headers and libs
+#   libhdf5-openmpi-dev  : MPI-enabled HDF5 for CP2K toolchain/CMake detection
+#   libblas-dev          : BLAS fallback/system detection
+#   liblapack-dev        : LAPACK fallback/system detection
+#   python3              : build/helper scripts invoked by CP2K toolchain
+# ---------------------------------------------------------------------------
+CP2K_PACKAGES=(
+    gfortran-14
+    libgfortran-14-dev
+    openmpi-bin
+    libopenmpi-dev
+    libhdf5-openmpi-dev
+    libblas-dev
+    liblapack-dev
+    python3
+)
+
 ALL_PACKAGES=(
     "${VULKAN_RUNTIME_PACKAGES[@]}"
     "${VULKAN_DEV_PACKAGES[@]}"
     "${FFTW_PNG_PACKAGES[@]}"
     "${CMAKE_PACKAGES[@]}"
+    "${CP2K_PACKAGES[@]}"
 )
 
 # Check which packages are missing
@@ -151,6 +176,39 @@ if ldconfig -p | grep -q libfftw3; then
     log_fpu "[OK] libfftw3 found in ldconfig cache"
 else
     log_fpu "[WARN] libfftw3 not found in ldconfig cache"
+fi
+
+# Check CP2K-related toolchain/runtime
+if command -v gfortran-14 >/dev/null 2>&1; then
+    log_fpu "[OK] gfortran-14 available: $(gfortran-14 --version | head -1)"
+elif command -v gfortran >/dev/null 2>&1; then
+    log_fpu "[WARN] gfortran-14 not found; fallback gfortran detected: $(gfortran --version | head -1)"
+else
+    log_fpu "[WARN] gfortran not found in PATH"
+fi
+
+if command -v mpirun >/dev/null 2>&1; then
+    log_fpu "[OK] mpirun available: $(mpirun --version 2>/dev/null | head -1)"
+else
+    log_fpu "[WARN] mpirun not found in PATH"
+fi
+
+if command -v mpifort >/dev/null 2>&1; then
+    log_fpu "[OK] mpifort available"
+else
+    log_fpu "[WARN] mpifort not found in PATH"
+fi
+
+if [[ -e /usr/lib/gcc/x86_64-linux-gnu/14/libgfortran.so ]]; then
+    log_fpu "[OK] GCC 14 libgfortran linker symlink present"
+else
+    log_fpu "[WARN] GCC 14 libgfortran linker symlink missing"
+fi
+
+if dpkg -s libhdf5-openmpi-dev >/dev/null 2>&1; then
+    log_fpu "[OK] MPI-enabled HDF5 development package installed"
+else
+    log_fpu "[WARN] libhdf5-openmpi-dev not installed"
 fi
 
 log_fpu "=== FPU benchmark dependency setup complete ==="
