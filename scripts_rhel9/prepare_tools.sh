@@ -68,7 +68,7 @@ if [ "$EL_VER" -lt 9 ] 2>/dev/null; then
     exit 1
 fi
 
-for required_script in setup_init.sh setup_gcc14.sh setup_binutil244.sh setup_jdkxx.sh build_zlib.sh setup_pcre.sh setup_selinux_ports.sh setup_pts.sh setup_rust.sh setup_srs.sh setup_llama.sh; do
+for required_script in setup_init.sh setup_gcc14.sh setup_binutil244.sh setup_jdkxx.sh build_zlib.sh setup_pcre.sh setup_selinux_ports.sh setup_pts.sh setup_rust.sh setup_srs.sh setup_memcached.sh setup_llama.sh setup_fpu.sh; do
     if [ ! -f "$SCRIPT_DIR/$required_script" ]; then
         echo "[ERROR] Missing required script: $SCRIPT_DIR/$required_script"
         exit 1
@@ -147,6 +147,9 @@ log_step "Setup SELinux port exceptions (for benchmark tools on RHEL/OL)"
 
 log_step "Setup PTS"
 "$SCRIPT_DIR/setup_pts.sh"
+
+log_step "Setup FPU benchmark dependencies"
+"$SCRIPT_DIR/setup_fpu.sh"
 
 log_step "Setup Rust"
 "$SCRIPT_DIR/setup_rust.sh"
