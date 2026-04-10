@@ -12,6 +12,8 @@
 #                           Requires: Vulkan dev, cmake, fftw-devel, libpng-devel
 #   pts/c-ray-2.0.0       : Multi-threaded CPU raytracer
 #                           Requires: gcc, make (covered by setup_pts.sh Dev Tools)
+#   pts/cp2k-1.5.0        : CP2K molecular dynamics (CPU/MPI)
+#                           Requires: Fortran toolchain, OpenMPI, MPI HDF5, BLAS/LAPACK
 #   pts/ospray-1.0.3      : Intel OSPray ray-tracing (x86_64 pre-built binary)
 #                           Requires: unzip, bzip2 (covered by setup_pts.sh)
 #
@@ -101,11 +103,32 @@ CMAKE_PACKAGES=(
     cmake
 )
 
+# ---------------------------------------------------------------------------
+# Group 5: CP2K toolchain/runtime
+#   gcc-gfortran       : GNU Fortran compiler
+#   openmpi            : mpirun/mpiexec runtime
+#   openmpi-devel      : mpicc/mpifort headers and libs
+#   hdf5-openmpi-devel : MPI-enabled HDF5 development package
+#   blas-devel         : BLAS fallback/system detection
+#   lapack-devel       : LAPACK fallback/system detection
+#   python3            : helper scripts used by CP2K toolchain
+# ---------------------------------------------------------------------------
+CP2K_PACKAGES=(
+    gcc-gfortran
+    openmpi
+    openmpi-devel
+    hdf5-openmpi-devel
+    blas-devel
+    lapack-devel
+    python3
+)
+
 ALL_PACKAGES=(
     "${VULKAN_RUNTIME_PACKAGES[@]}"
     "${VULKAN_DEV_PACKAGES[@]}"
     "${FFTW_PNG_PACKAGES[@]}"
     "${CMAKE_PACKAGES[@]}"
+    "${CP2K_PACKAGES[@]}"
 )
 
 # Check which packages are missing
@@ -179,6 +202,31 @@ if ldconfig -p | grep -q libfftw3 2>/dev/null || \
 else
     log_fpu "[WARN] libfftw3 not found (fftw-devel may need EPEL repo)"
     log_fpu "[HINT] Ensure EPEL is enabled: sudo dnf install -y epel-release"
+fi
+
+# Check CP2K-related toolchain/runtime
+if command -v gfortran >/dev/null 2>&1; then
+    log_fpu "[OK] gfortran available: $(gfortran --version | head -1)"
+else
+    log_fpu "[WARN] gfortran not found in PATH"
+fi
+
+if command -v mpirun >/dev/null 2>&1; then
+    log_fpu "[OK] mpirun available: $(mpirun --version 2>/dev/null | head -1)"
+else
+    log_fpu "[WARN] mpirun not found in PATH"
+fi
+
+if command -v mpifort >/dev/null 2>&1; then
+    log_fpu "[OK] mpifort available"
+else
+    log_fpu "[WARN] mpifort not found in PATH"
+fi
+
+if rpm -q hdf5-openmpi-devel >/dev/null 2>&1; then
+    log_fpu "[OK] MPI-enabled HDF5 development package installed"
+else
+    log_fpu "[WARN] hdf5-openmpi-devel not installed"
 fi
 
 log_fpu "=== FPU benchmark dependency setup complete ==="
