@@ -192,7 +192,17 @@
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
                     "notes": "CP2K ab initio molecular dynamics benchmark (MPI parallel). Upstream PTS profile uses NUM_CPU_PHYSICAL_CORES; runner patches install.sh to follow project convention via NUM_CPU_CORES. OMP_NUM_THREADS=1 (MPI-only parallelism). Result: seconds (lower is better).",
-                    "exe_time_v8cpu": "20.0"
+                    "exe_time_v8cpu": "50.0"
+                },
+                "pts/mocassin-1.1.0": {
+                    "enabled": true,
+                    "test_snippet": "Mocassin-2.02.73.3",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": false,
+                    "notes": "Monte Carlo Simulations of Ionised Nebulae benchmark (MPI parallel). Upstream PTS profile launches mpirun with NUM_CPU_PHYSICAL_CORES; runner patches install.sh to align project-level scaling via NUM_CPU_CORES while keeping MPI rank count portable through MPI_RANKS / NUM_CPU_PHYSICAL_CORES. Result: seconds (lower is better).",
+                    "exe_time_v8cpu": "50.0"
                 }
             }
         },
