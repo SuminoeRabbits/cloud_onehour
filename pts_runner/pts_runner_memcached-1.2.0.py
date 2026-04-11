@@ -372,7 +372,7 @@ class MemcachedRunner:
         except Exception as e:
             print(f"  [WARN] Could not write install log: {e}")
 
-        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(install_log)
+        pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         install_failed = False
         full_output = ''.join(output)
         if process.returncode != 0:

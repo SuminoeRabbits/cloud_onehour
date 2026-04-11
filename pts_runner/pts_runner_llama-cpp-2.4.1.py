@@ -51,12 +51,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from runner_common import (
-    cleanup_pts_artifacts,
-    detect_pts_failure_from_log,
-    get_install_status,
-    get_pts_profile_dir,
-)
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, get_pts_profile_dir
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +326,7 @@ class LlamaCppRunner:
                     failed.append(num_threads)
 
             print('\n' + '=' * 80)
-            print(f">>> Exporting results")
+            print(">>> Exporting results")
             print('=' * 80)
             self.export_results()
 
@@ -345,7 +340,7 @@ class LlamaCppRunner:
             print(f"\n[WARN] Failed thread counts: {failed}")
         else:
             print('\n' + '=' * 80)
-            print(f"[SUCCESS] All benchmarks completed successfully")
+            print("[SUCCESS] All benchmarks completed successfully")
             print('=' * 80)
 
         return len(failed) == 0
@@ -736,7 +731,7 @@ class LlamaCppRunner:
             print(f"  [ERROR] Installation directory not found: {install_dir}")
             sys.exit(1)
 
-        print(f"  [OK] Installation completed and verified")
+        print("  [OK] Installation completed and verified")
 
     # ------------------------------------------------------------------
     # Benchmark execution
@@ -786,14 +781,14 @@ class LlamaCppRunner:
         if self.perf_events:
             if self.perf_paranoid <= 0:
                 perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (per-CPU mode)")
+                print("  [INFO] Running with perf monitoring (per-CPU mode)")
             else:
                 perf_cmd = f"perf stat -e {self.perf_events} -o {perf_stats_file}"
-                print(f"  [INFO] Running with perf monitoring (aggregated mode)")
+                print("  [INFO] Running with perf monitoring (aggregated mode)")
             pts_cmd = f"{batch_env} {perf_cmd} {pts_base_cmd}"
         else:
             pts_cmd = f"{batch_env} {pts_base_cmd}"
-            print(f"  [INFO] Running without perf")
+            print("  [INFO] Running without perf")
 
         # Record CPU frequency before
         print("[INFO] Recording CPU frequency before benchmark...")
@@ -903,7 +898,7 @@ class LlamaCppRunner:
     def generate_summary(self):
         """Generate summary.log and summary.json from all thread results."""
         print('\n' + '=' * 80)
-        print(f">>> Generating summary")
+        print(">>> Generating summary")
         print('=' * 80)
 
         summary_log = self.results_dir / "summary.log"
@@ -1166,7 +1161,7 @@ class LlamaCppRunner:
             )
             output = result.stdout + result.stderr
             if result.returncode == 0 and "<not supported>" not in output:
-                print(f"  [OK] Hardware PMU available")
+                print("  [OK] Hardware PMU available")
                 return hw_events
 
             sw_events = "cpu-clock,task-clock,context-switches,cpu-migrations"
@@ -1175,7 +1170,7 @@ class LlamaCppRunner:
                 capture_output=True, text=True, timeout=3,
             )
             if result_sw.returncode == 0:
-                print(f"  [INFO] Using software-only perf events")
+                print("  [INFO] Using software-only perf events")
                 return sw_events
         except subprocess.TimeoutExpired:
             print("  [WARN] perf test timed out")
