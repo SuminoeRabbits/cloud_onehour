@@ -21,8 +21,9 @@ Test Characteristics:
 - THFix_in_compile: false - Thread count is not embedded in the binary
 - THChange_at_runtime: true - Runtime process count is controlled via NUM_CPU_CORES
 - Note: Upstream PTS profile uses NUM_CPU_PHYSICAL_CORES in the generated wrapper.
-  This runner patches install.sh so runtime scaling follows the project convention
-  via NUM_CPU_CORES, while still keeping a fallback to NUM_CPU_PHYSICAL_CORES.
+This runner patches install.sh so runtime scaling follows the project convention
+via NUM_CPU_CORES, while keeping MPI rank count on a more portable
+physical-core-based default through MPI_RANKS / NUM_CPU_PHYSICAL_CORES.
 - Measures: Total execution time in Seconds (lower is better)
 - App version: CP2K 2024.3 (test profile version: 1.5.0)
 
@@ -161,6 +162,7 @@ class CP2KRunner:
         self.test_category_dir = self.test_category.replace(" ", "_")
 
         self.vcpu_count = os.cpu_count() or 1
+        self.physical_core_count = self.detect_physical_core_count()
         self.machine_name = os.environ.get("MACHINE_NAME", os.uname().nodename)
         self.os_name = self.get_os_name()
         self.arch = os.uname().machine
@@ -391,6 +393,63 @@ class CP2KRunner:
 
         return ",".join(cpu_list)
 
+    def detect_physical_core_count(self):
+        """Best-effort physical core detection with conservative fallbacks."""
+        try:
+            result = subprocess.run(
+                ["lscpu", "-p=CORE,SOCKET"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout:
+                core_socket_pairs = set()
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 2 and parts[0] and parts[1]:
+                        core_socket_pairs.add((parts[0], parts[1]))
+                if core_socket_pairs:
+                    return len(core_socket_pairs)
+        except Exception:
+            pass
+
+        try:
+            physical_ids = set()
+            current_physical = None
+            current_core = None
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if not line.strip():
+                        if current_physical is not None and current_core is not None:
+                            physical_ids.add((current_physical, current_core))
+                        current_physical = None
+                        current_core = None
+                        continue
+                    if ":" not in line:
+                        continue
+                    key, value = [x.strip() for x in line.split(":", 1)]
+                    if key == "physical id":
+                        current_physical = value
+                    elif key == "core id":
+                        current_core = value
+            if current_physical is not None and current_core is not None:
+                physical_ids.add((current_physical, current_core))
+            if physical_ids:
+                return len(physical_ids)
+        except Exception:
+            pass
+
+        if self.vcpu_count % 2 == 0 and self.vcpu_count > 1:
+            return max(1, self.vcpu_count // 2)
+        return self.vcpu_count
+
+    def get_visible_physical_core_count(self, num_threads):
+        """Estimate physical cores represented by the selected visible CPUs."""
+        return max(1, min(num_threads, self.physical_core_count))
+
     def get_compiler_env(self):
         """Return compiler environment, preferring GCC 14 toolchain when available."""
         cc = "gcc-14" if shutil.which("gcc-14") else "gcc"
@@ -419,7 +478,8 @@ class CP2KRunner:
           * enables optional SIRIUS/libvdwxc toolchain components by default
 
         This runner patches it to:
-          * prefer NUM_CPU_CORES first so scaling stays aligned with the project
+          * keep NUM_CPU_CORES for project-wide runtime scaling metadata
+          * drive mpirun rank count from MPI_RANKS first, then NUM_CPU_PHYSICAL_CORES
           * disable optional SIRIUS/libvdwxc toolchain components that are not
             required for the default PTS CP2K benchmark inputs and can introduce
             extra network-sensitive downloads from cp2k.org
@@ -436,11 +496,20 @@ class CP2KRunner:
             original_content = content
             patched = False
 
-            old_np = r"-np \$NUM_CPU_PHYSICAL_CORES"
-            new_np = r"-np \${NUM_CPU_CORES:-\${NUM_CPU_PHYSICAL_CORES:-1}}"
-            if old_np in content:
-                content = content.replace(old_np, new_np)
-                patched = True
+            np_replacements = [
+                (
+                    r"-np \$NUM_CPU_PHYSICAL_CORES",
+                    r"-np \${MPI_RANKS:-\${NUM_CPU_PHYSICAL_CORES:-1}}",
+                ),
+                (
+                    r"-np \${NUM_CPU_CORES:-\${NUM_CPU_PHYSICAL_CORES:-1}}",
+                    r"-np \${MPI_RANKS:-\${NUM_CPU_PHYSICAL_CORES:-1}}",
+                ),
+            ]
+            for old_np, new_np in np_replacements:
+                if old_np in content:
+                    content = content.replace(old_np, new_np)
+                    patched = True
 
             old_make = 'make -j $NUM_CPU_CORES ARCH=local VERSION="psmp"'
             new_make = 'make -j ${NUM_CPU_CORES:-1} ARCH=local VERSION="psmp"'
@@ -460,7 +529,7 @@ class CP2KRunner:
 
             if patched:
                 install_sh_path.write_text(content if content.endswith("\n") else content + "\n")
-                print("  [OK] install.sh patched for scaling and reduced optional CP2K toolchain deps")
+                print("  [OK] install.sh patched for portable MPI rank scaling and reduced optional CP2K toolchain deps")
                 return True
 
             if original_content == content:
@@ -487,9 +556,11 @@ class CP2KRunner:
 
         cc, cxx, fc = self.get_compiler_env()
         nproc = os.cpu_count() or 1
+        install_physical = max(1, min(self.physical_core_count, nproc))
         install_cmd = (
             f'NUM_CPU_CORES={nproc} '
-            f'NUM_CPU_PHYSICAL_CORES={max(1, nproc // 2)} '
+            f'NUM_CPU_PHYSICAL_CORES={install_physical} '
+            f'MPI_RANKS={install_physical} '
             f'CC={cc} CXX={cxx} FC={fc} '
             f'MAKEFLAGS="-j{nproc}" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'
@@ -592,7 +663,13 @@ class CP2KRunner:
             f"TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads"
         )
 
-        base_env_prefix = f"NUM_CPU_CORES={num_threads} NUM_CPU_PHYSICAL_CORES={num_threads} "
+        visible_physical = self.get_visible_physical_core_count(num_threads)
+        mpi_ranks = visible_physical
+        base_env_prefix = (
+            f"NUM_CPU_CORES={num_threads} "
+            f"NUM_CPU_PHYSICAL_CORES={visible_physical} "
+            f"MPI_RANKS={mpi_ranks} "
+        )
         if self.perf_events:
             if self.perf_paranoid <= 0:
                 perf_cmd = f"perf stat -e {self.perf_events} -A -a -o {perf_stats_file}"
@@ -603,7 +680,9 @@ class CP2KRunner:
             pts_cmd = f"{base_env_prefix}{batch_env} {pts_base_cmd}"
 
         print(f"  [INFO] {cpu_info}")
-        print(f"  [INFO] MPI rank count target: {num_threads}")
+        print(f"  [INFO] Physical core baseline: {self.physical_core_count}")
+        print(f"  [INFO] Visible physical cores for this run: {visible_physical}")
+        print(f"  [INFO] MPI rank count target: {mpi_ranks}")
 
         self.record_cpu_frequency(freq_start_file)
 
