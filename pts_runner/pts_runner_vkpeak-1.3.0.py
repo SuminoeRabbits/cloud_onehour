@@ -300,7 +300,8 @@ class VkpeakRunner:
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        install_cmd = f'phoronix-test-suite batch-install {self.benchmark_full}'
+        # Inject DISPLAY=:0 to bypass PTS display server detection on headless GUI-less servers
+        install_cmd = f'DISPLAY=:0 phoronix-test-suite batch-install {self.benchmark_full}'
 
         print(f"\n{'>'*80}")
         print("[PTS INSTALL COMMAND]")
@@ -386,7 +387,7 @@ class VkpeakRunner:
 
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
         batch_env = (
-            f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 '
+            f'{quick_env}DISPLAY=:0 BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 '
             f'TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads '
             f'TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads '
             f'TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
