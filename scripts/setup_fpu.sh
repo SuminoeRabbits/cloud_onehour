@@ -12,6 +12,10 @@
 #                           Requires: Vulkan dev, cmake, fftw3-dev, libpng-dev
 #   pts/c-ray-2.0.0       : Multi-threaded CPU raytracer
 #                           Requires: build-essential (covered by setup_pts.sh)
+#   pts/mt-dgemm-1.3.1    : ACES DGEMM floating-point benchmark
+#                           Requires: build-essential + unzip (covered by setup_pts.sh)
+#   pts/mocassin-1.1.0    : Monte Carlo Simulations of Ionised Nebulae (CPU/MPI)
+#                           Requires: Fortran toolchain + OpenMPI (covered below)
 #   pts/cp2k-1.5.0        : CP2K molecular dynamics (CPU/MPI)
 #                           Requires: Fortran toolchain, OpenMPI, MPI HDF5, BLAS/LAPACK
 #   pts/ospray-1.0.3      : Intel OSPray ray-tracing (x86_64 pre-built binary)
