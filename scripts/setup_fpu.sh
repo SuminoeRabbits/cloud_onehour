@@ -138,6 +138,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Keep gfortran default aligned with GCC 14 for CP2K/OpenBLAS toolchain builds.
+# CP2K's internal toolchain resolves plain "gfortran" from PATH; if Ubuntu keeps
+# gfortran -> gfortran-13 while gcc/g++ point to 14, mixed-major linking breaks.
+# ---------------------------------------------------------------------------
+if [[ -x /usr/bin/gfortran-14 ]]; then
+    log_fpu "Configuring gfortran-14 as the default gfortran via update-alternatives..."
+    sudo update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-14 100 || true
+    sudo update-alternatives --set gfortran /usr/bin/gfortran-14
+    hash -r 2>/dev/null || true
+    log_fpu "[OK] Default gfortran now points to: $(readlink -f "$(command -v gfortran)")"
+else
+    log_fpu "[WARN] /usr/bin/gfortran-14 not found; cannot switch default gfortran"
+fi
+
+# ---------------------------------------------------------------------------
 # Post-install validation
 # ---------------------------------------------------------------------------
 log_fpu "=== Post-install validation ==="
@@ -185,6 +200,11 @@ elif command -v gfortran >/dev/null 2>&1; then
     log_fpu "[WARN] gfortran-14 not found; fallback gfortran detected: $(gfortran --version | head -1)"
 else
     log_fpu "[WARN] gfortran not found in PATH"
+fi
+
+if command -v gfortran >/dev/null 2>&1; then
+    log_fpu "[OK] default gfortran: $(gfortran --version | head -1)"
+    log_fpu "[OK] gfortran path: $(readlink -f "$(command -v gfortran)")"
 fi
 
 if command -v mpirun >/dev/null 2>&1; then
