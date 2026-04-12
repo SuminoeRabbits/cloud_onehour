@@ -19,6 +19,7 @@ import subprocess
 import argparse
 import shutil
 import time
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
@@ -38,7 +39,21 @@ class OpenCVRunner:
         self.test_category_dir = self.test_category.replace(' ', '_')
 
         # Test filter configurable variable
-        self._KEEP_TESTS = {"dnn"}
+        self._KEEP_TESTS = {"dnn", "objdetect", "imgproc"}
+
+        # Full upstream test catalogue (from pts/opencv-1.3.0 GitHub master).
+        # Used to supplement missing entries in the locally-installed
+        # test-definition.xml (OpenBenchmarking.org cache may ship a trimmed XML).
+        self._ALL_KNOWN_TESTS = {
+            "dnn":       "DNN - Deep Neural Network",
+            "features2d": "Features 2D",
+            "objdetect": "Object Detection",
+            "core":      "Core",
+            "gapi":      "Graph API",
+            "imgproc":   "Image Processing",
+            "stitching": "Stitching",
+            "video":     "Video",
+        }
 
         # System info
         self.vcpu_count = os.cpu_count() or 1
@@ -321,10 +336,17 @@ class OpenCVRunner:
             print(f"  [WARN] Failed to check/update user-config.xml: {e}")
 
     def patch_test_definition(self) -> bool:
-        """Patch test-definition.xml to only execute requested tests."""
+        """Patch test-definition.xml to execute exactly _KEEP_TESTS.
+
+        The XML distributed via OpenBenchmarking.org may only contain a subset
+        of the upstream entries (e.g. only 'dnn').  This method:
+          1. Adds any _KEEP_TESTS entries that are missing, using _ALL_KNOWN_TESTS
+             as the authoritative name->value mapping.
+          2. Removes any entries that are NOT in _KEEP_TESTS.
+        """
         xml_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark / "test-definition.xml"
         bak_path = xml_path.with_suffix(".xml.bak")
-        
+
         # Pull profile info to ensure XML is present locally
         if not xml_path.exists():
             subprocess.run(['phoronix-test-suite', 'info', self.benchmark_full], capture_output=True)
@@ -344,20 +366,45 @@ class OpenCVRunner:
             patched = False
             for option in test_settings.findall("Option"):
                 ident = option.find("Identifier")
-                if ident is not None and (ident.text or "").strip() == "test":
-                    menu = option.find("Menu")
-                    if menu is not None:
-                        for entry in menu.findall("Entry"):
-                            val_node = entry.find("Value")
-                            val = (val_node.text or "").strip() if val_node is not None else ""
-                            if val not in self._KEEP_TESTS:
-                                menu.remove(entry)
-                                patched = True
-                                print(f"  [PATCH] Removed test entry: {val}")
-                                
+                if ident is None or (ident.text or "").strip() != "test":
+                    continue
+                menu = option.find("Menu")
+                if menu is None:
+                    continue
+
+                # --- Step 1: collect existing values ---
+                existing_values = set()
+                for entry in menu.findall("Entry"):
+                    val_node = entry.find("Value")
+                    val = (val_node.text or "").strip() if val_node is not None else ""
+                    existing_values.add(val)
+
+                # --- Step 2: add missing _KEEP_TESTS entries ---
+                for val in sorted(self._KEEP_TESTS):
+                    if val not in existing_values:
+                        display_name = self._ALL_KNOWN_TESTS.get(val, val)
+                        entry = ET.SubElement(menu, "Entry")
+                        name_el = ET.SubElement(entry, "Name")
+                        name_el.text = display_name
+                        val_el = ET.SubElement(entry, "Value")
+                        val_el.text = val
+                        patched = True
+                        print(f"  [PATCH] Added missing test entry: {val} ({display_name})")
+
+                # --- Step 3: remove entries not in _KEEP_TESTS ---
+                for entry in menu.findall("Entry"):
+                    val_node = entry.find("Value")
+                    val = (val_node.text or "").strip() if val_node is not None else ""
+                    if val not in self._KEEP_TESTS:
+                        menu.remove(entry)
+                        patched = True
+                        print(f"  [PATCH] Removed test entry: {val}")
+
             if patched:
                 tree.write(xml_path, encoding="utf-8", xml_declaration=True)
                 print(f"  [INFO] Patched test-definition.xml to keep only tests: {self._KEEP_TESTS}")
+            else:
+                print(f"  [INFO] test-definition.xml already matches _KEEP_TESTS: {self._KEEP_TESTS}")
             return True
         except Exception as e:
             print(f"  [ERROR] Failed to patch XML: {e}")
@@ -371,6 +418,212 @@ class OpenCVRunner:
         if bak_path.exists():
             shutil.move(str(bak_path), str(xml_path))
             print("  [RESTORE] Restored test-definition.xml")
+
+    # ---------------------------------------------------------------------------
+    # OpenCV version patch: override PTS profile to use 4.13.0 instead of 4.7.0
+    # ---------------------------------------------------------------------------
+    _OPENCV_TARGET_VERSION = "4.13.0"
+    _OPENCV_PACKAGES = {
+        "opencv": {
+            "url_tmpl":   "https://github.com/opencv/opencv/archive/refs/tags/{ver}.tar.gz",
+            "filename":   "opencv-{ver}.tar.gz",
+            "md5":        "f33c0ace3add57aba7b9d3fe3c41feb4",
+            "sha256":     "1d40ca017ea51c533cf9fd5cbde5b5fe7ae248291ddf2af99d4c17cf8e13017d",
+            "filesize":   "95420275",
+        },
+        "opencv_extra": {
+            "url_tmpl":   "https://github.com/opencv/opencv_extra/archive/refs/tags/{ver}.tar.gz",
+            "filename":   "opencv_extra-{ver}.tar.gz",
+            "md5":        "7af2fe54d571c2efa4d67938f81b01b0",
+            "sha256":     "a6137c1e5e82010fa212c36f7d48a05b4467e2413bcd9ac6c469f6d398c71f27",
+            "filesize":   "17793015",
+        },
+    }
+    # opencv_extra-4.13.0 does NOT ship testdata/dnn/ — those files are stored
+    # in Git LFS and are absent from GitHub source archives.  We supplement them
+    # from opencv_extra-4.7.0 (last release where dnn testdata was in-repo).
+    _OPENCV_EXTRA_TESTDATA = {
+        "url":      "https://github.com/opencv/opencv_extra/archive/refs/tags/4.7.0.tar.gz",
+        "filename": "opencv_extra-4.7.0.tar.gz",
+        "md5":      "051564e9b2b59b01fe93d9ec12525556",
+        "sha256":   "835420bbd625ba73ac892bdadf247a52ac42fa26f24c2f3752f63dbb3487bbb5",
+        "filesize": "500181420",
+    }
+
+    def patch_opencv_version(self) -> bool:
+        """Patch PTS opencv profile to use OpenCV 4.13.0.
+
+        Modifies downloads.xml (URLs, checksums, sizes) and install.sh
+        (version strings).  Also copies pre-downloaded tarballs from the
+        pts_runner directory into the PTS download cache so that the install
+        step does not need to re-download them.
+        """
+        ver = self._OPENCV_TARGET_VERSION
+        profile_dir = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark
+
+        # Ensure profile XML is present locally
+        downloads_xml = profile_dir / "downloads.xml"
+        install_sh    = profile_dir / "install.sh"
+        if not downloads_xml.exists():
+            subprocess.run(['phoronix-test-suite', 'info', self.benchmark_full], capture_output=True)
+
+        if not downloads_xml.exists():
+            print(f"  [WARN] downloads.xml not found at {downloads_xml}; skipping version patch")
+            return False
+
+        # --- patch downloads.xml ---
+        try:
+            bak = downloads_xml.parent / "downloads.xml.bak"
+            shutil.copy2(downloads_xml, bak)
+            tree = ET.parse(downloads_xml)
+            root = tree.getroot()
+
+            downloads_node = root.find("Downloads")
+            if downloads_node is None:
+                downloads_node = root
+
+            for pkg in root.findall(".//Package"):
+                url_node    = pkg.find("URL")
+                fname_node  = pkg.find("FileName")
+                md5_node    = pkg.find("MD5")
+                sha256_node = pkg.find("SHA256")
+                size_node   = pkg.find("FileSize")
+
+                if url_node is None or fname_node is None:
+                    continue
+
+                fname = (fname_node.text or "").strip()
+
+                if "opencv_extra" in fname:
+                    meta = self._OPENCV_PACKAGES["opencv_extra"]
+                elif "opencv" in fname:
+                    meta = self._OPENCV_PACKAGES["opencv"]
+                else:
+                    continue
+
+                url_node.text   = meta["url_tmpl"].format(ver=ver)
+                fname_node.text = meta["filename"].format(ver=ver)
+                if md5_node    is not None: md5_node.text    = meta["md5"]
+                if sha256_node is not None: sha256_node.text = meta["sha256"]
+                if size_node   is not None: size_node.text   = meta["filesize"]
+
+            # Add supplemental opencv_extra-4.7.0 for DNN testdata (moved to LFS in 4.13.0)
+            td = self._OPENCV_EXTRA_TESTDATA
+            extra_pkg = ET.SubElement(downloads_node, "Package")
+            ET.SubElement(extra_pkg, "URL").text      = td["url"]
+            ET.SubElement(extra_pkg, "MD5").text      = td["md5"]
+            ET.SubElement(extra_pkg, "SHA256").text   = td["sha256"]
+            ET.SubElement(extra_pkg, "FileName").text = td["filename"]
+            ET.SubElement(extra_pkg, "FileSize").text = td["filesize"]
+
+            tree.write(downloads_xml, encoding="utf-8", xml_declaration=True)
+            print(f"  [PATCH] downloads.xml updated to OpenCV {ver} + DNN testdata supplement")
+        except Exception as e:
+            print(f"  [ERROR] Failed to patch downloads.xml: {e}")
+            return False
+
+        # --- patch install.sh ---
+        if install_sh.exists():
+            try:
+                bak_sh = install_sh.parent / "install.sh.bak"
+                shutil.copy2(install_sh, bak_sh)
+                content = install_sh.read_text()
+
+                # Step 1: replace old version strings with 4.13.0
+                old_ver_match = re.search(r'4\.\d+\.\d+', content)
+                if old_ver_match:
+                    old_ver = old_ver_match.group(0)
+                    content = content.replace(old_ver, ver)
+                    print(f"  [PATCH] install.sh: {old_ver} -> {ver}")
+
+                # Step 2: inject DNN testdata supplement immediately after
+                # `tar -xf opencv_extra-4.13.0.tar.gz`
+                extra_extract_marker = f"tar -xf opencv_extra-{ver}.tar.gz"
+                dnn_supplement = (
+                    f"{extra_extract_marker}\n"
+                    f"# Supplement missing testdata/dnn/ from opencv_extra-4.7.0\n"
+                    f"# (DNN testdata was moved to Git LFS in 4.13.0; absent from source archive)\n"
+                    f"tar -xf opencv_extra-4.7.0.tar.gz opencv_extra-4.7.0/testdata/dnn/\n"
+                    f"mkdir -p opencv_extra-{ver}/testdata/dnn\n"
+                    f"cp -r opencv_extra-4.7.0/testdata/dnn/. opencv_extra-{ver}/testdata/dnn/\n"
+                    f"rm -rf opencv_extra-4.7.0"
+                )
+                if extra_extract_marker in content:
+                    content = content.replace(extra_extract_marker, dnn_supplement)
+                    print(f"  [PATCH] install.sh: DNN testdata supplement injected")
+                else:
+                    print(f"  [WARN]  install.sh: marker '{extra_extract_marker}' not found; "
+                          f"DNN testdata supplement NOT injected")
+
+                # Step 3: replace cmake command with optimized flags (arch-aware)
+                # WITH_KLEIDICV is ARM64-only: ON x86_64 it injects -march=armv8-a
+                # which causes a hard build failure with GCC.
+                import platform
+                machine = platform.machine().lower()
+                is_arm64 = machine in ("aarch64", "arm64")
+                arch_label = "aarch64" if is_arm64 else "x86_64"
+
+                cmake_old = "cmake -DCMAKE_BUILD_TYPE=Release -DWITH_OPENCL=OFF .."
+                cmake_new = (
+                    "cmake -DCMAKE_BUILD_TYPE=Release -DWITH_OPENCL=OFF"
+                    " -DCPU_BASELINE=DETECT"
+                    " -DCPU_DISPATCH=ALL"
+                    " -DOPENCV_GENERATE_SETUPVARS=ON"
+                    + (" -DWITH_KLEIDICV=ON" if is_arm64 else "")
+                    + " -DWITH_IPP=OFF"
+                    " .."
+                )
+                if cmake_old in content:
+                    content = content.replace(cmake_old, cmake_new)
+                    print(f"  [PATCH] install.sh: cmake SIMD flags injected [{arch_label}]"
+                          + (" +KLEIDICV" if is_arm64 else " KLEIDICV=OFF(x86)"))
+                else:
+                    print(f"  [WARN]  install.sh: cmake marker not found; SIMD flags NOT injected")
+
+                install_sh.write_text(content)
+            except Exception as e:
+                print(f"  [ERROR] Failed to patch install.sh: {e}")
+                return False
+
+        # --- seed PTS download cache with local tarballs ---
+        cache_dir = Path.home() / ".phoronix-test-suite" / "download-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        seed_files = [
+            self._OPENCV_PACKAGES["opencv"]["filename"].format(ver=ver),
+            self._OPENCV_PACKAGES["opencv_extra"]["filename"].format(ver=ver),
+            self._OPENCV_EXTRA_TESTDATA["filename"],
+        ]
+        for fname in seed_files:
+            src = self.script_dir / fname
+            dst = cache_dir / fname
+            if src.exists():
+                if not dst.exists():
+                    shutil.copy2(str(src), str(dst))
+                    print(f"  [CACHE] Seeded {fname} into PTS download cache")
+                else:
+                    print(f"  [CACHE] {fname} already in PTS download cache")
+            else:
+                print(f"  [WARN]  Local tarball not found: {src} (will attempt download)")
+
+        return True
+
+    def restore_opencv_version(self):
+        """Restore original downloads.xml and install.sh from backups."""
+        profile_dir = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark
+        for orig_name, bak_name in [("downloads.xml", "downloads.xml.bak"), ("install.sh", "install.sh.bak")]:
+            bak  = profile_dir / bak_name
+            orig = profile_dir / orig_name
+            if bak.exists():
+                shutil.move(str(bak), str(orig))
+                print(f"  [RESTORE] Restored {orig_name}")
+
+    def _is_target_version_installed(self) -> bool:
+        """Return True when the OpenCV 4.13.0 build artefacts are present."""
+        ver = self._OPENCV_TARGET_VERSION
+        installed_base = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark
+        # install.sh unpacks to opencv-{ver}/ and builds under opencv-{ver}/build/
+        opencv_build = installed_base / f"opencv-{ver}" / "build"
+        return opencv_build.is_dir()
 
     def clean_pts_cache(self):
         """Clean PTS installed tests."""
@@ -616,22 +869,33 @@ class OpenCVRunner:
 
         try:
             self.patch_test_definition()
+            self.patch_opencv_version()
+
+            # Force reinstall when the installed binary does not match the
+            # target version (e.g. previously built with 4.7.0).
+            if already_installed and not self._is_target_version_installed():
+                print(
+                    f"[INFO] Installed OpenCV does not match target "
+                    f"{self._OPENCV_TARGET_VERSION}; forcing reinstall."
+                )
+                already_installed = False
 
             if not already_installed:
                 self.clean_pts_cache()
                 self.install_benchmark()
             else:
                 print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
-            
+
             for t in self.thread_list:
                 self.run_benchmark(t)
-                
+
             self.export_results()
             self.generate_summary()
             cleanup_pts_artifacts(self.benchmark)
             return True
         finally:
             self.restore_test_definition()
+            self.restore_opencv_version()
 
 def main():
     parser = argparse.ArgumentParser(description="OpenCV Runner")
