@@ -542,7 +542,15 @@ class MocassinRunner:
         cc, cxx, fc = self.get_compiler_env()
         nproc = os.cpu_count() or 1
         install_physical = max(1, min(self.physical_core_count, nproc))
+        
+        mpi_path_setup = (
+            "export PATH=/usr/lib64/openmpi/bin:/usr/lib64/mpich/bin:$PATH; "
+            "export LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/lib64/mpich/lib:$LD_LIBRARY_PATH; "
+            "export PKG_CONFIG_PATH=/usr/lib64/openmpi/lib/pkgconfig:/usr/lib64/mpich/lib/pkgconfig:$PKG_CONFIG_PATH; "
+        )
+        
         install_cmd = (
+            f'{mpi_path_setup}'
             f'NUM_CPU_CORES={nproc} '
             f'NUM_CPU_PHYSICAL_CORES={install_physical} '
             f'MPI_RANKS={install_physical} '
@@ -650,7 +658,14 @@ class MocassinRunner:
 
         visible_physical = self.get_visible_physical_core_count(num_threads)
         mpi_ranks = visible_physical
+        
+        mpi_path_setup = (
+            "export PATH=/usr/lib64/openmpi/bin:/usr/lib64/mpich/bin:$PATH; "
+            "export LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/lib64/mpich/lib:$LD_LIBRARY_PATH; "
+        )
+        
         base_env_prefix = (
+            f"{mpi_path_setup}"
             f"NUM_CPU_CORES={num_threads} "
             f"NUM_CPU_PHYSICAL_CORES={visible_physical} "
             f"MPI_RANKS={mpi_ranks} "
