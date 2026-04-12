@@ -546,6 +546,7 @@ class MocassinRunner:
         mpi_path_setup = (
             "export PATH=/usr/lib64/openmpi/bin:/usr/lib64/mpich/bin:$PATH; "
             "export LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/lib64/mpich/lib:$LD_LIBRARY_PATH; "
+            "export LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/lib64/mpich/lib:$LIBRARY_PATH; "
             "export PKG_CONFIG_PATH=/usr/lib64/openmpi/lib/pkgconfig:/usr/lib64/mpich/lib/pkgconfig:$PKG_CONFIG_PATH; "
         )
         
@@ -662,6 +663,7 @@ class MocassinRunner:
         mpi_path_setup = (
             "export PATH=/usr/lib64/openmpi/bin:/usr/lib64/mpich/bin:$PATH; "
             "export LD_LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/lib64/mpich/lib:$LD_LIBRARY_PATH; "
+            "export LIBRARY_PATH=/usr/lib64/openmpi/lib:/usr/lib64/mpich/lib:$LIBRARY_PATH; "
         )
         
         base_env_prefix = (
