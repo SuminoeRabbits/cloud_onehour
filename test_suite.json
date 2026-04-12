@@ -203,6 +203,16 @@
                     "sve2_support": false,
                     "notes": "Monte Carlo Simulations of Ionised Nebulae benchmark (MPI parallel). Upstream PTS profile launches mpirun with NUM_CPU_PHYSICAL_CORES; runner patches install.sh to align project-level scaling via NUM_CPU_CORES while keeping MPI rank count portable through MPI_RANKS / NUM_CPU_PHYSICAL_CORES. Result: seconds (lower is better).",
                     "exe_time_v8cpu": "50.0"
+                },
+                "pts/opencv-1.3.0": {
+                    "enabled": true,
+                    "test_snippet": "OpenCV-4.13.0",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": "unknown",
+                    "notes": "OpenCV DNN performance benchmark. Runner patches PTS profile (downloads.xml + install.sh) to build OpenCV 4.13.0 instead of the upstream 4.7.0. testdata/dnn/ is absent from the 4.13.0 GitHub source archive (moved to Git LFS); runner supplements it from opencv_extra-4.7.0.tar.gz. Only the 'dnn' sub-test is executed. Thread count passed via NUM_CPU_CORES env var at build time. Result: iterations/sec (higher is better).",
+                    "exe_time_v8cpu": "100.0"
                 }
             }
         },
