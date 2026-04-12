@@ -185,13 +185,13 @@
                     "exe_time_v8cpu": "6.0"
                 },
                 "pts/cp2k-1.5.0": {
-                    "enabled": true,
+                    "enabled": false,
                     "test_snippet": "CP2K-2024.3",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "CP2K ab initio molecular dynamics benchmark (MPI parallel). Upstream PTS profile uses NUM_CPU_PHYSICAL_CORES; runner patches install.sh to follow project convention via NUM_CPU_CORES. OMP_NUM_THREADS=1 (MPI-only parallelism). Result: seconds (lower is better).",
+                    "notes": "CP2K ab initio molecular dynamics benchmark (MPI parallel). arm64 is not supported. Upstream PTS profile uses NUM_CPU_PHYSICAL_CORES; runner patches install.sh to follow project convention via NUM_CPU_CORES. OMP_NUM_THREADS=1 (MPI-only parallelism). Result: seconds (lower is better).",
                     "exe_time_v8cpu": "50.0"
                 },
                 "pts/mocassin-1.1.0": {

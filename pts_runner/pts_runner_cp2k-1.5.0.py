@@ -517,15 +517,32 @@ class CP2KRunner:
                 content = content.replace(old_make, new_make)
                 patched = True
 
-            toolchain_calls = [
+            # Patch toolchain calls to:
+            #   --with-sirius=no --with-libvdwxc=no  : disable network-sensitive optional deps
+            #   --with-mpich=no --with-openmpi=system : use system OpenMPI (installed by
+            #       setup_fpu.sh) instead of building MPICH from source.
+            #
+            # Without --with-mpich=no, CP2K's install_mpich.sh detects OpenMPI's mpifort in
+            # PATH (injected by the runner) and assumes "system MPICH available", then fails
+            # with "ld cannot find -lmpifort" because OpenMPI ships libmpi_mpifh.so, not
+            # the MPICH-specific libmpifort.so.
+            toolchain_bases = [
                 "./install_cp2k_toolchain.sh --with-libxsmm=install --with-openblas=install --with-fftw=install --with-cmake=system",
                 "./install_cp2k_toolchain.sh --with-libxsmm=install --with-openblas=system --with-fftw=install --with-cmake=system",
             ]
-            for call in toolchain_calls:
-                if call in content and "--with-sirius=no" not in call:
-                    new_call = f"{call} --with-sirius=no --with-libvdwxc=no"
-                    content = content.replace(call, new_call)
-                    patched = True
+            for base in toolchain_bases:
+                # Handle both the original call and a previously-patched variant
+                # (idempotent: skip if target is already present)
+                src_variants = [
+                    base,
+                    base + " --with-sirius=no --with-libvdwxc=no",
+                ]
+                target = base + " --with-sirius=no --with-libvdwxc=no --with-mpich=no --with-openmpi=system"
+                for src in src_variants:
+                    if src in content and src != target:
+                        content = content.replace(src, target)
+                        patched = True
+                        break
 
             if patched:
                 install_sh_path.write_text(content if content.endswith("\n") else content + "\n")
@@ -848,6 +865,13 @@ class CP2KRunner:
 
     def run(self):
         """Main execution method."""
+        # pts/cp2k-1.5.0 upstream profile only supports x86_64.
+        # PTS refuses to install on aarch64 ("not supported on this architecture"),
+        # so exit cleanly rather than failing with an installation error.
+        if self.arch not in ("x86_64", "amd64"):
+            print(f"[SKIP] pts/cp2k-1.5.0 is not supported on {self.arch} (x86_64 only). Exiting cleanly.")
+            return True
+
         print(f"{'='*80}")
         print(f"PTS Benchmark Runner: {self.benchmark}")
         print(f"Machine: {self.machine_name}")
