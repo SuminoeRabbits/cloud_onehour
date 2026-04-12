@@ -531,15 +531,17 @@ class CP2KRunner:
                 "./install_cp2k_toolchain.sh --with-libxsmm=install --with-openblas=system --with-fftw=install --with-cmake=system",
             ]
             for base in toolchain_bases:
-                # Handle both the original call and a previously-patched variant
-                # (idempotent: skip if target is already present)
-                src_variants = [
-                    base,
-                    base + " --with-sirius=no --with-libvdwxc=no",
-                ]
                 target = base + " --with-sirius=no --with-libvdwxc=no --with-mpich=no --with-openmpi=system"
-                for src in src_variants:
-                    if src in content and src != target:
+                # Idempotency: target is a superset of base, so naively checking
+                # "base in content" would match even when already fully patched,
+                # causing flags to be appended twice.  Check for target first.
+                if target in content:
+                    continue  # already fully patched — nothing to do
+                for src in [
+                    base + " --with-sirius=no --with-libvdwxc=no",  # partially patched
+                    base,                                             # original
+                ]:
+                    if src in content:
                         content = content.replace(src, target)
                         patched = True
                         break
