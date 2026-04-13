@@ -507,7 +507,7 @@ class OpenCVRunner:
                 if sha256_node is not None: sha256_node.text = meta["sha256"]
                 if size_node   is not None: size_node.text   = meta["filesize"]
 
-            # Add supplemental opencv_extra-4.7.0 for DNN testdata (moved to LFS in 4.13.0)
+            # Add supplemental opencv_extra-4.7.0 for full testdata/ (moved to LFS in 4.13.0)
             td = self._OPENCV_EXTRA_TESTDATA
             extra_pkg = ET.SubElement(downloads_node, "Package")
             ET.SubElement(extra_pkg, "URL").text      = td["url"]
@@ -517,7 +517,7 @@ class OpenCVRunner:
             ET.SubElement(extra_pkg, "FileSize").text = td["filesize"]
 
             tree.write(downloads_xml, encoding="utf-8", xml_declaration=True)
-            print(f"  [PATCH] downloads.xml updated to OpenCV {ver} + DNN testdata supplement")
+            print(f"  [PATCH] downloads.xml updated to OpenCV {ver} + full testdata supplement")
         except Exception as e:
             print(f"  [ERROR] Failed to patch downloads.xml: {e}")
             return False
@@ -536,24 +536,35 @@ class OpenCVRunner:
                     content = content.replace(old_ver, ver)
                     print(f"  [PATCH] install.sh: {old_ver} -> {ver}")
 
-                # Step 2: inject DNN testdata supplement immediately after
+                # Step 2: inject full testdata supplement immediately after
                 # `tar -xf opencv_extra-4.13.0.tar.gz`
+                #
+                # opencv_extra-4.13.0 ships only module source code; all testdata
+                # (dnn/, cv/tracking/, cv/shared/, cv/qrcode/, perf/, …) was moved
+                # to Git LFS and is absent from the release tarball.
+                # opencv_extra-4.7.0 is the last release where testdata was included
+                # in-tree.  We extract the entire testdata/ tree from 4.7.0 and merge
+                # it into 4.13.0's directory so all perf tests can find their assets:
+                #   - dnn/         : DNN model weights / configs
+                #   - cv/tracking/ : video test data (faceocc2.webm …)
+                #   - cv/shared/   : common images (lena.png …)
+                #   - cv/qrcode/   : QR-code test images
+                #   - perf/        : XML performance reference data (stitching.xml …)
                 extra_extract_marker = f"tar -xf opencv_extra-{ver}.tar.gz"
-                dnn_supplement = (
+                testdata_supplement = (
                     f"{extra_extract_marker}\n"
-                    f"# Supplement missing testdata/dnn/ from opencv_extra-4.7.0\n"
-                    f"# (DNN testdata was moved to Git LFS in 4.13.0; absent from source archive)\n"
-                    f"tar -xf opencv_extra-4.7.0.tar.gz opencv_extra-4.7.0/testdata/dnn/\n"
-                    f"mkdir -p opencv_extra-{ver}/testdata/dnn\n"
-                    f"cp -r opencv_extra-4.7.0/testdata/dnn/. opencv_extra-{ver}/testdata/dnn/\n"
+                    f"# Supplement missing testdata/ from opencv_extra-4.7.0\n"
+                    f"# (testdata moved to Git LFS in 4.13.0; absent from source archive)\n"
+                    f"tar -xf opencv_extra-4.7.0.tar.gz opencv_extra-4.7.0/testdata/\n"
+                    f"cp -r opencv_extra-4.7.0/testdata/. opencv_extra-{ver}/testdata/\n"
                     f"rm -rf opencv_extra-4.7.0"
                 )
                 if extra_extract_marker in content:
-                    content = content.replace(extra_extract_marker, dnn_supplement)
-                    print(f"  [PATCH] install.sh: DNN testdata supplement injected")
+                    content = content.replace(extra_extract_marker, testdata_supplement)
+                    print(f"  [PATCH] install.sh: full testdata supplement injected")
                 else:
                     print(f"  [WARN]  install.sh: marker '{extra_extract_marker}' not found; "
-                          f"DNN testdata supplement NOT injected")
+                          f"testdata supplement NOT injected")
 
                 # Step 3: replace cmake command with optimized flags (arch-aware)
                 # WITH_KLEIDICV is ARM64-only: ON x86_64 it injects -march=armv8-a
