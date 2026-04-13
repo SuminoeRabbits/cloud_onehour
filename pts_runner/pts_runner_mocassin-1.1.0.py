@@ -474,6 +474,12 @@ class MocassinRunner:
           * keep NUM_CPU_CORES for project-wide runtime scaling metadata
           * drive mpirun rank count from MPI_RANKS first, then NUM_CPU_PHYSICAL_CORES
           * make install reruns idempotent via mkdir -p for input/output
+
+        NOTE: Mocassin's Makefile has no Fortran .mod dependency declarations.
+        Parallel make (-jN, N>1) causes a race where files that USE common_mod are
+        compiled before common_mod.mod is created.  The source build MUST be serial.
+        Do NOT patch "make" to "make -j N" here, and do NOT pass MAKEFLAGS=-jN to
+        the install environment.
         """
         install_sh_path = (
             Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark / "install.sh"
@@ -505,7 +511,9 @@ class MocassinRunner:
             replacements = [
                 ("mkdir input", "mkdir -p input"),
                 ("mkdir output", "mkdir -p output"),
-                ("make\n", "make -j ${NUM_CPU_CORES:-1}\n"),
+                # NOTE: Do NOT add -jN here.  Mocassin's Makefile has no Fortran
+                # .mod dependency declarations; parallel make causes a race on
+                # common_mod.mod and fails on all platforms.  Serial build only.
             ]
             for old_text, new_text in replacements:
                 if old_text in content:
@@ -556,7 +564,9 @@ class MocassinRunner:
             f'NUM_CPU_PHYSICAL_CORES={install_physical} '
             f'MPI_RANKS={install_physical} '
             f'CC={cc} CXX={cxx} FC={fc} '
-            f'MAKEFLAGS="-j{nproc}" '
+            # MAKEFLAGS intentionally omitted: Mocassin's Makefile has no Fortran
+            # .mod dependency declarations, so -jN (N>1) causes a race on
+            # common_mod.mod and fails on all platforms.  Serial build is required.
             f'phoronix-test-suite batch-install {self.benchmark_full}'
         )
 
