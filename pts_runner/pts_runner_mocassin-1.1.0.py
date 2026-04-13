@@ -511,9 +511,13 @@ class MocassinRunner:
             replacements = [
                 ("mkdir input", "mkdir -p input"),
                 ("mkdir output", "mkdir -p output"),
-                # NOTE: Do NOT add -jN here.  Mocassin's Makefile has no Fortran
-                # .mod dependency declarations; parallel make causes a race on
-                # common_mod.mod and fails on all platforms.  Serial build only.
+                # Revert any previously-applied parallel-make patch.
+                # Earlier versions of this runner mistakenly patched "make" ->
+                # "make -j ${NUM_CPU_CORES:-1}".  Mocassin's Makefile has no
+                # Fortran .mod dependency declarations; parallel make causes a
+                # race on *.mod files (common_mod.mod, constants_mod.mod, etc.)
+                # and fails on all platforms regardless of core count.
+                ("make -j ${NUM_CPU_CORES:-1}\n", "make\n"),
             ]
             for old_text, new_text in replacements:
                 if old_text in content:
