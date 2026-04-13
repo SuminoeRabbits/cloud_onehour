@@ -39,7 +39,7 @@ class OpenCVRunner:
         self.test_category_dir = self.test_category.replace(' ', '_')
 
         # Test filter configurable variable
-        self._KEEP_TESTS = {"dnn", "objdetect", "imgproc"}
+        self._KEEP_TESTS = {"dnn", "objdetect", "imgproc", "features2d", "stitching", "video"}
 
         # Full upstream test catalogue (from pts/opencv-1.3.0 GitHub master).
         # Used to supplement missing entries in the locally-installed
