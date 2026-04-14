@@ -196,7 +196,7 @@ Python 3.12 以上が必要です。
 同名ファイルが既に存在する場合は上書きされます。
 
 - 処理対象カテゴリ:
-`AI`, `Compression`, `Cryptography_and_TLS`, `Database`, `Java_Applications`,
+`AI`, `Compression`, `Cryptography_and_TLS`, `Database`, `FPU`,`Java_Applications`,
 `Memory_Access`, `Multimedia`, `Network`,`Telecom`,`Processor`, `System`
 
 各カテゴリ `<testcategory>` 配下の `<testcategory>/<testcategory>_*.json` という形式のファイルを

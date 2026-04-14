@@ -29,6 +29,7 @@ TEST_CATEGORIES = [
     "Compression",
     "Cryptography_and_TLS",
     "Database",
+    "FPU",
     "Java_Applications",
     "Memory_Access",
     "Multimedia",
