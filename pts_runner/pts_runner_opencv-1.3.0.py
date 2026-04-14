@@ -502,19 +502,28 @@ class OpenCVRunner:
                     continue
 
                 url_node.text   = meta["url_tmpl"].format(ver=ver)
-                fname_node.text = meta["filename"].format(ver=ver)
-                if md5_node    is not None: md5_node.text    = meta["md5"]
-                if sha256_node is not None: sha256_node.text = meta["sha256"]
-                if size_node   is not None: size_node.text   = meta["filesize"]
+                new_fname       = meta["filename"].format(ver=ver)
+                fname_node.text = new_fname
+                if size_node is not None: size_node.text = meta["filesize"]
+                # GitHub tag archives are non-deterministic (tar header timestamps vary
+                # per request), so the SHA256 of a fresh download often differs from the
+                # value computed on the developer's machine.  Only enforce the checksum
+                # when the file is already pre-seeded in the local pts_runner/ directory;
+                # otherwise clear it so PTS accepts whatever GitHub serves.
+                local_ok = (self.script_dir / new_fname).exists()
+                if md5_node    is not None: md5_node.text    = meta["md5"]    if local_ok else ""
+                if sha256_node is not None: sha256_node.text = meta["sha256"] if local_ok else ""
 
             # Add supplemental opencv_extra-4.7.0 for full testdata/ (moved to LFS in 4.13.0)
             td = self._OPENCV_EXTRA_TESTDATA
             extra_pkg = ET.SubElement(downloads_node, "Package")
             ET.SubElement(extra_pkg, "URL").text      = td["url"]
-            ET.SubElement(extra_pkg, "MD5").text      = td["md5"]
-            ET.SubElement(extra_pkg, "SHA256").text   = td["sha256"]
             ET.SubElement(extra_pkg, "FileName").text = td["filename"]
             ET.SubElement(extra_pkg, "FileSize").text = td["filesize"]
+            # Same non-determinism applies to 4.7.0 archive.
+            local_ok_47 = (self.script_dir / td["filename"]).exists()
+            ET.SubElement(extra_pkg, "MD5").text    = td["md5"]    if local_ok_47 else ""
+            ET.SubElement(extra_pkg, "SHA256").text = td["sha256"] if local_ok_47 else ""
 
             tree.write(downloads_xml, encoding="utf-8", xml_declaration=True)
             print(f"  [PATCH] downloads.xml updated to OpenCV {ver} + full testdata supplement")
