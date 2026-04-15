@@ -621,6 +621,15 @@ class OpenCVRunner:
                 else:
                     print(f"  [WARN]  install.sh: cmake marker not found; SIMD flags NOT injected")
 
+                # Step 4: Inject --perf_threads into the wrapper script
+                wrapper_old = "./opencv_perf_\\$@ > \\$LOG_FILE 2>&1"
+                wrapper_new = "./opencv_perf_\\$@ --perf_threads=\\${NUM_CPU_CORES:-\\$(nproc)} > \\$LOG_FILE 2>&1"
+                if wrapper_old in content:
+                    content = content.replace(wrapper_old, wrapper_new)
+                    print(f"  [PATCH] install.sh: Injected --perf_threads into wrapper script")
+                else:
+                    print(f"  [WARN]  install.sh: wrapper marker not found; --perf_threads NOT injected")
+
                 install_sh.write_text(content)
             except Exception as e:
                 print(f"  [ERROR] Failed to patch install.sh: {e}")
