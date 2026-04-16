@@ -68,16 +68,10 @@ class OpenCVRunner:
         self.quick_mode = quick_mode
 
         if threads_arg is None:
-            # Even-number scaling: [2, 4, 6, ..., nproc]
-            # 4-point scaling: [nproc/4, nproc/2, nproc*3/4, nproc]
-
-            n_4 = self.vcpu_count // 4
-
-            self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
-
-            # Remove any zeros and deduplicate
-
-            self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
+            # OpenCV's perf binary defaults to cv::getNumThreads() = nproc regardless
+            # of NUM_CPU_CORES, so the 4-point scaling produces 4 identical measurements.
+            # Run once at full concurrency (nproc) — reflects actual behaviour.
+            self.thread_list = [self.vcpu_count]
         else:
             # Fixed mode: cap at vcpu_count
             n = min(threads_arg, self.vcpu_count)
