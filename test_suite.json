@@ -208,11 +208,11 @@
                     "enabled": true,
                     "test_snippet": "OpenCV-4.13.0",
                     "THFix_in_compile": false,
-                    "THChange_at_runtime": true,
-                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "THChange_at_runtime": false,
+                    "TH_scaling": "nproc",
                     "sve2_support": "unknown",
-                    "notes": "OpenCV DNN performance benchmark. Runner patches PTS profile (downloads.xml + install.sh) to build OpenCV 4.13.0 instead of the upstream 4.7.0. testdata/dnn/ is absent from the 4.13.0 GitHub source archive (moved to Git LFS); runner supplements it from opencv_extra-4.7.0.tar.gz. Only the 'dnn' sub-test is executed. Thread count passed via NUM_CPU_CORES env var at build time. Result: iterations/sec (higher is better).",
-                    "exe_time_v8cpu": "100.0"
+                    "notes": "OpenCV computer vision performance benchmark (dnn, imgproc, objdetect, features2d, stitching, video). Runner patches PTS profile (downloads.xml + install.sh) to build OpenCV 4.13.0 instead of upstream 4.7.0. testdata/ is absent from the 4.13.0 GitHub archive (Git LFS); supplemented from opencv_extra-4.7.0.tar.gz plus a synthetic dog416.png for DNN tests added after 4.7.0. NUM_CPU_CORES controls build parallelism only; the perf binary uses cv::getNumThreads()=nproc internally regardless of NUM_CPU_CORES. Runner runs a single measurement at nproc. Result: ms (lower is better).",
+                    "exe_time_v8cpu": "2.0"
                 }
             }
         },

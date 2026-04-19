@@ -719,6 +719,8 @@ def cleanup_active_instances(signum=None, frame=None):
 
         print(f"[CLEANUP] Found {len(active_instances)} active instance(s). Starting termination...")
 
+        remaining_instances = []
+
         for inst_info in active_instances:
             cloud = inst_info['cloud']
             instance_id = inst_info['instance_id']
@@ -729,40 +731,50 @@ def cleanup_active_instances(signum=None, frame=None):
             try:
                 if cloud == 'aws':
                     region = inst_info.get('region', 'ap-northeast-1')
-                    subprocess.run(
+                    result = subprocess.run(
                         f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}",
                         shell=True,
                         timeout=30,
                         capture_output=True
                     )
+                    if result.returncode != 0:
+                        err = result.stderr.decode().strip() if isinstance(result.stderr, bytes) else (result.stderr or "").strip()
+                        raise RuntimeError(err or f"AWS terminate command failed with rc={result.returncode}")
                     print(f"[CLEANUP] AWS instance {instance_id} termination initiated")
 
                 elif cloud == 'gcp':
                     project = inst_info.get('project')
                     zone = inst_info.get('region') or inst_info.get('zone')
-                    subprocess.run(
+                    result = subprocess.run(
                         f"gcloud compute instances delete {instance_name} "
                         f"--project={project} --zone={zone} --quiet",
                         shell=True,
                         timeout=30,
                         capture_output=True
                     )
+                    if result.returncode != 0:
+                        err = result.stderr.decode().strip() if isinstance(result.stderr, bytes) else (result.stderr or "").strip()
+                        raise RuntimeError(err or f"GCP delete command failed with rc={result.returncode}")
                     print(f"[CLEANUP] GCP instance {instance_name} termination initiated")
 
                 elif cloud == 'oci':
                     region = inst_info.get('region')
                     cmd_prefix = f"OCI_REGION={region} " if region else ""
-                    subprocess.run(
+                    result = subprocess.run(
                         f"{cmd_prefix}oci compute instance terminate --instance-id {instance_id} --force",
                         shell=True,
                         timeout=300,  # OCI takes longer
                         capture_output=True
                     )
+                    if result.returncode != 0:
+                        err = result.stderr.decode().strip() if isinstance(result.stderr, bytes) else (result.stderr or "").strip()
+                        raise RuntimeError(err or f"OCI terminate command failed with rc={result.returncode}")
                     print(f"[CLEANUP] OCI instance {instance_id} termination initiated")
 
             except subprocess.TimeoutExpired:
                 print(f"[CLEANUP] Warning: Termination timeout for {instance_id}. "
                       f"Instance may still be running. Please check manually.")
+                remaining_instances.append(inst_info)
                 # Continue to next instance
 
             except Exception as e:
@@ -777,11 +789,14 @@ def cleanup_active_instances(signum=None, frame=None):
                     region = inst_info.get('region')
                     prefix = f"OCI_REGION={region} " if region else ""
                     print(f"[CLEANUP] Manual cleanup: {prefix}oci compute instance terminate --instance-id {instance_id} --force")
+                remaining_instances.append(inst_info)
                 # Continue to next instance
 
-        # Clear list after all termination attempts
-        active_instances.clear()
-        print("[CLEANUP] All termination requests sent. Exiting.")
+        active_instances[:] = remaining_instances
+        if active_instances:
+            print(f"[CLEANUP] {len(active_instances)} instance(s) still require manual verification.")
+        else:
+            print("[CLEANUP] All termination requests sent successfully. Exiting.")
 
     if signum:
         sys.exit(1)
@@ -820,6 +835,62 @@ def get_manual_cleanup_command(
         return f"{prefix}oci compute instance terminate --instance-id {instance_id} --force"
     else:
         return f"Unknown cloud type: {cloud}"
+
+
+def wait_for_termination(
+    provider: CloudProvider,
+    instance_id: str,
+    inst: Dict[str, Any],
+    logger,
+    timeout: int = 600,
+    poll_interval: int = 10
+) -> None:
+    """
+    Wait until an instance reaches a terminated/deleted state.
+
+    Raises:
+        TimeoutError: If the instance does not terminate within timeout.
+        RuntimeError: If the instance enters an unexpected steady state.
+    """
+    deadline = time.time() + timeout
+    last_status = "unknown"
+
+    terminal_statuses = {
+        "terminated",
+        "shutting-down",
+        "shutting_down",
+        "deleted",
+        "notfound",
+    }
+    transitional_statuses = {
+        "stopping",
+        "stopped",
+        "terminating",
+        "deleting",
+        "unknown",
+        "",
+        "none",
+    }
+
+    while time.time() < deadline:
+        status = provider.get_instance_status(instance_id, inst, logger=logger)
+        last_status = (status or "unknown").strip().lower()
+
+        if last_status in terminal_statuses:
+            logger.info(f"Termination confirmed: {inst['name']} -> {status}")
+            return
+
+        if last_status in transitional_statuses:
+            logger.info(f"Waiting for termination: {inst['name']} status={status}")
+            time.sleep(poll_interval)
+            continue
+
+        logger.warn(f"Instance still active after terminate request: {inst['name']} status={status}")
+        time.sleep(poll_interval)
+
+    raise TimeoutError(
+        f"Instance {inst['name']} did not terminate within {timeout}s (last status: {last_status})"
+    )
 
 
 # =========================================================================================
@@ -2868,17 +2939,17 @@ class AWSProvider(CloudProvider):
     def terminate_instance(self, instance_id: str, inst: Dict[str, Any], logger=None) -> bool:
         """Terminate AWS instance."""
         region = self._get_region_for_instance(inst)
-        try:
-            run_cmd(
-                f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}",
-                timeout=600,
-                logger=logger
-            )
-            return True
-        except Exception as e:
-            if logger:
-                logger.error(f"Termination failed: {e}")
-            return False
+        run_cmd(
+            f"aws ec2 terminate-instances --region {region} --instance-ids {instance_id}",
+            timeout=600,
+            logger=logger
+        )
+        run_cmd(
+            f"aws ec2 wait instance-terminated --region {region} --instance-ids {instance_id}",
+            timeout=600,
+            logger=logger
+        )
+        return True
 
     def get_instance_status(self, instance_id: str, inst: Dict[str, Any], logger=None) -> str:
         """Get AWS instance status."""
@@ -3014,17 +3085,13 @@ class GCPProvider(CloudProvider):
         zone = self._get_zone_for_instance(inst)
         # Note: GCP uses instance name, not ID
         name = inst.get('name', instance_id)
-        try:
-            run_cmd(
-                f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet",
-                timeout=600,
-                logger=logger
-            )
-            return True
-        except Exception as e:
-            if logger:
-                logger.error(f"Termination failed: {e}")
-            return False
+        run_cmd(
+            f"gcloud compute instances delete {name} --project={project} --zone={zone} --quiet",
+            timeout=600,
+            logger=logger
+        )
+        wait_for_termination(self, instance_id, inst, logger, timeout=600, poll_interval=10)
+        return True
 
     def get_instance_status(self, instance_id: str, inst: Dict[str, Any], logger=None) -> str:
         """Get GCP instance status."""
@@ -3551,17 +3618,13 @@ class OCIProvider(CloudProvider):
     def terminate_instance(self, instance_id: str, inst: Dict[str, Any], logger=None) -> bool:
         """Terminate OCI instance."""
         cmd_prefix = self._oci_cmd_prefix(inst)
-        try:
-            run_cmd(
-                f"{cmd_prefix}oci compute instance terminate --instance-id {instance_id} --force",
-                timeout=600,
-                logger=logger
-            )
-            return True
-        except Exception as e:
-            if logger:
-                logger.error(f"Termination failed: {e}")
-            return False
+        run_cmd(
+            f"{cmd_prefix}oci compute instance terminate --instance-id {instance_id} --force",
+            timeout=600,
+            logger=logger
+        )
+        wait_for_termination(self, instance_id, inst, logger, timeout=600, poll_interval=10)
+        return True
 
     def get_instance_status(self, instance_id: str, inst: Dict[str, Any], logger=None) -> str:
         """Get OCI instance status."""
@@ -3594,15 +3657,18 @@ def cleanup_instance_safely(provider: CloudProvider, instance_id: str, inst: Dic
         logger: Logger for output
     """
     try:
-        retry_with_exponential_backoff(
+        terminated = retry_with_exponential_backoff(
             lambda: provider.terminate_instance(instance_id, inst, logger),
             max_retries=3,
             base_delay=2.0,
             logger=logger,
             error_classifier=provider.is_retryable_error
         )
+        if terminated is not True:
+            raise RuntimeError(f"Terminate returned unexpected result: {terminated!r}")
         logger.info(f"Instance {inst['name']} terminated successfully")
         DASHBOARD.update(f"{provider.csp_config.get('name', 'unknown').upper()}:{inst['name']}", status="TERMINATED")
+        unregister_instance(instance_id)
     except Exception as term_error:
         logger.error(f"Failed to terminate instance after retries: {term_error}")
 
@@ -3624,8 +3690,6 @@ def cleanup_instance_safely(provider: CloudProvider, instance_id: str, inst: Dic
             status="TERM_FAILED",
             color=DASHBOARD.FAIL
         )
-    finally:
-        unregister_instance(instance_id)
 
 
 def process_instance(
