@@ -35,6 +35,8 @@ CASE5_BENCHMARKS = {
     "build-linux-kernel-1.17.1",
     "build-llvm-1.6.0",
     "coremark-1.0.1",
+    "cp2k-1.5.0",
+    "mocassin-1.1.0",
     "sysbench-1.1.0",
     "java-jmh-1.0.1",
     "ffmpeg-7.0.1",
@@ -338,6 +340,9 @@ class JsonParserComplianceChecker:
         """Check if unit is included in the test_payload key to prevent overwriting."""
         if "run_main(" in self.content:
             return  # Skip for wrapper-style
+        # Case5 benchmarks use a single hardcoded key per test; collision risk does not apply.
+        if self._benchmark_from_filename() in CASE5_BENCHMARKS:
+            return
             
         # Common patterns used to include unit in the key name
         has_unit_in_key = (
