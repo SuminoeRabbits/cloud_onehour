@@ -12,12 +12,14 @@
 | `json_parser_build-llvm-1.6.0.py` | D (ビルド系) | 複数 | ログ内複数ビルドシステム |
 | `json_parser_cachebench-1.2.0.py` | C (JSON) | 3 | `<N>-thread.json` から取得 (Read / Write / Read+Modify+Write) |
 | `json_parser_cassandra-1.3.1.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
+| `json_parser_c-ray-2.0.0.py` | C (JSON) | 3 | `<N>-thread.json` から取得 |
 | `json_parser_compress-7zip-1.12.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_compress-lz4-1.10.0.py` | C (JSON) | 複数 (10) | `<N>-thread.json` から取得 (Level×Speed/Decompression) |
 | `json_parser_compress-xz-1.1.0.py` | C (JSON) | 単一 | `<N>-thread.json` から取得 (unit=Seconds) |
 | `json_parser_compress-zstd-1.6.0.py` | C (JSON) | 複数 (12〜14) | `<N>-thread.json` から取得 (機種によりテスト数が異なる) |
 | `json_parser_coremark-1.0.1.py` | A (ログ単一) | 単一 | time 取得不可 |
 | `json_parser_cpuminer-opt-1.8.0.py` | C (JSON) | 複数 | `<N>-thread.json` 有り機種のみ出力。log-only機種はスキップ |
+| `json_parser_dacapobench-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_ffmpeg-7.0.1.py` | B (ログ複数) | 複数 | ケース5相当 |
 | `json_parser_glibc-bench-1.9.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_java-jmh-1.0.1.py` | A (ログ単一) | 単一 | time 取得不可 |
@@ -44,6 +46,7 @@
 | `json_parser_tinymembench-1.0.2.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Memcpy / Memset) |
 | `json_parser_valkey-1.0.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_valkey-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
+| `json_parser_vkpeak-1.3.0.py` | C (JSON) | 11 | `<N>-thread.json` から取得 |
 | `json_parser_webp-1.4.0.py` | C (JSON) | 5 | `<N>-thread.json` から取得 (Default / Quality 100 等), pts/webp-1.2.0用 |
 | `json_parser_x265-1.5.0.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Bosphorus 4K / 1080p) |
 | `json_parser_svt-av1-2.17.0.py` | C (JSON) | 12 | `<N>-thread.json` から取得 (Preset 3/5/8/13 × Bosphorus 4K/1080p/Beauty 4K 10-bit)。neo55sGen6 で検証済み |
@@ -62,6 +65,7 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_build-gcc-1.5.0.py` — OK (1 test: time_to_compile)
 - `json_parser_build-linux-kernel-1.17.1.py` — OK (2 tests: defconfig / allyesconfig)
 - `json_parser_cachebench-1.2.0.py` — OK (3 tests: Read / Write / Read+Modify+Write)
+- `json_parser_c-ray-2.0.0.py` — OK (3 tests: 1080p / 4K / 5K)
 - `json_parser_compress-lz4-1.10.0.py` — OK (10 tests: Level × Speed/Decompression)
 - `json_parser_compress-xz-1.1.0.py` — OK (1 test)
 - `json_parser_compress-zstd-1.6.0.py` — OK (14 tests)
@@ -80,3 +84,4 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_spark-1.0.1.py` — OK (16 tests)
 - `json_parser_tensorflow-lite-1.1.0.py` — OK (6 tests)
 - `json_parser_tinymembench-1.0.2.py` — OK (2 tests)
+- `json_parser_vkpeak-1.3.0.py` — OK (11 tests: fp32/fp16/fp64/int32/int16/int8 variants)
