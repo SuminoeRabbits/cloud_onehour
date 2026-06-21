@@ -2082,17 +2082,26 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             log_file = f"/tmp/cloud_exec_cmd_{i}.log"
             remote_log_path = log_file
 
-            # Wrap command with nohup and marker file creation
-            # Use double quotes for outer command to avoid nested single quote issues
-            # Escape double quotes and dollar signs in the command
-            escaped_cmd = cmd.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$')
-            wrapped_cmd = f'nohup sh -c "{escaped_cmd} && echo SUCCESS > {marker_file} || echo FAILED > {marker_file}" > {log_file} 2>&1 &'
+            # Wrap command with nohup and marker file creation.
+            # Quote both the remote wrapper and the inner script so workload
+            # redirections like "> /tmp/foo.log 2>&1" are preserved verbatim.
+            marker_q = shlex.quote(marker_file)
+            log_q = shlex.quote(log_file)
+            inner_script = (
+                f"{cmd}\n"
+                "status=$?\n"
+                f'if [ "$status" -eq 0 ]; then echo SUCCESS > {marker_q}; '
+                f'else echo FAILED > {marker_q}; fi\n'
+                'exit "$status"'
+            )
+            wrapped_cmd = f"nohup bash -lc {shlex.quote(inner_script)} > {log_q} 2>&1 < /dev/null &"
+            remote_wrapped_cmd = shlex.quote(wrapped_cmd)
 
             # Start the command in background
             nohup_max_retries = 3
             for nohup_attempt in range(nohup_max_retries):
                 try:
-                    run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} '{wrapped_cmd}'", capture=False, timeout=60, logger=logger)
+                    run_cmd(f"ssh {ssh_opt} {ssh_user}@{ip} {remote_wrapped_cmd}", capture=False, timeout=60, logger=logger)
                     break  # nohup started successfully
                 except subprocess.TimeoutExpired:
                     # SSH connected but nohup sh ... & did not return within 60s.
