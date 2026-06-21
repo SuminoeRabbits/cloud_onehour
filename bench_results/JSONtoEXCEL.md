@@ -163,17 +163,19 @@ Python 3.12 以上が必要です。
 | レベル | 内容 | 参照元 |
 |-------|---------|--------|
 | **メインタイトル**（大） | `test_snippet` | Excel 列 **B** (`test_snippet`) |
-| **サブタイトル**（小） | `test_name (unit)` または `test_name (unit), Thread=N` | test_name + 単位 |
+| **サブタイトル**（小） | `benchmark | test_name [score unit: unit]` または `benchmark | test_name [score unit: unit], Thread=N` | benchmark + test_name + score 単位 |
 
 `test_snippet` が空の場合は、サブタイトルのみを `axis.set_title()` で表示します。
+Y 軸は実測値ではなく列 **L** `performance` を描画するため、単位はスコアの元単位としてサブタイトルに表示します。
+例: STREAM の場合、`stream-1.3.4/size-100000000 | Stream - Type: Copy [score unit: MB/s]` のようにサイズ条件も表示します。
 
 ### スレッド数が複数のとき（折れ線グラフ）
 
 - X 軸: `thread`（整数）
-- Y 軸: `performance`
+- Y 軸: `performance (baseline=100)`
 - 系列: `machinename` ごとに 1 本の線
 - メインタイトル: Excel 列 **B** `test_snippet`
-- サブタイトル: `test_name (unit)`
+- サブタイトル: `benchmark | test_name [score unit: unit]`
 - マーカー: CSP マーカー表（上記）
 
 各系列は凡例とグラフ上に番号（1, 2, …）で表示されます。
@@ -181,10 +183,10 @@ Python 3.12 以上が必要です。
 
 ### スレッド数が 1 つのとき（棒グラフ）
 
-- Y 軸: `performance`（通常は 0–100）
+- Y 軸: `performance (baseline=100)`（通常は 0–100）
 - 系列: `machinename` ごとに 1 本の棒
 - メインタイトル: Excel 列 **B** `test_snippet`
-- サブタイトル: `test_name (unit), Thread=<thread>`
+- サブタイトル: `benchmark | test_name [score unit: unit], Thread=<thread>`
 - X 軸ラベル: 短縮した `machinename`
 
 棒は左側が高い性能、右側が低い性能の順に並びます。
@@ -210,6 +212,7 @@ Python 3.12 以上が必要です。
 - 相対性能フィールド: `relative_performance` を優先し、なければ `relative_cost_efficiency` を使用します。
 - `test_snippet` と `gcc_ver` は可能な場合、JSON の `<benchmark>` レベルから読み取ります。
 - スレッド値: 数値文字列なら整数へ変換します（例: `"4"` → `4`）。
+- `benchmark` 名には条件展開が含まれることがあります。例: STREAMのsize/thread sweepは `stream-1.3.4/size-100000000` のようにサイズ条件をbenchmark列へ含めます。この文字列はExcelセル値およびグラフのグループキーとして扱われ、出力ファイル名やディレクトリ名には使用されません。
 
 ## 変換後の網羅性チェック
 変換後、処理対象カテゴリ内の `<testcategory>_performance_analysis.json` からテスト結果の網羅性を抽出する。抽出結果は **NOG（欠損あり）のみ** を JSON で出力する。
@@ -218,6 +221,7 @@ Python 3.12 以上が必要です。
 - とある"machinename"で一つでもデータ点がある場合は、ほかの"machinename"でも等しく情報が存在していなくてはならない。
 - "machinename"の母集団は、<testcategory>_performance_analysis.jsonの中で必ず１度は現れる"machinename"を積算したもの。
 - 判定単位は `benchmark + thread`。その配下の `test_name` のいずれかで欠損があれば `nog` に含める。
+- STREAMのようにサイズ条件がbenchmark名へ展開される場合、`stream-1.3.4/size-50000000 + thread` と `stream-1.3.4/size-100000000 + thread` は別々の判定単位です。
 
 出力フォーマットは以下の通りとする。
 

@@ -141,6 +141,10 @@ def is_fallback_value(value: Any) -> bool:
 def extract_rows(payload: Dict[str, Any]) -> List[Tuple[Any, ...]]:
     """Extract 12-tuples:
     (benchmark, test_snippet, test_name, os, gcc_ver, thread, unit, machinename, cpu_name, score, relative, rank).
+
+    Analytics may flatten benchmark conditions into the benchmark key, e.g.
+    stream-1.3.4/size-100000000. This value is treated as display/group text
+    only; it is never used as an output path.
     """
     comparison = find_comparison_block(payload)
     workload = comparison.get("workload", {})
@@ -668,18 +672,15 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
 
             # Common axes/title
             unit_label = benchmark_units.get(key)
+            metric_label = f"{test_name} [score unit: {unit_label}]" if unit_label else test_name
             if single_thread_mode and all_threads:
-                subtitle = (
-                    f"{test_name} ({unit_label}), Thread={all_threads[0]}"
-                    if unit_label else f"{test_name}, Thread={all_threads[0]}"
-                )
-            else:
-                subtitle = f"{test_name} ({unit_label})" if unit_label else test_name
+                metric_label = f"{metric_label}, Thread={all_threads[0]}"
+            subtitle = f"{benchmark} | {metric_label}" if benchmark else metric_label
             main_title = snippet_map.get(key, "")
             if not is_fallback_value(main_title):
                 figure.suptitle(main_title, x=0.5, y=0.98, ha="center", va="top", fontsize=13, fontweight="bold")
             axis.set_title(subtitle, fontsize=9, pad=2)
-            axis.set_ylabel("performance")
+            axis.set_ylabel("performance (baseline=100)")
             axis.grid(True, axis="y", linestyle="--", alpha=0.35)
 
             if legend_handles:
@@ -791,6 +792,8 @@ def build_coverage_nog_for_category(json_path: Path) -> Dict[str, Any]:
     testcategory = json_path.stem.replace("_performance_analysis", "")
     machine_population: Set[str] = set()
     presence: Dict[Tuple[str, int, str], Set[str]] = {}
+    # Benchmark may include condition suffixes such as /size-100000000.
+    # Coverage intentionally treats each benchmark condition independently.
     benchmark_threads: Dict[Tuple[str, int], Set[str]] = {}
 
     for row in rows:
