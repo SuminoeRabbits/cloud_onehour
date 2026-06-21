@@ -197,11 +197,22 @@ def _load_thread_json(container_dir: Path, size_value: str, thread_num: str, is_
 def _collect_thread_payload(
     container_dir: Path,
     size_value: str,
-    thread_num: str,
-    is_flat_layout: bool,
-    cost_hour: float,
+    thread_num: Optional[str] = None,
+    is_flat_layout: Optional[bool] = None,
+    cost_hour: float = 0.0,
 ) -> Optional[Dict[str, Any]]:
     """Extract benchmark results for a specific thread count."""
+    # Backward-compatible entry point used by make_one_big_json.py for legacy
+    # STREAM layouts: _collect_thread_payload(benchmark_dir, thread_num, cost).
+    if thread_num is not None and is_flat_layout is None:
+        legacy_thread_num = str(size_value)
+        cost_hour = float(thread_num)
+        size_value = ""
+        thread_num = legacy_thread_num
+        is_flat_layout = False
+
+    if thread_num is None or is_flat_layout is None:
+        return None
     
     entries = _load_thread_json(container_dir, size_value, thread_num, is_flat_layout)
     if not entries:
@@ -278,6 +289,31 @@ def _load_size_metadata(container_dir: Path, size_value: str, is_flat_layout: bo
     if isinstance(loaded, dict):
         metadata.update(loaded)
     return metadata
+
+
+def _collect_benchmark_payload(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[Dict[str, Any]]:
+    """Return the benchmark payload for make_one_big_json.py."""
+    size_nodes: Dict[str, Any] = {}
+
+    for size_value, container_dir, is_flat_layout in _discover_size_entries(benchmark_dir):
+        thread_nodes: Dict[str, Any] = {}
+        for thread_num in _discover_threads(container_dir, size_value, is_flat_layout):
+            thread_payload = _collect_thread_payload(
+                container_dir, size_value, thread_num, is_flat_layout, cost_hour
+            )
+            if thread_payload:
+                thread_nodes[thread_num] = thread_payload
+
+        if thread_nodes:
+            size_nodes[size_value] = {
+                "metadata": _load_size_metadata(container_dir, size_value, is_flat_layout),
+                "thread": thread_nodes,
+            }
+
+    if not size_nodes:
+        return None
+
+    return {"size": size_nodes}
 
 
 # ---------------------------------------------------------------------------

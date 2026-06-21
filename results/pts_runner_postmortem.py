@@ -208,6 +208,130 @@ def find_thread_numbers(benchmark_path: Path) -> List[int]:
     return sorted(list(thread_numbers))
 
 
+def check_stream_size_sweep_completion(benchmark_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Check completion for STREAM size/thread sweep layout.
+
+    The canonical STREAM runner writes files as:
+      size-<SIZE>-<N>-thread.json
+      size-<SIZE>-<N>-thread.log
+      size-<SIZE>-<N>-thread/size-<SIZE>-<N>-thread_perf_summary.json
+    This does not match the legacy <N>-thread.* discovery rules.
+    """
+    summary_json = benchmark_path / "summary.json"
+    size_list = []
+    thread_list = []
+
+    if summary_json.exists():
+        try:
+            summary = json.loads(summary_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            summary = {}
+
+        size_list = summary.get("stream_array_sizes") or []
+        thread_list = summary.get("thread_list") or []
+
+    observed: Dict[int, set] = {}
+    run_re = re.compile(r"^size-(\d+)-(\d+)-thread\.(?:log|json|csv)$")
+    for item in benchmark_path.iterdir():
+        match = run_re.match(item.name)
+        if not match:
+            continue
+        observed.setdefault(int(match.group(1)), set()).add(int(match.group(2)))
+
+    metadata_re = re.compile(r"^size-(\d+)-metadata\.json$")
+    metadata_sizes = {
+        int(match.group(1))
+        for item in benchmark_path.iterdir()
+        if (match := metadata_re.match(item.name))
+    }
+
+    if not size_list:
+        size_list = sorted(set(observed.keys()) | metadata_sizes)
+    if not thread_list:
+        thread_list = sorted(set().union(*observed.values())) if observed else []
+
+    if not size_list:
+        return None
+
+    result = {
+        "status": "complete",
+        "threads": {}
+    }
+
+    for size_value in size_list:
+        metadata_file = benchmark_path / f"size-{size_value}-metadata.json"
+        if not metadata_file.exists():
+            result["status"] = "incomplete"
+            result["threads"][f"size-{size_value}-N/A"] = {
+                "status": "incomplete",
+                "reason": f"Missing required files: {metadata_file.name}",
+                "missing_files": [metadata_file.name],
+                "completion_case": None
+            }
+
+        expected_threads = thread_list
+        if int(size_value) in observed and observed[int(size_value)]:
+            expected_threads = sorted(observed[int(size_value)])
+
+        if not expected_threads:
+            result["status"] = "incomplete"
+            result["threads"][f"size-{size_value}-N/A"] = {
+                "status": "incomplete",
+                "reason": "No thread-specific files found for STREAM size",
+                "missing_files": [f"size-{size_value}-<N>-thread.json"],
+                "completion_case": None
+            }
+            continue
+
+        for thread_num in expected_threads:
+            run_prefix = f"size-{size_value}-{thread_num}-thread"
+            thread_key = f"size-{size_value}-{thread_num}"
+            required_files = [
+                benchmark_path / f"{run_prefix}.log",
+                benchmark_path / f"{run_prefix}.json",
+                benchmark_path / f"{run_prefix}.csv",
+                benchmark_path / run_prefix / f"{run_prefix}_perf_summary.json",
+            ]
+            missing_files = [
+                str(path.relative_to(benchmark_path))
+                for path in required_files
+                if not path.exists()
+            ]
+
+            if missing_files:
+                result["status"] = "incomplete"
+                result["threads"][thread_key] = {
+                    "status": "incomplete",
+                    "reason": f"Missing required files: {', '.join(missing_files)}",
+                    "missing_files": missing_files,
+                    "completion_case": None
+                }
+                continue
+
+            log_file = benchmark_path / f"{run_prefix}.log"
+            has_failure, failure_reason = check_failure_patterns_in_log(log_file)
+            if has_failure:
+                result["status"] = "incomplete"
+                result["threads"][thread_key] = {
+                    "status": "incomplete",
+                    "reason": f"Test failure detected: {failure_reason}",
+                    "missing_files": [],
+                    "completion_case": 6,
+                    "failure_detected": True
+                }
+                continue
+
+            result["threads"][thread_key] = {
+                "status": "complete",
+                "reason": "All required files present (STREAM size/thread sweep)",
+                "missing_files": [],
+                "completion_case": 6
+            }
+
+    return result
+
+
 def check_required_files_for_thread(
     benchmark_path: Path,
     thread_num: int,
@@ -324,6 +448,12 @@ def check_benchmark_completion(benchmark_path: Path) -> Dict[str, Any]:
     }
 
     benchmark_name = benchmark_path.name
+
+    if benchmark_name == "stream-1.3.4":
+        stream_result = check_stream_size_sweep_completion(benchmark_path)
+        if stream_result is not None:
+            return stream_result
+
     thread_numbers = find_thread_numbers(benchmark_path)
 
     if not thread_numbers:

@@ -736,6 +736,14 @@ def process_benchmark(benchmark_dir: Path, cost_hour: float = 0.0) -> Optional[D
     # Load the benchmark-specific parser module
     parser_module = _load_benchmark_parser(benchmark_name)
 
+    if parser_module and hasattr(parser_module, '_collect_benchmark_payload'):
+        try:
+            payload = parser_module._collect_benchmark_payload(benchmark_dir, cost_hour)
+            if payload:
+                return {"__benchmark_node__": payload}
+        except Exception as e:
+            print(f"Warning: Parser for '{benchmark_name}' failed on benchmark payload: {e}", file=sys.stderr)
+
     # Discover all thread numbers
     thread_nums = _discover_threads(benchmark_dir)
     if not thread_nums:
@@ -847,7 +855,10 @@ def build_json_structure(project_root: Path) -> tuple:
                     benchmark_data = process_benchmark(benchmark_dir, machine_info["cost_hour[730h-mo]"])
 
                     if benchmark_data:
-                        testcategory_data["benchmark"][benchmark] = {"thread": benchmark_data}
+                        if "__benchmark_node__" in benchmark_data:
+                            testcategory_data["benchmark"][benchmark] = benchmark_data["__benchmark_node__"]
+                        else:
+                            testcategory_data["benchmark"][benchmark] = {"thread": benchmark_data}
                     else:
                         parser_file = Path(__file__).resolve().parent / "json_parser" / f"json_parser_{benchmark}.py"
                         if not parser_file.exists():
