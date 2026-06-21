@@ -34,6 +34,8 @@
 #  - "THFix_in_compile": false かつ "THChange_at_runtime": true → "full"
 #  - "THFix_in_compile": false かつ "THChange_at_runtime": false 
 #    かつ "TH_scaling" に "single-threaded" (大文字小文字問わず) を含む → "single_th"
+#  - "THFix_in_compile": false かつ "THChange_at_runtime": false
+#    かつ "TH_scaling" が "nproc" (大文字小文字問わず) → "auto_nproc"
 #  - "THFix_in_compile": true かつ "THChange_at_runtime": false → "max_th"
 # ※これらの条件で分類できない <testname> が発生した場合は、エラーを出力してスクリプトを停止します。
 # ※この条件設定もLUTで定義しチューニング可能とします。
@@ -44,6 +46,7 @@
 # まず、scaling に応じてベースとなる文字列 (base_opt) を決定します。
 # - "full" → "" (何も指定しない)
 # - "single_th" → "1"
+# - "auto_nproc" → "$(nproc)"
 # - "max_th" → "288"
 # 
 # 次に、test_length との組み合わせで exec_opt を決定します。
@@ -53,7 +56,7 @@
 # (2) test_length = "middle" の場合
 #     exec_opt = base_opt に "--quick" を付加
 # (3) test_length = "long" または "very_long" の場合
-#     - scaling が "single_th" または "max_th" の場合 (例外ルール)
+#     - scaling が "single_th", "auto_nproc", "max_th" の場合 (例外ルール)
 #       exec_opt = base_opt (このルールを優先)
 #     - scaling が "full" の場合
 #       以下の3通りの exec_opt を生成し、３つの実行コマンドを作成します。
@@ -135,12 +138,17 @@ def get_test_length(exe_time: float) -> str:
     return "very_long"
 
 def get_scaling(th_fix: bool, th_change: bool, th_scaling: str) -> str:
+    th_scaling_text = str(th_scaling).lower().strip()
+
     # "THFix_in_compile": false かつ "THChange_at_runtime": true → "full"
     if not th_fix and th_change:
         return "full"
     # "THFix_in_compile": false かつ "THChange_at_runtime": false かつ "TH_scaling" に "single-threaded" を含む → "single_th"
-    if not th_fix and not th_change and "single-threaded" in str(th_scaling).lower():
+    if not th_fix and not th_change and "single-threaded" in th_scaling_text:
         return "single_th"
+    # "THFix_in_compile": false かつ "THChange_at_runtime": false かつ "TH_scaling" が "nproc" → "auto_nproc"
+    if not th_fix and not th_change and th_scaling_text == "nproc":
+        return "auto_nproc"
     # "THFix_in_compile": true かつ "THChange_at_runtime": false → "max_th"
     if th_fix and not th_change:
         return "max_th"
@@ -192,6 +200,8 @@ def generate_commands(testname: str, test_length: str, scaling: str) -> list[str
         base_opt = ""
     elif scaling == "single_th":
         base_opt = "1"
+    elif scaling == "auto_nproc":
+        base_opt = "$(nproc)"
     elif scaling == "max_th":
         base_opt = "288"
     else:
@@ -199,7 +209,7 @@ def generate_commands(testname: str, test_length: str, scaling: str) -> list[str
         
     # test_length に組み合わせて exec_opt のリストを構築
     opts = []
-    if scaling in ("single_th", "max_th"):
+    if scaling in ("single_th", "auto_nproc", "max_th"):
         if test_length == "short":
             opts = [base_opt]
         elif test_length == "middle":

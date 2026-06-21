@@ -2,7 +2,7 @@
 """stream-1.3.4 専用 JSON パーサー。
 
 `cloud_onehour/results/<machinename>` を入力に README_results.md と同じ
-データ構造（抜粋）で Memory_Access/stream-1.3.4 のみを抽出する。
+データ構造（抜粋）で Memory_Access/stream-1.3.4 の size/thread sweep 結果を抽出する。
 """
 
 from __future__ import annotations
@@ -69,13 +69,44 @@ def _read_freq_file(freq_file: Path) -> Dict[str, int]:
     return freqs
 
 
-def _discover_threads(benchmark_dir: Path) -> Iterable[str]:
+FLAT_RUN_RE = re.compile(r"^size-(\d+)-(\d+)-thread\.log$")
+
+
+def _discover_size_entries(benchmark_dir: Path) -> Iterable[tuple[str, Path, bool]]:
+    """Return (stream_array_size, container_dir, is_flat_layout) tuples."""
+    flat_sizes = set()
+    for log_file in sorted(benchmark_dir.glob("size-*-*-thread.log")):
+        match = FLAT_RUN_RE.match(log_file.name)
+        if match:
+            flat_sizes.add(match.group(1))
+
+    for size_value in sorted(flat_sizes, key=int):
+        yield size_value, benchmark_dir, True
+
+    for size_dir in sorted(benchmark_dir.glob("size-*")):
+        if not size_dir.is_dir():
+            continue
+        size_value = size_dir.name.replace("size-", "", 1)
+        if size_value.isdigit() and size_value not in flat_sizes:
+            yield size_value, size_dir, False
+
+
+def _discover_threads(container_dir: Path, size_value: str, is_flat_layout: bool) -> Iterable[str]:
     """Return iterable of thread identifiers."""
-    log_threads = sorted(benchmark_dir.glob("*-thread.log"))
+    if is_flat_layout:
+        log_threads = sorted(container_dir.glob(f"size-{size_value}-*-thread.log"))
+    else:
+        log_threads = sorted(container_dir.glob("*-thread.log"))
+
     for file_path in log_threads:
-        thread_prefix = file_path.stem.split("-", 1)[0]
-        if thread_prefix:
-            yield thread_prefix
+        if is_flat_layout:
+            match = FLAT_RUN_RE.match(file_path.name)
+            if match:
+                yield match.group(2)
+        else:
+            thread_prefix = file_path.stem.split("-", 1)[0]
+            if thread_prefix:
+                yield thread_prefix
 
 
 def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> tuple[str, str, str, Dict[str, Any]]:
@@ -128,9 +159,12 @@ def _find_machine_info_in_hierarchy(benchmark_dir: Path, search_root: Path) -> t
 # Benchmark-specific extraction hooks
 # ---------------------------------------------------------------------------
 
-def _load_thread_json(benchmark_dir: Path, thread_num: str) -> list[tuple[str, dict]]:
+def _load_thread_json(container_dir: Path, size_value: str, thread_num: str, is_flat_layout: bool) -> list[tuple[str, dict]]:
     """Load <N>-thread.json and return list of (test_key, test_data) tuples."""
-    json_file = benchmark_dir / f"{thread_num}-thread.json"
+    if is_flat_layout:
+        json_file = container_dir / f"size-{size_value}-{thread_num}-thread.json"
+    else:
+        json_file = container_dir / f"{thread_num}-thread.json"
     if not json_file.exists():
         return []
     
@@ -161,13 +195,15 @@ def _load_thread_json(benchmark_dir: Path, thread_num: str) -> list[tuple[str, d
 
 
 def _collect_thread_payload(
-    benchmark_dir: Path,
+    container_dir: Path,
+    size_value: str,
     thread_num: str,
+    is_flat_layout: bool,
     cost_hour: float,
 ) -> Optional[Dict[str, Any]]:
     """Extract benchmark results for a specific thread count."""
     
-    entries = _load_thread_json(benchmark_dir, thread_num)
+    entries = _load_thread_json(container_dir, size_value, thread_num, is_flat_layout)
     if not entries:
         return None
     
@@ -200,8 +236,23 @@ def _collect_thread_payload(
         }
     
     # perf_stat 構築
-    start_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_start.txt")
-    end_freq = _read_freq_file(benchmark_dir / f"{thread_num}-thread_freq_end.txt")
+    if is_flat_layout:
+        run_prefix = f"size-{size_value}-{thread_num}-thread"
+        thread_dir = container_dir / run_prefix
+    else:
+        run_prefix = f"{thread_num}-thread"
+        thread_dir = container_dir / run_prefix
+
+    start_freq = _read_freq_file(thread_dir / f"{run_prefix}_freq_start.txt")
+    end_freq = _read_freq_file(thread_dir / f"{run_prefix}_freq_end.txt")
+    if not start_freq:
+        start_freq = _read_freq_file(thread_dir / f"{thread_num}-thread_freq_start.txt")
+    if not end_freq:
+        end_freq = _read_freq_file(thread_dir / f"{thread_num}-thread_freq_end.txt")
+    if not start_freq:
+        start_freq = _read_freq_file(container_dir / f"{run_prefix}_freq_start.txt")
+    if not end_freq:
+        end_freq = _read_freq_file(container_dir / f"{run_prefix}_freq_end.txt")
     perf_stat: Dict[str, Any] = {}
     if start_freq:
         perf_stat["start_freq"] = start_freq
@@ -209,6 +260,24 @@ def _collect_thread_payload(
         perf_stat["end_freq"] = end_freq
     
     return {"perf_stat": perf_stat, "test_name": test_payload}
+
+
+def _load_size_metadata(container_dir: Path, size_value: str, is_flat_layout: bool) -> Dict[str, Any]:
+    """Load size metadata written by the sweep runner."""
+    if is_flat_layout:
+        metadata_file = container_dir / f"size-{size_value}-metadata.json"
+    else:
+        metadata_file = container_dir / "metadata.json"
+    metadata: Dict[str, Any] = {"stream_array_size": int(size_value)}
+    if not metadata_file.exists():
+        return metadata
+    try:
+        loaded = json.loads(metadata_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return metadata
+    if isinstance(loaded, dict):
+        metadata.update(loaded)
+    return metadata
 
 
 # ---------------------------------------------------------------------------
@@ -236,15 +305,23 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
         
         cost_hour = machine_info.get("cost_hour[730h-mo]", 0.0)
 
-        thread_nodes: Dict[str, Any] = {}
-        for thread_num in _discover_threads(benchmark_dir):
-            thread_payload = _collect_thread_payload(
-                benchmark_dir, thread_num, cost_hour
-            )
-            if thread_payload:
-                thread_nodes[thread_num] = thread_payload
+        size_nodes: Dict[str, Any] = {}
+        for size_value, container_dir, is_flat_layout in _discover_size_entries(benchmark_dir):
+            thread_nodes: Dict[str, Any] = {}
+            for thread_num in _discover_threads(container_dir, size_value, is_flat_layout):
+                thread_payload = _collect_thread_payload(
+                    container_dir, size_value, thread_num, is_flat_layout, cost_hour
+                )
+                if thread_payload:
+                    thread_nodes[thread_num] = thread_payload
 
-        if not thread_nodes:
+            if thread_nodes:
+                size_nodes[size_value] = {
+                    "metadata": _load_size_metadata(container_dir, size_value, is_flat_layout),
+                    "thread": thread_nodes,
+                }
+
+        if not size_nodes:
             continue
 
         if machinename not in all_payload:
@@ -266,7 +343,7 @@ def _build_full_payload(search_root: Path) -> Dict[str, Any]:
             os_node["testcategory"][category_name] = {"benchmark": {}}
 
         benchmark_group = os_node["testcategory"][category_name]["benchmark"]
-        benchmark_group[BENCHMARK_NAME] = {"thread": thread_nodes}
+        benchmark_group[BENCHMARK_NAME] = {"size": size_nodes}
 
     return all_payload
 

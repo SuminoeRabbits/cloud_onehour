@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PTS Runner for stream-1.3.4
+PTS Runner for stream-1.3.4 size/thread sweep
 
 System Dependencies (from phoronix-test-suite info):
 - Software Dependencies:
@@ -16,17 +16,72 @@ Test Characteristics:
 - Notable Instructions: N/A (memory bandwidth test)
 - THFix_in_compile: false - Thread count NOT fixed at compile time
 - THChange_at_runtime: true - Runtime thread configuration via OMP_NUM_THREADS=$NUM_CPU_CORES
+
+Sweep Characteristics:
+- STREAM_ARRAY_SIZE is fixed at build time, so this runner reinstalls/rebuilds
+  pts/stream-1.3.4 once per requested array size.
+- For each size, it runs the requested thread list and captures Copy, Scale,
+  Add, and Triad from a single PTS run.
+- Results are written under stream-1.3.4. This runner is now the canonical
+  cloud_onehour STREAM runner and uses size/thread sweep output.
 """
 
 import argparse
 import json
 import os
+import py_compile
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+
+
+DEFAULT_STREAM_ARRAY_SIZES = [50000000, 100000000, 200000000]
+
+
+def build_default_thread_list(vcpu_count):
+    """
+    Build default thread scaling points for memory bandwidth saturation.
+
+    The low-thread points show ramp-up, while nproc/2, 3*nproc/4, and nproc
+    show where DDR bandwidth saturates or SMT stops helping.
+    """
+    candidates = [
+        1,
+        2,
+        4,
+        8,
+        max(1, vcpu_count // 2),
+        max(1, (vcpu_count * 3) // 4),
+        vcpu_count,
+    ]
+    return sorted(set([min(t, vcpu_count) for t in candidates if t > 0]))
+
+
+def parse_int_list(values, option_name):
+    """Parse space- or comma-separated positive integers from argparse values."""
+    if values is None:
+        return None
+    if isinstance(values, str):
+        values = [values]
+
+    parsed = []
+    for item in values:
+        for token in str(item).split(','):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                value = int(token)
+            except ValueError:
+                raise ValueError(f"{option_name} expects integers, got: {token}") from None
+            if value <= 0:
+                raise ValueError(f"{option_name} expects positive integers, got: {value}")
+            parsed.append(value)
+
+    return sorted(set(parsed))
 
 class PreSeedDownloader:
     """
@@ -181,16 +236,19 @@ class PreSeedDownloader:
             if target_path.exists():
                 target_path.unlink()
             return False
-class StreamRunner:
-    def __init__(self, threads_arg=None, quick_mode=False):
+class StreamSizeThreadSweepRunner:
+    def __init__(self, threads_arg=None, threads_list=None, sizes_arg=None, quick_mode=False):
         """
-        Initialize Stream memory benchmark runner.
+        Initialize Stream memory benchmark size/thread sweep runner.
 
         Args:
             threads_arg: Thread count argument (None for scaling mode, int for fixed mode)
+            threads_list: Explicit thread counts for sweep mode
+            sizes_arg: STREAM_ARRAY_SIZE values to build and test
             quick_mode: If True, run tests once (FORCE_TIMES_TO_RUN=1) for development
         """
         self.benchmark = "stream-1.3.4"
+        self.output_benchmark = "stream-1.3.4"
         self.benchmark_full = f"pts/{self.benchmark}"
         self.test_category = "Memory Access"
         self.test_category_dir = self.test_category.replace(" ", "_")
@@ -201,24 +259,21 @@ class StreamRunner:
         self.os_name = self.get_os_name()
 
         # Thread list setup
-        if threads_arg is None:
-            # 4-point scaling: [nproc/4, nproc/2, nproc*3/4, nproc]
-
-            n_4 = self.vcpu_count // 4
-
-            self.thread_list = [n_4, n_4 * 2, n_4 * 3, self.vcpu_count]
-
-            # Remove any zeros and deduplicate
-
-            self.thread_list = sorted(list(set([t for t in self.thread_list if t > 0])))
+        if threads_list:
+            self.thread_list = sorted(set([min(t, self.vcpu_count) for t in threads_list if t > 0]))
+        elif threads_arg is None:
+            self.thread_list = build_default_thread_list(self.vcpu_count)
         else:
             n = min(threads_arg, self.vcpu_count)
             self.thread_list = [n]
 
+        self.size_list = sizes_arg or DEFAULT_STREAM_ARRAY_SIZES
+        self.current_stream_array_size = None
+
         # Project structure
         self.script_dir = Path(__file__).parent.resolve()
         self.project_root = self.script_dir.parent
-        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.benchmark
+        self.results_dir = self.project_root / "results" / self.machine_name / self.os_name / self.test_category_dir / self.output_benchmark
 
         # Quick mode for development
         self.quick_mode = quick_mode
@@ -532,17 +587,30 @@ class StreamRunner:
 
         return ','.join(cpu_list)
 
-    def install_benchmark(self):
+    def install_benchmark(self, stream_array_size):
         """Install benchmark with error detection and verification."""
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
         print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
 
-        print(f"\n>>> Installing {self.benchmark_full}...")
+        print(f"\n>>> Installing {self.benchmark_full} with STREAM_ARRAY_SIZE={stream_array_size}...")
 
-        # Patch install.sh to cap STREAM_ARRAY_SIZE on large L3 systems (e.g., m8i)
-        self.patch_install_script(required=False)
+        # STREAM_ARRAY_SIZE is a compile-time constant in the PTS STREAM profile.
+        # Patch the profile before install, then verify the installed copy after install.
+        profile_install_sh = Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh'
+        if not profile_install_sh.exists():
+            print(f"  [INFO] Fetching test profile metadata for {self.benchmark_full}...")
+            subprocess.run(
+                ['phoronix-test-suite', 'info', self.benchmark_full],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        if not self.patch_install_script(stream_array_size=stream_array_size, required=False):
+            print("  [ERROR] Failed to patch STREAM_ARRAY_SIZE before install")
+            print(f"  [INFO] Try manually fetching the profile: phoronix-test-suite info {self.benchmark_full}")
+            sys.exit(1)
 
         print("  [INFO] Removing existing installation...")
         remove_cmd = f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'
@@ -561,7 +629,8 @@ class StreamRunner:
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
-        install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        install_log = Path(install_log_path) if install_log_path else (self.results_dir / f"size-{stream_array_size}-install.log")
         log_f = open(install_log, 'w') if use_install_log else None
         if log_f:
             log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
@@ -633,14 +702,14 @@ class StreamRunner:
             print("  [INFO] But installation directory exists, continuing...")
 
         # Ensure patch is present after install (fail fast if not)
-        if not self.patch_install_script(required=True):
+        if not self.patch_install_script(stream_array_size=stream_array_size, required=True):
             print("  [ERROR] Failed to apply STREAM_ARRAY_SIZE patch after install")
             sys.exit(1)
 
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
-    def patch_install_script(self, required=False):
-        """Patch install.sh to avoid oversized STREAM_ARRAY_SIZE on large L3 caches."""
+    def patch_install_script(self, stream_array_size, required=False):
+        """Patch install.sh to force a specific STREAM_ARRAY_SIZE for this sweep."""
         candidates = [
             Path.home() / '.phoronix-test-suite' / 'test-profiles' / 'pts' / self.benchmark / 'install.sh',
             Path.home() / '.phoronix-test-suite' / 'installed-tests' / 'pts' / self.benchmark / 'install.sh',
@@ -657,57 +726,37 @@ class StreamRunner:
                 content = install_sh.read_text()
                 if "\\n" in content:
                     content = content.replace("\\n", "\n")
-                    install_sh.write_text(content)
 
-                if 'MAX_STREAM_ARRAY_SIZE' in content:
-                    print(f"  [INFO] install.sh already patched: {install_sh}")
+                marker_start = "# CLOUD_ONEHOUR_STREAM_SIZE_SWEEP_BEGIN"
+                marker_end = "# CLOUD_ONEHOUR_STREAM_SIZE_SWEEP_END"
+                force_block = (
+                    f"{marker_start}\n"
+                    f"STREAM_ARRAY_SIZE={stream_array_size}\n"
+                    f"{marker_end}\n"
+                )
+
+                marker_re = re.compile(
+                    rf"{re.escape(marker_start)}\n"
+                    r"STREAM_ARRAY_SIZE=\d+\n"
+                    rf"{re.escape(marker_end)}\n"
+                )
+                if marker_re.search(content):
+                    new_content = marker_re.sub(force_block, content)
+                else:
+                    matches = list(re.finditer(r"^STREAM_ARRAY_SIZE=\d+\s*$", content, re.MULTILINE))
+                    if not matches:
+                        print(f"  [WARN] Could not find STREAM_ARRAY_SIZE assignment to patch: {install_sh}")
+                        continue
+                    insert_at = matches[-1].end()
+                    new_content = content[:insert_at] + "\n" + force_block + content[insert_at:]
+
+                if new_content == content:
+                    print(f"  [INFO] install.sh already forced to STREAM_ARRAY_SIZE={stream_array_size}: {install_sh}")
                     patched_any = True
                     continue
 
-                cap_block = (
-                    "MAX_STREAM_ARRAY_SIZE=200000000\n"
-                    "if [ $STREAM_ARRAY_SIZE -gt $MAX_STREAM_ARRAY_SIZE ]; then\n"
-                    "     STREAM_ARRAY_SIZE=$MAX_STREAM_ARRAY_SIZE\n"
-                    "fi\n"
-                )
-
-                new_content = content
-                count = 0
-                if "MAX_STREAM_ARRAY_SIZE=200000000\\n" in content:
-                    new_content, replace_count = re.subn(
-                        r"MAX_STREAM_ARRAY_SIZE=200000000\\n"
-                        r"if \[ \$STREAM_ARRAY_SIZE -gt \$MAX_STREAM_ARRAY_SIZE \]; then\\n"
-                        r"\s*STREAM_ARRAY_SIZE=\$MAX_STREAM_ARRAY_SIZE\\n"
-                        r"fi\\n",
-                        cap_block,
-                        content
-                    )
-                    if replace_count > 0:
-                        count = 1
-                    else:
-                        new_content = content.replace("\\n", "\n")
-                        count = 1
-
-                start = content.find("STREAM_ARRAY_SIZE=100000000")
-                if count == 0 and start != -1:
-                    fi_match = re.search(r"\nfi\r?\n", content[start:])
-                    if fi_match:
-                        insert_at = start + fi_match.end()
-                        new_content = content[:insert_at] + cap_block + content[insert_at:]
-                        count = 1
-                    else:
-                        fallback_match = re.search(r"STREAM_ARRAY_SIZE=100000000\r?\n", content)
-                        if fallback_match:
-                            insert_at = fallback_match.end()
-                            new_content = content[:insert_at] + cap_block + content[insert_at:]
-                            count = 1
-
-                if count == 0:
-                    print(f"  [WARN] Could not find STREAM_ARRAY_SIZE block to patch: {install_sh}")
-                    continue
-
                 install_sh.write_text(new_content)
-                print(f"  [OK] install.sh patched to cap STREAM_ARRAY_SIZE: {install_sh}")
+                print(f"  [OK] install.sh forced to STREAM_ARRAY_SIZE={stream_array_size}: {install_sh}")
                 patched_any = True
             except Exception as e:
                 print(f"  [WARN] Failed to patch install.sh: {install_sh}: {e}")
@@ -803,37 +852,58 @@ class StreamRunner:
         print("  [OK] Perf stats parsed successfully")
         return perf_summary
 
+    def get_run_prefix(self, num_threads, stream_array_size=None):
+        """Return file/directory prefix for a size/thread run."""
+        size = stream_array_size or self.current_stream_array_size
+        return f"size-{size}-{num_threads}-thread"
+
+    def get_run_dir(self, num_threads, stream_array_size=None):
+        """Return auxiliary directory for perf/frequency files of one run."""
+        return self.results_dir / self.get_run_prefix(num_threads, stream_array_size)
+
+    def get_result_name(self, num_threads, stream_array_size=None):
+        """Return unique PTS result name for a size/thread run."""
+        size = stream_array_size or self.current_stream_array_size
+        return f"{self.benchmark}-size{size}-{num_threads}threads"
+
     def run_benchmark(self, num_threads):
         """Run benchmark with specified thread count."""
+        stream_array_size = self.current_stream_array_size
+        if stream_array_size is None:
+            raise RuntimeError("current_stream_array_size is not set")
+
         print(f"\n{'='*80}")
-        print(f">>> Running {self.benchmark_full} with {num_threads} thread(s)")
+        print(f">>> Running {self.benchmark_full} with STREAM_ARRAY_SIZE={stream_array_size}, {num_threads} thread(s)")
         print(f"{'='*80}")
 
         
         # Remove existing PTS result to prevent interactive prompts
         # PTS sanitizes identifiers (e.g. 1.0.2 -> 102), so we try to remove both forms
-        sanitized_benchmark = self.benchmark.replace('.', '')
+        result_name = self.get_result_name(num_threads, stream_array_size)
+        sanitized_result_name = result_name.replace('.', '')
         remove_cmds = [
-            f'phoronix-test-suite remove-result {self.benchmark}-{num_threads}threads',
-            f'phoronix-test-suite remove-result {sanitized_benchmark}-{num_threads}threads'
+            f'phoronix-test-suite remove-result {result_name}',
+            f'phoronix-test-suite remove-result {sanitized_result_name}'
         ]
         for cmd in remove_cmds:
             subprocess.run(cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        thread_dir = self.results_dir / f"{num_threads}-thread"
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        run_prefix = self.get_run_prefix(num_threads, stream_array_size)
+        thread_dir = self.get_run_dir(num_threads, stream_array_size)
         thread_dir.mkdir(parents=True, exist_ok=True)
 
-        perf_stats_file = thread_dir / f"{num_threads}-thread_perf_stats.txt"
-        freq_start_file = thread_dir / f"{num_threads}-thread_freq_start.txt"
-        freq_end_file = thread_dir / f"{num_threads}-thread_freq_end.txt"
-        perf_summary_file = thread_dir / f"{num_threads}-thread_perf_summary.json"
+        perf_stats_file = thread_dir / f"{run_prefix}_perf_stats.txt"
+        freq_start_file = thread_dir / f"{run_prefix}_freq_start.txt"
+        freq_end_file = thread_dir / f"{run_prefix}_freq_end.txt"
+        perf_summary_file = thread_dir / f"{run_prefix}_perf_summary.json"
 
-        log_file = self.results_dir / f"{num_threads}-thread.log"
+        log_file = self.results_dir / f"{run_prefix}.log"
         stdout_log = self.results_dir / "stdout.log"
 
         # Setup environment variables
         quick_env = 'FORCE_TIMES_TO_RUN=1 ' if self.quick_mode else ''
-        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={self.benchmark}-{num_threads}threads TEST_RESULTS_IDENTIFIER={self.benchmark}-{num_threads}threads TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
+        batch_env = f'{quick_env}BATCH_MODE=1 SKIP_ALL_PROMPTS=1 DISPLAY_COMPACT_RESULTS=1 TEST_RESULTS_NAME={result_name} TEST_RESULTS_IDENTIFIER={result_name} TEST_RESULTS_DESCRIPTION={result_name}'
 
         # Build PTS command
         if num_threads >= self.vcpu_count:
@@ -932,7 +1002,7 @@ class StreamRunner:
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
-            err_file = self.results_dir / f"{num_threads}-thread.err"
+            err_file = self.results_dir / f"{self.get_run_prefix(num_threads)}.err"
             with open(err_file, 'w') as f:
                 f.write(f"Benchmark failed with return code {returncode}\n")
                 f.write(f"See {log_file} for details.\n")
@@ -969,7 +1039,7 @@ class StreamRunner:
             debug_text += msg
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
-        result_name = f"{self.benchmark}-{num_threads}threads"
+        result_name = self.get_result_name(num_threads)
         result_dir_name = result_name.replace('.', '')
         result_dir = pts_results_dir / result_dir_name
 
@@ -1016,6 +1086,7 @@ class StreamRunner:
         print(f"# Machine: {self.machine_name}")
         print(f"# OS: {self.os_name}")
         print(f"# vCPU Count: {self.vcpu_count}")
+        print(f"# STREAM_ARRAY_SIZE List: {self.size_list}")
         print(f"# Thread List: {self.thread_list}")
         if self.quick_mode:
             print("# Quick Mode: ENABLED (FORCE_TIMES_TO_RUN=1)")
@@ -1024,49 +1095,50 @@ class StreamRunner:
         # Clean results directory
         if self.results_dir.exists():
             print(f"\n>>> Cleaning existing results directory: {self.results_dir}")
-            # Clean only thread-specific files (preserve other threads' results)
             self.results_dir.mkdir(parents=True, exist_ok=True)
-            for num_threads in self.thread_list:
-                prefix = f"{num_threads}-thread"
-                thread_dir = self.results_dir / prefix
-                if thread_dir.exists():
-                    shutil.rmtree(thread_dir)
-                for f in self.results_dir.glob(f"{prefix}.*"):
-                    f.unlink()
-                print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
 
-        # Clean and install
-        install_status = get_install_status(self.benchmark_full, self.benchmark)
-        info_installed = install_status["info_installed"]
-        test_installed_ok = install_status["test_installed_ok"]
-        installed_dir_exists = install_status["installed_dir_exists"]
-        already_installed = install_status["already_installed"]
+            # Remove legacy non-size STREAM outputs from the old canonical runner.
+            for legacy_file in sorted(self.results_dir.glob("*-thread.*")):
+                if legacy_file.name.startswith("size-"):
+                    continue
+                if legacy_file.is_file():
+                    legacy_file.unlink()
+                    print(f"  [INFO] Cleaned legacy STREAM result file: {legacy_file.name}")
+            for legacy_dir in sorted(self.results_dir.glob("*-thread")):
+                if legacy_dir.name.startswith("size-"):
+                    continue
+                if legacy_dir.is_dir():
+                    shutil.rmtree(legacy_dir)
+                    print(f"  [INFO] Cleaned legacy STREAM result directory: {legacy_dir.name}")
 
-        print(
-            f"[INFO] Install check -> info:{info_installed}, "
-            f"test-installed:{test_installed_ok}, dir:{installed_dir_exists}"
-        )
+            for stream_array_size in self.size_list:
+                legacy_size_dir = self.results_dir / f"size-{stream_array_size}"
+                if legacy_size_dir.exists():
+                    shutil.rmtree(legacy_size_dir)
+                    print(f"  [INFO] Cleaned legacy size directory: {legacy_size_dir}")
+                for num_threads in self.thread_list:
+                    run_prefix = self.get_run_prefix(num_threads, stream_array_size)
+                    run_dir = self.results_dir / run_prefix
+                    if run_dir.exists():
+                        shutil.rmtree(run_dir)
+                    for f in self.results_dir.glob(f"{run_prefix}.*"):
+                        f.unlink()
+                    print(f"  [INFO] Cleaned existing {run_prefix} results")
 
-        if not already_installed and installed_dir_exists:
-            print(
-                f"[WARN] Existing install directory found but PTS does not report '{self.benchmark_full}' as installed. "
-                "Treating as broken install and reinstalling."
-            )
-
-        if not already_installed:
-            self.clean_pts_cache()
-            self.install_benchmark()
-        else:
-            print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
-
-        # Run for each thread count
         failed = []
-        for num_threads in self.thread_list:
-            if not self.run_benchmark(num_threads):
-                failed.append(num_threads)
+        for stream_array_size in self.size_list:
+            self.current_stream_array_size = stream_array_size
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+            self.write_size_metadata(stream_array_size)
 
-        # Export results to CSV and JSON
-        self.export_results()
+            self.clean_pts_cache()
+            self.install_benchmark(stream_array_size)
+
+            for num_threads in self.thread_list:
+                if not self.run_benchmark(num_threads):
+                    failed.append((stream_array_size, num_threads))
+
+            self.export_results_for_size(stream_array_size)
 
         # Generate summary
         self.generate_summary()
@@ -1075,23 +1147,47 @@ class StreamRunner:
         print(f"\n{'='*80}")
         print("Benchmark Summary")
         print(f"{'='*80}")
-        print(f"Total tests: {len(self.thread_list)}")
-        print(f"Successful: {len(self.thread_list) - len(failed)}")
+        total_tests = len(self.size_list) * len(self.thread_list)
+        print(f"Total tests: {total_tests}")
+        print(f"Successful: {total_tests - len(failed)}")
         print(f"Failed: {len(failed)}")
         print(f"{'='*80}")
 
         return len(failed) == 0
 
-    def export_results(self):
+    def write_size_metadata(self, stream_array_size):
+        """Write metadata for a STREAM_ARRAY_SIZE sweep point."""
+        bytes_per_array = stream_array_size * 8
+        estimated_working_set_bytes = bytes_per_array * 3
+        metadata = {
+            "benchmark": self.benchmark,
+            "output_benchmark": self.output_benchmark,
+            "stream_array_size": stream_array_size,
+            "bytes_per_array": bytes_per_array,
+            "estimated_working_set_bytes": estimated_working_set_bytes,
+            "estimated_working_set_gib": round(estimated_working_set_bytes / (1024 ** 3), 3),
+            "thread_list": self.thread_list,
+            "vcpu_count": self.vcpu_count,
+            "machine": self.machine_name,
+            "os": self.os_name,
+            "quick_mode": self.quick_mode,
+        }
+        metadata_file = self.results_dir / f"size-{stream_array_size}-metadata.json"
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        print(f"  [OK] Size metadata saved: {metadata_file}")
+
+    def export_results_for_size(self, stream_array_size):
         """Export benchmark results to CSV and JSON formats."""
         print(f"\n{'='*80}")
-        print(">>> Exporting benchmark results")
+        print(f">>> Exporting benchmark results for STREAM_ARRAY_SIZE={stream_array_size}")
         print(f"{'='*80}")
 
         pts_results_dir = Path.home() / ".phoronix-test-suite" / "test-results"
 
         for num_threads in self.thread_list:
-            result_name = f"{self.benchmark}-{num_threads}threads"
+            result_name = self.get_result_name(num_threads, stream_array_size)
+            run_prefix = self.get_run_prefix(num_threads, stream_array_size)
 
             # PTS removes dots from directory names, so "stream-1.3.4" becomes "stream-134"
             result_dir_name = result_name.replace('.', '')
@@ -1108,7 +1204,7 @@ class StreamRunner:
 
             # Export to CSV
             # Note: Use result_dir_name (with dots removed) for PTS commands
-            csv_output = self.results_dir / f"{num_threads}-thread.csv"
+            csv_output = self.results_dir / f"{run_prefix}.csv"
             print(f"  [EXPORT] CSV: {csv_output}")
             result = subprocess.run(
                 ['phoronix-test-suite', 'result-file-to-csv', result_dir_name],
@@ -1128,7 +1224,7 @@ class StreamRunner:
 
             # Export to JSON
             # Note: Use result_dir_name (with dots removed) for PTS commands
-            json_output = self.results_dir / f"{num_threads}-thread.json"
+            json_output = self.results_dir / f"{run_prefix}.json"
             print(f"  [EXPORT] JSON: {json_output}")
             result = subprocess.run(
                 ['phoronix-test-suite', 'result-file-to-json', result_dir_name],
@@ -1159,22 +1255,27 @@ class StreamRunner:
 
         # Collect results from all JSON files
         all_results = []
-        for num_threads in self.thread_list:
-            json_file = self.results_dir / f"{num_threads}-thread.json"
-            if json_file.exists():
-                with open(json_file, 'r') as f:
-                    data = json.load(f)
-                    # Extract benchmark result
-                    for result_id, result in data.get('results', {}).items():
-                        for system_id, system_result in result.get('results', {}).items():
-                            all_results.append({
-                                'threads': num_threads,
-                                'value': system_result.get('value'),
-                                'raw_values': system_result.get('raw_values', []),
-                                'test_name': result.get('title'),
-                                'description': result.get('description'),
-                                'unit': result.get('scale')
-                            })
+        for stream_array_size in self.size_list:
+            for num_threads in self.thread_list:
+                run_prefix = self.get_run_prefix(num_threads, stream_array_size)
+                json_file = self.results_dir / f"{run_prefix}.json"
+                if not json_file.exists():
+                    json_file = self.results_dir / f"size-{stream_array_size}" / f"{num_threads}-thread.json"
+                if json_file.exists():
+                    with open(json_file, 'r') as f:
+                        data = json.load(f)
+                        # Extract benchmark result
+                        for result_id, result in data.get('results', {}).items():
+                            for system_id, system_result in result.get('results', {}).items():
+                                all_results.append({
+                                    'stream_array_size': stream_array_size,
+                                    'threads': num_threads,
+                                    'value': system_result.get('value'),
+                                    'raw_values': system_result.get('raw_values', []),
+                                    'test_name': result.get('title'),
+                                    'description': result.get('description'),
+                                    'unit': result.get('scale')
+                                })
 
         if not all_results:
             print("[WARN] No results found for summary generation")
@@ -1182,48 +1283,52 @@ class StreamRunner:
 
         # Generate summary.log (human-readable)
         with open(summary_log, 'w') as f:
-            f.write("="*80 + "\\n")
-            f.write(f"Benchmark Summary: {self.benchmark}\\n")
-            f.write(f"Machine: {self.machine_name}\\n")
-            f.write(f"Test Category: {self.test_category}\\n")
-            f.write("="*80 + "\\n\\n")
+            f.write("="*80 + "\n")
+            f.write(f"Benchmark Summary: {self.output_benchmark}\n")
+            f.write(f"Machine: {self.machine_name}\n")
+            f.write(f"Test Category: {self.test_category}\n")
+            f.write("="*80 + "\n\n")
 
             for result in all_results:
-                f.write(f"Threads: {result['threads']}\\n")
-                f.write(f"  Test: {result['test_name']}\\n")
-                f.write(f"  Description: {result['description']}\\n")
+                f.write(f"STREAM_ARRAY_SIZE: {result['stream_array_size']}\n")
+                f.write(f"Threads: {result['threads']}\n")
+                f.write(f"  Test: {result['test_name']}\n")
+                f.write(f"  Description: {result['description']}\n")
                 
                 # Check for None to avoid f-string crash
                 val_str = f"{result['value']:.2f}" if result['value'] is not None else "FAILED"
-                f.write(f"  Average: {val_str} {result['unit']}\\n")
+                f.write(f"  Average: {val_str} {result['unit']}\n")
                     
                 # Handle raw values safely
                 raw_vals = result.get('raw_values')
                 if raw_vals:
                     val_str = ', '.join([f'{v:.2f}' for v in raw_vals if v is not None])
-                    f.write(f"  Raw values: {val_str}\\n")
+                    f.write(f"  Raw values: {val_str}\n")
                 else:
-                    f.write("  Raw values: N/A\\n")
+                    f.write("  Raw values: N/A\n")
                     
-                f.write("\\n")
+                f.write("\n")
 
-            f.write("="*80 + "\\n")
-            f.write("Summary Table\\n")
-            f.write("="*80 + "\\n")
-            f.write(f"{'Threads':<10} {'Average':<15} {'Unit':<20}\\n")
-            f.write("-"*80 + "\\n")
+            f.write("="*80 + "\n")
+            f.write("Summary Table\n")
+            f.write("="*80 + "\n")
+            f.write(f"{'Size':<14} {'Threads':<10} {'Average':<15} {'Unit':<20}\n")
+            f.write("-"*80 + "\n")
             for result in all_results:
                 val_str = f"{result['value']:<15.2f}" if result['value'] is not None else "FAILED         "
-                f.write(f"{result['threads']:<10} {val_str} {result['unit']:<20}\\n")
+                f.write(f"{result['stream_array_size']:<14} {result['threads']:<10} {val_str} {result['unit']:<20}\n")
 
         print(f"[OK] Summary log saved: {summary_log}")
 
         # Generate summary.json (AI-friendly format)
         summary_data = {
-            "benchmark": self.benchmark,
+            "benchmark": self.output_benchmark,
+            "pts_benchmark": self.benchmark,
             "test_category": self.test_category,
             "machine": self.machine_name,
             "vcpu_count": self.vcpu_count,
+            "stream_array_sizes": self.size_list,
+            "thread_list": self.thread_list,
             "results": all_results
         }
 
@@ -1234,8 +1339,14 @@ class StreamRunner:
 
 
 def main():
+    try:
+        py_compile.compile(str(Path(__file__).resolve()), doraise=True)
+    except py_compile.PyCompileError as e:
+        print(f"Syntax error in {Path(__file__).name}: {e}", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
-        description="Stream 2013-01-17 Memory Benchmark Runner",
+        description="Stream 2013-01-17 Memory Benchmark Size/Thread Sweep Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -1253,6 +1364,21 @@ def main():
     )
 
     parser.add_argument(
+        '--threads-list',
+        nargs='+',
+        help='Run benchmark with multiple thread counts (space- or comma-separated)'
+    )
+
+    parser.add_argument(
+        '--sizes',
+        nargs='+',
+        help=(
+            'STREAM_ARRAY_SIZE values to sweep (space- or comma-separated). '
+            f'Default: {" ".join(str(x) for x in DEFAULT_STREAM_ARRAY_SIZES)}'
+        )
+    )
+
+    parser.add_argument(
         '--quick',
         action='store_true',
         help='Quick mode: Run each test only once (for development/testing)'
@@ -1266,8 +1392,19 @@ def main():
 
     # Resolve threads argument (prioritize --threads if both provided)
     threads = args.threads if args.threads is not None else args.threads_pos
+    try:
+        threads_list = parse_int_list(args.threads_list, "--threads-list")
+        sizes = parse_int_list(args.sizes, "--sizes") or DEFAULT_STREAM_ARRAY_SIZES
+    except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
 
-    runner = StreamRunner(threads_arg=threads, quick_mode=args.quick)
+    runner = StreamSizeThreadSweepRunner(
+        threads_arg=threads,
+        threads_list=threads_list,
+        sizes_arg=sizes,
+        quick_mode=args.quick
+    )
     success = runner.run()
 
     sys.exit(0 if success else 1)
