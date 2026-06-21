@@ -38,7 +38,7 @@ from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
 
-DEFAULT_STREAM_ARRAY_SIZES = [50000000, 100000000, 200000000]
+DEFAULT_STREAM_ARRAY_SIZES = [50000000, 100000000]
 
 
 def build_default_thread_list(vcpu_count):
