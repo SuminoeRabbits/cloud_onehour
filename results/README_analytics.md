@@ -17,6 +17,10 @@
 # 1. Benchmark information
 `<benchmark>`の付加情報を下記のTableに作成する。なおこれは `${PWD}/../test_suite.json` の情報を利用しているので、更新時には変更されるものとする。
 
+`one_big_json.json` 内で `benchmark -> size -> <SIZE> -> thread` の形を持つベンチマークは、analytics入力時に `benchmark/size-<SIZE>` というbenchmark名へ展開する。
+例えばSTREAMは `stream-1.3.4/size-50000000` と `stream-1.3.4/size-100000000` を別benchmarkとして扱い、`thread` は従来通り `1`, `2`, `4` などの数値スレッド数として扱う。
+これにより既存のperformance/cost/thread scaling分析の構造を保つ。
+
 | testcategory | benchmark | test_snippet | gcc_ver |
 | ------------ | --------- | ------------ | ------- |
 | Processor | coremark-1.0.1 | Coremark-1.0 | 14.2-system |
@@ -103,6 +107,8 @@
 }
 ```
 
+`<benchmark>` はサイズ条件を含むことがある。例: `stream-1.3.4/size-100000000`。
+
 ## 例外処理
 - 該当する OS / スレッド数 `<N>` のデータが存在しないエントリは出力に含めません。
 
@@ -162,6 +168,8 @@
   }
 }
 ```
+
+`<benchmark>` はサイズ条件を含むことがある。例: `stream-1.3.4/size-100000000`。
 
 ## 例外処理
 - `hourly_rate` が `"unknown"` または 0 以下のマシンは、ランキングから除外します。

@@ -18,6 +18,7 @@
       - [ケース3: `<N>-thread.json`と`<N>-thread_perf_stats.txt`はないが`<N>-thread_perf_summary.json`が存在](#ケース3-n-threadjsonとn-thread_perf_statstxtはないがn-thread_perf_summaryjsonが存在)
       - [ケース4: このケースは将来の拡張の為に確保されている。](#ケース4-このケースは将来の拡張の為に確保されている)
       - [ケース5: 特殊ベンチマーク（`summary.json`も`<N>-thread_perf_summary.json`も`<N>-thread.json`も存在しない）](#ケース5-特殊ベンチマークsummaryjsonもn-thread_perf_summaryjsonもn-threadjsonも存在しない)
+      - [ケース6: STREAM size/thread sweep](#ケース6-stream-sizethread-sweep)
       - [Multiple "test\_name", "description" in one ](#multiple-test_name-description-in-one-)
         - ["test\_name"のキー生成ルール](#test_nameのキー生成ルール)
   - [perf\_stat output](#perf_stat-output)
@@ -147,6 +148,42 @@ find results -name "*.log" -type f -exec sed -i 's/\x1b\[[0-9;]*m//g' {} \;
 - `<N>-thread_freq_start.txt`（存在すれば読み込む）
 
 [注意]これら４条件のいづれかに合致しない場合はテスト完了ではないので処理を行わない。
+
+#### ケース6: STREAM size/thread sweep
+`<benchmark>="stream-1.3.4"` はSTREAM_ARRAY_SIZEごとに再ビルドし、各サイズで複数スレッドを測定する。
+このためファイル名は従来の `<N>-thread.*` ではなく、`size-<SIZE>-<N>-thread.*` 形式を利用する。
+
+**必須ファイル:**
+- `size-<SIZE>-metadata.json`
+- `size-<SIZE>-<N>-thread.log`
+- `size-<SIZE>-<N>-thread.json`
+- `size-<SIZE>-<N>-thread.csv`
+- `size-<SIZE>-<N>-thread/size-<SIZE>-<N>-thread_perf_summary.json`
+
+`summary.json` が存在する場合は `stream_array_sizes` と `thread_list` を期待値として完了判定に利用する。
+`summary.json` が存在しない途中失敗時でも、`size-<SIZE>-metadata.json` と `size-<SIZE>-<N>-thread.*` の有無から不足ファイルを判定する。
+
+`one_big_json.json` ではSTREAMだけ以下のように `size` ノードを持つ。
+
+```json
+"stream-1.3.4": {
+  "size": {
+    "100000000": {
+      "metadata": {
+        "stream_array_size": 100000000
+      },
+      "thread": {
+        "16": {
+          "perf_stat": {},
+          "test_name": {}
+        }
+      }
+    }
+  }
+}
+```
+
+後段のanalyticsでは互換性のため、`stream-1.3.4/size-100000000` のようにサイズ条件をbenchmark名へ展開し、`thread` は数値スレッド数のまま扱う。
 
 
 次に`${PROJECT_ROOT}/<machinename>/<os>/<testcategory>/<benchmark>`デイレク取りの`summary.json`についてデータの読み方を説明する。

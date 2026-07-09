@@ -248,8 +248,18 @@ def generate_commands(testname: str, test_length: str, scaling: str) -> list[str
     return commands
 
 def main():
-    parser = argparse.ArgumentParser(description="PTS Regression Command Generator")
+    parser = argparse.ArgumentParser(
+        description="PTS Regression Command Generator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  ./pts_regression.py --testcategory Multimedia\n"
+            "  ./pts_regression.py --testcategory --all\n"
+            "      Expand Target test category to all categories from test_suite.json.\n"
+        )
+    )
     parser.add_argument("--testcategory", nargs="*", default=["Full"], help="Target test categories (e.g. Multimedia)")
+    parser.add_argument("--all", action="store_true", help="Use with --testcategory to target all categories")
     parser.add_argument("--test_length", nargs="*", default=["Full"], help="Target test lengths (short, middle, long, very_long)")
     
     # ショートカットフラグ
@@ -286,7 +296,11 @@ def main():
     suite_data = load_test_suite(suite_path)
     
     valid_categories = list(suite_data.get("test_category", {}).keys())
-    check_args_typo(args.testcategory, valid_categories, "--testcategory")
+    selected_categories = list(args.testcategory)
+    if args.all:
+        selected_categories = valid_categories
+
+    check_args_typo(selected_categories, valid_categories, "--testcategory")
 
     # --regression フラグが指定された場合は、自身を実行するコマンドを標準出力して終了する
     if args.regression:
@@ -298,11 +312,11 @@ def main():
             
             # testcategory の展開
             # ユーザーが指定したかどうかは sys.argv を確認するか default かどうかで判定
-            if "Full" in args.testcategory and "--testcategory" not in sys.argv:
+            if args.all or ("Full" in selected_categories and "--testcategory" not in sys.argv):
                 cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in valid_categories])
                 final_opts.append(f"--testcategory {cat_cmd}")
             else:
-                cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in args.testcategory])
+                cat_cmd = " ".join([f'"{c}"' if ' ' in c else c for c in selected_categories])
                 if "Full" not in cat_cmd:
                     final_opts.append(f"--testcategory {cat_cmd}")
                 
@@ -323,8 +337,24 @@ def main():
             
             opts_str = " ".join(final_opts)
         else:
-            # 通常は入力されたコマンド引数から --regression と -v を取り除くだけ
-            opts = [arg for arg in sys.argv[1:] if arg not in ("--regression", "-v", "--verbose")]
+            # 通常は入力されたコマンド引数から --regression と -v を取り除くだけ。
+            # --all は実行先で未展開のまま残さず、カテゴリ引数として明示する。
+            if args.all:
+                opts = []
+                skipping_testcategory_values = False
+                for arg in sys.argv[1:]:
+                    if skipping_testcategory_values and not arg.startswith("--"):
+                        continue
+                    skipping_testcategory_values = False
+                    if arg in ("--regression", "-v", "--verbose", "--all"):
+                        continue
+                    if arg == "--testcategory":
+                        skipping_testcategory_values = True
+                        continue
+                    opts.append(arg)
+                opts.extend(["--testcategory", *valid_categories])
+            else:
+                opts = [arg for arg in sys.argv[1:] if arg not in ("--regression", "-v", "--verbose")]
             opts_str = " ".join([f'"{opt}"' if ' ' in opt else opt for opt in opts])
             
         cmd_suffix = f" {opts_str}" if opts_str else ""
@@ -352,7 +382,7 @@ def main():
     test_plan = []
     
     for cat_name, cat_data in suite_data.get("test_category", {}).items():
-        if "Full" not in args.testcategory and cat_name not in args.testcategory:
+        if "Full" not in selected_categories and cat_name not in selected_categories:
             continue
 
         if not cat_data.get("enabled", True):

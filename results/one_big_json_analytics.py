@@ -194,6 +194,11 @@ def extract_workloads(
 ) -> List[Dict[str, Any]]:
     """
     Extract all workload entries from the JSON data.
+
+    Most benchmarks use benchmark -> thread -> test_name. Benchmarks with a
+    size sweep, such as STREAM, may use benchmark -> size -> thread -> test_name.
+    Those are flattened for analytics as benchmark/size-<SIZE> while keeping
+    thread as the numeric thread count expected by scaling analysis.
     Returns a list of dicts with workload information.
     """
     workloads = []
@@ -209,7 +214,8 @@ def extract_workloads(
             for testcategory, tc_content in testcategory_data.items():
                 benchmark_data = tc_content.get("benchmark", {})
                 for benchmark, bm_content in benchmark_data.items():
-                    suite_meta = suite_metadata.get(benchmark, {})
+                    base_benchmark = benchmark.split("/size-", 1)[0]
+                    suite_meta = suite_metadata.get(benchmark) or suite_metadata.get(base_benchmark, {})
                     fallback_snippet = str(suite_meta.get("test_snippet", "N/A")).strip()
                     fallback_gcc_ver = str(suite_meta.get("gcc_ver", DEFAULT_GCC_VER)).strip()
                     if is_fallback_value(fallback_snippet):
@@ -217,17 +223,17 @@ def extract_workloads(
                     if is_fallback_value(fallback_gcc_ver):
                         fallback_gcc_ver = DEFAULT_GCC_VER
 
-                    thread_data = bm_content.get("thread", {})
-                    if not isinstance(thread_data, dict):
-                        continue
-
-                    for thread, th_content in thread_data.items():
+                    def append_thread_workloads(
+                        benchmark_label: str,
+                        thread: str,
+                        th_content: Dict[str, Any],
+                    ) -> None:
                         if not isinstance(th_content, dict):
-                            continue
+                            return
 
                         test_name_data = th_content.get("test_name", {})
                         if not isinstance(test_name_data, dict):
-                            continue
+                            return
 
                         for test_name, test_data in test_name_data.items():
                             if isinstance(test_data, dict):
@@ -272,7 +278,7 @@ def extract_workloads(
                                 "cpu_isa": machine_data.get("cpu_isa", "N/A"),
                                 "os": os_name,
                                 "testcategory": testcategory,
-                                "benchmark": benchmark,
+                                "benchmark": benchmark_label,
                                 "thread": thread,
                                 "test_name": test_name,
                                 "test_snippet": test_snippet,
@@ -280,6 +286,26 @@ def extract_workloads(
                                 "test_data": test_data,
                                 "machine_data": machine_data
                             })
+
+                    thread_data = bm_content.get("thread", {})
+                    if isinstance(thread_data, dict):
+                        for thread, th_content in thread_data.items():
+                            append_thread_workloads(benchmark, thread, th_content)
+
+                    # Size-sweep layout. Keep the canonical one_big_json shape
+                    # intact, but expose each size as a benchmark condition for
+                    # performance/cost/thread-scaling analytics.
+                    size_data = bm_content.get("size", {})
+                    if isinstance(size_data, dict):
+                        for size_value, size_content in size_data.items():
+                            if not isinstance(size_content, dict):
+                                continue
+                            size_thread_data = size_content.get("thread", {})
+                            if not isinstance(size_thread_data, dict):
+                                continue
+                            benchmark_label = f"{benchmark}/size-{size_value}"
+                            for thread, th_content in size_thread_data.items():
+                                append_thread_workloads(benchmark_label, thread, th_content)
 
     return workloads
 
@@ -393,6 +419,22 @@ def resolve_os_merge_target(os_name: str, enabled_rule_names: Tuple[str, ...]) -
     return os_name
 
 
+def merge_missing_values(target: Any, source: Any) -> Any:
+    """Merge source into target without replacing existing benchmark data."""
+    if not isinstance(target, dict) or not isinstance(source, dict):
+        return target
+
+    for key, source_value in source.items():
+        if key not in target:
+            target[key] = copy.deepcopy(source_value)
+            continue
+        target_value = target[key]
+        if isinstance(target_value, dict) and isinstance(source_value, dict):
+            merge_missing_values(target_value, source_value)
+
+    return target
+
+
 def preprocess_input_data(
     data: Dict[str, Any],
     requested_categories: List[str],
@@ -425,16 +467,18 @@ def preprocess_input_data(
                     continue
 
                 if testcategory in target_testcategories:
-                    # This should not normally happen for current merge rules because
-                    # merged OS families do not overlap on the same machine.
+                    # A machine may have legacy results in Red_10_1 and new results
+                    # in Red_10_2 for the same testcategory. Preserve both by adding
+                    # missing benchmarks while keeping existing values stable.
+                    merge_missing_values(target_testcategories[testcategory], tc_content)
                     print(
                         f"Warning: duplicate testcategory merge detected for "
-                        f"{machine_name}/{target_os_name}/{testcategory}; keeping first entry.",
+                        f"{machine_name}/{target_os_name}/{testcategory}; merged missing entries.",
                         file=sys.stderr
                     )
                     continue
 
-                target_testcategories[testcategory] = tc_content
+                target_testcategories[testcategory] = copy.deepcopy(tc_content)
 
         pruned_os_map = {
             os_name: os_node

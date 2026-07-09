@@ -56,6 +56,9 @@
 # 4. Globalでの回帰分析
 # オプション: --analyze(省略可能)　指定時はこのステップのみ
 # ${PWD}/globalディレクトリで、one_big_json_analytics.pyを使って回帰分析を行います。
+# STREAMなどのsize sweepは、one_big_jsonでは`benchmark -> size -> thread`として保持され、
+# analytics出力では`stream-1.3.4/size-100000000`のようなbenchmark名に展開されます。
+# これによりthread列は従来通り整数のまま維持され、thread scaling分析とExcel/PDF生成で互換性を保ちます。
 # 各出力ファイルが存在する場合でも上書きします。
 # $> ../results/one_big_json_analytics.py \
 #     --input ./global/global_all_results.json \
@@ -741,6 +744,12 @@ def main() -> int:
                 print(f"Failed to generate JSON for {csp_dir.name}: {exc}", file=sys.stderr)
                 if not args.keep_going:
                     return 1
+
+        if run_all:
+            # Default full runs should add newly extracted tarball data to any
+            # already-expanded machine directories instead of rebuilding global
+            # results from only the tarballs found in this invocation.
+            csp_dirs = find_csp_dirs(workdir)
     else:
         csp_dirs = find_csp_dirs(workdir)
 
