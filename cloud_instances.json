@@ -174,7 +174,7 @@
           }
         ]
       },
-      "us-east-1": {
+      "us-west-2": {
         "enable": true,
         "vcpux16_only": "true",
         "vcpux8_only": "false",
@@ -184,47 +184,9 @@
             "testloads": false,
             "type": "m9g.4xlarge",
             "arch": "arm64",
-            "hostname": "aws-m9g-4xlarge-arm64-us-east-1",
+            "hostname": "aws-m9g-4xlarge-arm64",
             "vcpus": 16,
-            "name": "aws-m9g-4xlarge-arm64-us-east-1-vcpu-16",
-            "cpu_cost_hour[730h-mo]": 0.78272,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.01644
-          }
-        ]
-      },
-      "us-east-2": {
-        "enable": false,
-        "vcpux16_only": "true",
-        "vcpux8_only": "false",
-        "instances": [
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "m9g.4xlarge",
-            "arch": "arm64",
-            "hostname": "aws-m9g-4xlarge-arm64-us-east-2",
-            "vcpus": 16,
-            "name": "aws-m9g-4xlarge-arm64-us-east-2-vcpu-16",
-            "cpu_cost_hour[730h-mo]": 0.78272,
-            "extra_150g_storage": true,
-            "extra_150g_storage_cost_hour": 0.01644
-          }
-        ]
-      },
-      "us-west-2": {
-        "enable": false,
-        "vcpux16_only": "true",
-        "vcpux8_only": "false",
-        "instances": [
-          {
-            "enable": true,
-            "testloads": false,
-            "type": "m9g.4xlarge",
-            "arch": "arm64",
-            "hostname": "aws-m9g-4xlarge-arm64-us-west-2",
-            "vcpus": 16,
-            "name": "aws-m9g-4xlarge-arm64-us-west-2-vcpu-16",
+            "name": "aws-m9g-4xlarge-arm64-vcpu-16",
             "cpu_cost_hour[730h-mo]": 0.78272,
             "extra_150g_storage": true,
             "extra_150g_storage_cost_hour": 0.01644

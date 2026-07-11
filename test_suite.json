@@ -121,12 +121,12 @@
             "items": {
                 "pts/compress-7zip-1.12.0": {
                     "enabled": true,
-                    "test_snippet": "7-Zip Compression-25.00",
+                    "test_snippet": "7-Zip Compression-23.01",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": true,
                     "TH_scaling": "env:NUM_CPU_CORES",
                     "sve2_support": false,
-                    "notes": "7-Zip benchmark uses -mmt=$NUM_CPU_CORES for thread control (custom install.sh). Default auto-detects all threads without this option.",
+                    "notes": "7-Zip benchmark uses the 23.01 ISA-specific Linux binary package and -mmt=$NUM_CPU_CORES for thread control (custom install.sh). Default auto-detects all threads without this option.",
                     "exe_time_v8cpu": "1.0"
                 },
                 "pts/compress-zstd-1.6.0": {
@@ -206,12 +206,12 @@
                 },
                 "pts/opencv-1.3.0": {
                     "enabled": true,
-                    "test_snippet": "OpenCV-4.13.0",
+                    "test_snippet": "OpenCV-5.0.0",
                     "THFix_in_compile": false,
                     "THChange_at_runtime": false,
                     "TH_scaling": "nproc",
                     "sve2_support": "unknown",
-                    "notes": "OpenCV computer vision performance benchmark (dnn, imgproc, objdetect, features2d, stitching, video). Runner patches PTS profile (downloads.xml + install.sh) to build OpenCV 4.13.0 instead of upstream 4.7.0. testdata/ is absent from the 4.13.0 GitHub archive (Git LFS); supplemented from opencv_extra-4.7.0.tar.gz plus a synthetic dog416.png for DNN tests added after 4.7.0. NUM_CPU_CORES controls build parallelism only; the perf binary uses cv::getNumThreads()=nproc internally regardless of NUM_CPU_CORES. Runner runs a single measurement at nproc. Result: ms (lower is better).",
+                    "notes": "OpenCV computer vision performance benchmark (dnn, imgproc, objdetect, features2d, stitching, video). Runner patches PTS profile (downloads.xml + install.sh) to build OpenCV 5.0.0 instead of upstream 4.7.0 while keeping the PTS test definition shape. testdata/ is absent from newer opencv_extra GitHub archives (Git LFS); supplemented from opencv_extra-4.7.0.tar.gz plus a synthetic dog416.png for DNN tests added after 4.7.0. NUM_CPU_CORES controls build parallelism only; the perf binary uses cv::getNumThreads()=nproc internally regardless of NUM_CPU_CORES. Runner runs a single measurement at nproc. Result: ms (lower is better).",
                     "exe_time_v8cpu": "2.0"
                 }
             }
@@ -418,6 +418,26 @@
                     "sve2_support": true,
                     "notes": "svt-av1 auto-detects CPU cores; supports --pools and --threads but PTS doesn't use them",
                     "exe_time_v8cpu": "50.0"
+                },
+                "pts/jpegxl-1.6.0": {
+                    "enabled": true,
+                    "test_snippet": "libjxl-0.10.1",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "cjxl uses libjxl worker threads; PTS profile does not expose a thread option, so runner scales by CPU affinity.",
+                    "exe_time_v8cpu": "10.0"
+                },
+                "pts/aom-av1-3.12.0": {
+                    "enabled": true,
+                    "test_snippet": "AOM AV1-3.12",
+                    "THFix_in_compile": false,
+                    "THChange_at_runtime": true,
+                    "TH_scaling": "env:NUM_CPU_CORES",
+                    "sve2_support": true,
+                    "notes": "aomenc receives --threads via NUM_CPU_CORES in the PTS wrapper; runner also limits CPU affinity and caps runtime threads at 64.",
+                    "exe_time_v8cpu": "60.0"
                 }
             }
         },
