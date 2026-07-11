@@ -117,13 +117,14 @@ sudo dnf -y groupinstall "Development Tools"
 # Libraries and headers
 # dwarves: provides pahole, required for kernel allmodconfig (BTF/BPF support since kernel 5.2)
 # glibc-static: required for BPF skeleton programs compiled during allmodconfig
-LIB_DEPS="flex bison bc elfutils-libelf-devel openssl-devel zlib-devel bzip2-devel readline-devel sqlite-devel ncurses-devel libffi-devel xz-devel dwarves glibc-static"
+LIB_DEPS="flex bison bc elfutils-libelf-devel openssl-devel zlib-devel bzip2-devel readline-devel sqlite-devel ncurses-devel libffi-devel xz-devel dwarves glibc-static libuv-devel"
 
 echo "Installing: $BUILD_DEPS $LIB_DEPS"
 for pkg in $BUILD_DEPS $LIB_DEPS; do
     install_required_from_candidates "$pkg" "$pkg"
 done
 install_required_from_candidates "gmock-devel" "gmock-devel,googletest-devel"
+install_required_from_candidates "hwloc-devel" "hwloc-devel,hwloc-libs-devel"
 
 # 2. Install PTS
 echo "=== Step 2: Installing Phoronix Test Suite ${VERSION} ==="
