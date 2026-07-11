@@ -324,14 +324,17 @@ class PyTorchBenchmarkRunner:
             import psutil
             from torchvision.models import {model}
             from pytorch_benchmark import benchmark
+            import pytorch_benchmark.machine_info as pb_machine_info
 
             # Workaround: psutil.cpu_freq() returns None on some ARM kernels
-            # (e.g. OCI a2-flex, AWS m6g). This only affects the machine_info
+            # (e.g. OCI a2-flex, AWS m6g/m9g). This only affects the machine_info
             # metadata field and has no impact on benchmark timing results.
             if psutil.cpu_freq() is None:
-                psutil.cpu_freq = lambda percpu=False: type(
+                _zero_cpu_freq = lambda percpu=False: type(
                     "_CpuFreq", (), {{"max": 0.0, "min": 0.0, "current": 0.0}}
                 )()
+                psutil.cpu_freq = _zero_cpu_freq
+                pb_machine_info.cpu_freq = _zero_cpu_freq
 
             device = {self.device!r}
             batch_size = {batch_size}

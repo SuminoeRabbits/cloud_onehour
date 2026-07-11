@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, get_pts_profile_dir
 
 
 class Compress7zipRunner:
@@ -502,14 +502,165 @@ class Compress7zipRunner:
         print("  [OK] SHA512 optimization disabled")
         return True
 
+    @staticmethod
+    def select_7zip_archive(machine=None):
+        """Return the ISA-specific 7-Zip 23.01 Linux binary archive."""
+        machine = (machine or os.uname().machine).lower()
+        if machine in {"x86_64", "amd64"}:
+            filename = "7z2301-linux-x64.tar.xz"
+        elif machine in {"aarch64", "arm64"}:
+            filename = "7z2301-linux-arm64.tar.xz"
+        else:
+            raise RuntimeError(f"Unsupported CPU architecture for 7-Zip binary package: {machine}")
+
+        return filename, f"https://7-zip.org/a/{filename}"
+
+    def ensure_pts_profile_available(self):
+        """Fetch the PTS test profile if it is not already present locally."""
+        profile_dir = get_pts_profile_dir(self.benchmark_full)
+        if (profile_dir / "downloads.xml").exists() and (profile_dir / "install.sh").exists():
+            return True
+
+        print(f"  [WARN] downloads.xml not found under {profile_dir}; fetching PTS profile")
+        print(f"  [INFO] Fetching PTS profile: {self.benchmark_full}")
+        result = subprocess.run(
+            ["phoronix-test-suite", "info", self.benchmark_full],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  [WARN] Failed to fetch PTS profile: {self.benchmark_full}")
+
+        return (profile_dir / "downloads.xml").exists() and (profile_dir / "install.sh").exists()
+
+    @staticmethod
+    def write_backup_once(path):
+        """Keep the original upstream PTS profile file before local patching."""
+        backup = path.with_name(f"{path.name}.cloud-onehour-bak")
+        if not backup.exists() and path.exists():
+            shutil.copy2(path, backup)
+
+    def patch_7zip_binary_profile(self):
+        """
+        Patch the local PTS profile to use 7-Zip 23.01 ISA-specific Linux binaries.
+
+        The upstream compress-7zip-1.12.0 profile points at 7z2500-src.tar.xz,
+        which is no longer available on 7-zip.org. The replacement archives are
+        binary packages split by CPU ISA, so install.sh must extract 7zz directly
+        instead of compiling CPP/7zip/Bundles/Alone2.
+        """
+        print("\n>>> Patching 7-Zip PTS profile for ISA-specific binary package...")
+
+        try:
+            archive_name, archive_url = self.select_7zip_archive()
+        except RuntimeError as exc:
+            print(f"  [ERROR] {exc}")
+            sys.exit(1)
+
+        if not self.ensure_pts_profile_available():
+            print("  [WARN] PTS profile files are not available; using upstream profile unchanged")
+            return False
+
+        profile_dir = get_pts_profile_dir(self.benchmark_full)
+        downloads_xml = profile_dir / "downloads.xml"
+        install_sh = profile_dir / "install.sh"
+        test_definition = profile_dir / "test-definition.xml"
+        generated_json = profile_dir / "generated.json"
+        changelog_json = profile_dir / "changelog.json"
+
+        if not downloads_xml.exists() or not install_sh.exists():
+            print(f"  [WARN] Missing PTS profile files under {profile_dir}")
+            return False
+
+        downloads_content = f"""<?xml version="1.0"?>
+<PhoronixTestSuite>
+  <Downloads>
+    <Package>
+      <URL>{archive_url}</URL>
+      <FileName>{archive_name}</FileName>
+      <PlatformSpecific>Linux</PlatformSpecific>
+    </Package>
+  </Downloads>
+</PhoronixTestSuite>
+"""
+
+        install_content = f"""#!/bin/sh
+ARCHIVE="{archive_name}"
+
+if [ -f "$ARCHIVE" ]; then
+  tar -xf "$ARCHIVE"
+elif [ -f "$HOME/$ARCHIVE" ]; then
+  tar -xf "$HOME/$ARCHIVE"
+else
+  echo "Missing 7-Zip archive: $ARCHIVE"
+  echo 1 > ~/install-exit-status
+  exit 1
+fi
+
+chmod +x 7zz
+./7zz b -mmt=1 >/dev/null 2>&1
+INSTALL_STATUS=$?
+echo $INSTALL_STATUS > ~/install-exit-status
+if [ "$INSTALL_STATUS" -ne 0 ]; then
+  exit "$INSTALL_STATUS"
+fi
+
+cat > compress-7zip <<'EOF'
+#!/bin/sh
+THREADS="${{NUM_CPU_CORES:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}}"
+./7zz b -mmt="${{THREADS}}" > "${{LOG_FILE}}" 2>&1
+echo $? > ~/test-exit-status
+EOF
+chmod +x compress-7zip
+"""
+
+        try:
+            self.write_backup_once(downloads_xml)
+            self.write_backup_once(install_sh)
+            downloads_xml.write_text(downloads_content)
+            install_sh.write_text(install_content)
+            install_sh.chmod(0o755)
+
+            if test_definition.exists():
+                self.write_backup_once(test_definition)
+                content = test_definition.read_text(errors="ignore")
+                patched = content.replace("25.00", "23.01")
+                if patched != content:
+                    test_definition.write_text(patched)
+                    print("  [INFO] test-definition.xml label patched: 25.00 -> 23.01")
+
+            if generated_json.exists():
+                self.write_backup_once(generated_json)
+                content = generated_json.read_text(errors="ignore")
+                patched = content.replace('"app_version":"25.00"', '"app_version":"23.01"')
+                if patched != content:
+                    generated_json.write_text(patched)
+                    print("  [INFO] generated.json app_version patched: 25.00 -> 23.01")
+
+            if changelog_json.exists():
+                self.write_backup_once(changelog_json)
+                content = changelog_json.read_text(errors="ignore")
+                patched = content.replace("Update against 7-Zip 25.00.", "Use 7-Zip 23.01 binary package.")
+                if patched != content:
+                    changelog_json.write_text(patched)
+                    print("  [INFO] changelog.json note patched for 7-Zip 23.01")
+
+            print(f"  [OK] downloads.xml patched: {archive_url}")
+            print("  [OK] install.sh patched: uses ./7zz b -mmt=$NUM_CPU_CORES")
+            return True
+        except Exception as exc:
+            print(f"  [WARN] Failed to patch PTS profile: {exc}")
+            return False
+
     def install_benchmark(self):
         """
-        Install compress-7zip-1.12.0 with GCC-14 native compilation.
+        Install compress-7zip-1.12.0 using ISA-specific 7-Zip 23.01 binaries.
 
         Note: Unlike coremark, 7-Zip does NOT need reinstallation for each thread count
         because it supports runtime thread configuration via -mmt argument.
 
-        Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during build.
+        Since THFix_in_compile=false, NUM_CPU_CORES is NOT set during install.
         Thread count is controlled at runtime via NUM_CPU_CORES environment variable.
         """
         print(f"\n>>> Installing {self.benchmark_full}...")
@@ -524,12 +675,14 @@ class Compress7zipRunner:
             stderr=subprocess.DEVNULL
         )
 
+        self.patch_7zip_binary_profile()
+
         # Build install command with environment variables
         # Note: NUM_CPU_CORES is NOT set here because THFix_in_compile=false
         # Thread control is done at runtime, not compile time
         # Use batch-install to suppress prompts
-        # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
-        # Note: Using -O2 (7-Zip default) instead of -O3 to reduce optimization issues
+        # MAKEFLAGS/CC/CXX are retained for compatibility with normal PTS installs,
+        # but the patched 7-Zip profile uses a prebuilt ISA-specific binary.
         nproc = os.cpu_count() or 1
         install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
 
@@ -1158,7 +1311,7 @@ class Compress7zipRunner:
         info_installed = install_status["info_installed"]
         test_installed_ok = install_status["test_installed_ok"]
         installed_dir_exists = install_status["installed_dir_exists"]
-        already_installed = install_status["already_installed"]
+        already_installed = install_status['already_installed']
 
         print(
             f"[INFO] Install check -> info:{info_installed}, "

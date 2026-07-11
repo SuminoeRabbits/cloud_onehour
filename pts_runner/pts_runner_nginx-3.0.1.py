@@ -46,6 +46,7 @@ import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
@@ -448,6 +449,85 @@ class NginxRunner:
 
         return ','.join(cpu_list)
 
+    def ensure_test_profile_available(self):
+        """Ensure the PTS profile exists locally before patching profile files."""
+        profile_dir = Path.home() / '.phoronix-test-suite/test-profiles/pts' / self.benchmark
+        test_definition = profile_dir / 'test-definition.xml'
+        if test_definition.exists():
+            return
+
+        print("\n  [INFO] Downloading test profile...")
+        download_cmd = f'phoronix-test-suite info {self.benchmark_full}'
+        subprocess.run(
+            ['bash', '-c', download_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    def patch_test_definition_connections(self):
+        """
+        Patch the PTS nginx connection menu to avoid the unstable 4000-connection case.
+
+        On some cloud VMs, the 4000 concurrent connection case can fail because it
+        stresses socket, backlog, or file descriptor limits more than CPU throughput.
+        Keep the same menu shape but replace the highest point with 2000.
+        """
+        test_definition = (
+            Path.home()
+            / '.phoronix-test-suite/test-profiles/pts'
+            / self.benchmark
+            / 'test-definition.xml'
+        )
+
+        if not test_definition.exists():
+            print(f"  [WARN] test-definition.xml not found: {test_definition}")
+            return
+
+        try:
+            tree = ET.parse(test_definition)
+            root = tree.getroot()
+        except ET.ParseError as e:
+            print(f"  [WARN] Failed to parse test-definition.xml: {e}")
+            return
+
+        changed = False
+        already_patched = False
+        for option in root.findall('./TestSettings/Option'):
+            display_name = option.findtext('DisplayName', default='').strip()
+            identifier = option.findtext('Identifier', default='').strip()
+            if display_name != 'Connections' or identifier != 'concurrent':
+                continue
+
+            for entry in option.findall('./Menu/Entry'):
+                name_node = entry.find('Name')
+                value_node = entry.find('Value')
+                name = (name_node.text or '').strip() if name_node is not None else ''
+                value = (value_node.text or '').strip() if value_node is not None else ''
+
+                if name == '2000' and value == '2000':
+                    already_patched = True
+                if name == '4000' and value == '4000':
+                    if name_node is not None:
+                        name_node.text = '2000'
+                    if value_node is not None:
+                        value_node.text = '2000'
+                    changed = True
+
+        if not changed:
+            if already_patched:
+                print("  [INFO] test-definition.xml already uses Connections: 2000")
+            else:
+                print("  [WARN] Connections: 4000 entry not found in test-definition.xml")
+            return
+
+        backup = test_definition.parent / 'test-definition.xml.original'
+        if not backup.exists():
+            shutil.copy(test_definition, backup)
+            print(f"  [INFO] Backed up original: {backup}")
+
+        tree.write(test_definition, encoding='unicode', xml_declaration=True)
+        print("  [OK] Patched test-definition.xml: Connections 4000 -> 2000")
+
     def patch_install_sh_for_gcc14(self):
         """
         Patch PTS install.sh to fix wrk Makefile before building.
@@ -461,7 +541,8 @@ class NginxRunner:
         3. Modifies OpenSSL build commands to use OPENSSL_CFLAGS
         4. Uses $(nproc) instead of $NUM_CPU_CORES for compilation parallelism
         5. Increases nginx listen backlog 511->4096 (prevents SYN queue overflow
-           at C=4000 when all vCPUs are in use and no taskset CPU restriction applies)
+           during high-connection runs when all vCPUs are in use and no taskset
+           CPU restriction applies)
         6. Adds --timeout 30s to wrk command (safety net: allows nginx backlog to drain
            instead of wrk exiting after the default 2-second connection timeout)
         """
@@ -596,14 +677,14 @@ fi
         # ------------------------------------------------------------------
         # Patch 5: nginx listen backlog - independent of GCC-14 patches
         # Increases default backlog (511) to 4096 to prevent SYN queue overflow
-        # when 16 wrk threads burst 4000 simultaneous SYN packets (C=4000, no taskset).
+        # when 16 wrk threads burst thousands of simultaneous SYN packets (no taskset).
         # Effective backlog = min(nginx_backlog, net.core.somaxconn); RHEL 10 default = 4096.
         # ------------------------------------------------------------------
         if 'backlog=4096' not in content:
             old_listen_sed = 'sed -i "s/        listen       80;/        listen       8089;/g" nginx_/conf/nginx.conf'
             new_listen_sed = (
                 'sed -i "s/        listen       80;/        listen       8089;/g" nginx_/conf/nginx.conf\n'
-                '# Patch 5: Increase listen backlog to prevent SYN queue overflow at C=4000\n'
+                '# Patch 5: Increase listen backlog to prevent SYN queue overflow at high connection counts\n'
                 'sed -i "s/listen       8089;/listen       8089 backlog=4096;/g" nginx_/conf/nginx.conf'
             )
             if old_listen_sed in content:
@@ -713,21 +794,18 @@ fi
         print(f"\n>>> Installing {self.benchmark_full}...")
 
         # STEP 1: Force PTS to download test profile first
-        # This ensures install.sh exists before we try to patch it
-        print("\n  [INFO] Downloading test profile...")
-        download_cmd = f'phoronix-test-suite info {self.benchmark_full}'
-        subprocess.run(
-            ['bash', '-c', download_cmd],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        # This ensures profile files exist before we try to patch them.
+        self.ensure_test_profile_available()
 
-        # STEP 2: Patch install.sh BEFORE running batch-install
+        # STEP 2: Patch test-definition.xml and install.sh BEFORE running batch-install
+        self.patch_test_definition_connections()
+
+        # STEP 2a: Patch install.sh BEFORE running batch-install
         # This allows install.sh to patch wrk's Makefile before building
         self.patch_install_sh_for_gcc14()
 
         # STEP 2b: Patch post.sh for fast nginx shutdown + port-wait
-        # Prevents "Address already in use" race at Connections:4000 after high-load subtests
+        # Prevents "Address already in use" race after high-load subtests
         self.patch_post_sh()
 
         # STEP 2c: Patch pre.sh to probe port 8089 after nginx starts
@@ -1366,6 +1444,11 @@ fi
             for f in self.results_dir.glob(f"{prefix}.*"):
                 f.unlink()
             print(f"  [INFO] Cleaned existing {prefix} results (other threads preserved)")
+
+        # Ensure the local PTS profile uses the stable connection menu even when
+        # the benchmark binary is already installed and installation is skipped.
+        self.ensure_test_profile_available()
+        self.patch_test_definition_connections()
 
         # Install benchmark once (not per thread count, since THFix_in_compile=false)
         install_status = get_install_status(self.benchmark_full, self.benchmark)

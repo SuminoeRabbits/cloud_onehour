@@ -19,6 +19,9 @@ Test Characteristics:
 - Notable Instructions: Assembly-optimized encoder path
 - THFix_in_compile: false - Thread count NOT fixed at compile time
 - THChange_at_runtime: true - Runtime thread configuration via NUM_CPU_CORES
+
+Timeout > 14400 (4H) for large files (e.g., 4K YUV420p 10-bit) is recommended. 
+The test may take longer than 4 hours on low-end CPUs or when using large input files.
 """
 
 import argparse
