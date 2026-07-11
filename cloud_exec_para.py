@@ -69,7 +69,7 @@ def parse_os_version(os_version: str) -> dict:
     Parse os_version string from cloud_config.json into structured info.
 
     Supports:
-      - Ubuntu versions: "24.04", "22.04", "25.04" -> os_family='ubuntu'
+      - Ubuntu versions: "22.04", "24.04", "25.04", "26.04" -> os_family='ubuntu'
       - RHEL:            "rhel9", "rhel10"          -> os_family='rhel'
       - Oracle Linux:    "orcl9", "orcl10"          -> os_family='orcl'
 
@@ -1526,9 +1526,17 @@ def launch_aws_instance(inst, config, region, key_name, sg_id, logger=None):
             '20.04': 'focal',
             '22.04': 'jammy',
             '24.04': 'noble',
-            '25.04': 'plucky'
+            '25.04': 'plucky',
+            '26.04': 'resolute'
         }
-        codename = version_to_codename.get(os_info['version'], 'jammy')
+        codename = version_to_codename.get(os_info['version'])
+        if not codename:
+            msg = f"Unsupported Ubuntu version for AWS AMI lookup: {os_info['version']}"
+            if logger:
+                logger.error(msg)
+            else:
+                print(f"[Error] {msg}")
+            return None, None
         if logger:
             logger.info(f"Finding AMI for Ubuntu {os_info['version']} ({codename}) {inst['arch']}...")
         ami_patterns = [
@@ -1650,6 +1658,15 @@ def launch_gcp_instance(inst, config, project, zone, logger=None):
 
     if effective['provision_as'] == 'ubuntu':
         # --- Ubuntu image family search ---
+        supported_ubuntu_versions = {'20.04', '22.04', '24.04', '25.04', '26.04'}
+        if os_info['version'] not in supported_ubuntu_versions:
+            msg = f"Unsupported Ubuntu version for GCP image lookup: {os_info['version']}"
+            if logger:
+                logger.error(msg)
+            else:
+                print(f"[Error] {msg}")
+            return None, None
+
         version_number = os_info['version'].replace('.', '')
         is_lts = os_info['version'].endswith('.04') and int(os_info['version'].split('.')[0]) % 2 == 0
         lts_suffix = "-lts" if is_lts else ""
@@ -1939,8 +1956,10 @@ def run_ssh_commands(ip, config, inst, key_path, ssh_strict_host_key_checking, i
             logger.info(f"Testloads mode ENABLED for {instance_name}. Running ONLY testloads.")
         workloads = config['common'].get('testloads', [])
     else:
-        # Determine OS-specific setup commands (debian_setup / fedra_setup)
-        if os_info['os_family'] == 'ubuntu':
+        # Determine OS-specific setup commands.
+        if os_info['os_family'] == 'ubuntu' and os_info.get('version') == '26.04':
+            setup_key = 'ubuntu2604_setup'
+        elif os_info['os_family'] == 'ubuntu':
             setup_key = 'debian_setup'
         else:  # rhel, orcl
             setup_key = 'fedra_setup'
