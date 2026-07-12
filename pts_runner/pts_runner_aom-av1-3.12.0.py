@@ -208,6 +208,9 @@ class PreSeedDownloader:
 
 
 class AomAv1Runner:
+    INSTALL_SH_LOG_FILTER = "LC_ALL=C tr -c '\\11\\40-\\176' '\\12' < 1.log > \\\"\\$LOG_FILE\\\""
+    WRAPPER_LOG_FILTER = "LC_ALL=C tr -c '\\11\\40-\\176' '\\12' < 1.log > \"$LOG_FILE\""
+
     def __init__(self, threads_arg=None, quick_mode=False):
         """
         Initialize aom-av1 runner.
@@ -556,6 +559,37 @@ class AomAv1Runner:
 
         print("  [OK] PTS cache cleaned")
 
+    def _patch_log_filter_text(self, original, replacement):
+        """Replace fragile wrapper LOG_FILE filters with a portable /bin/sh form."""
+        changed = False
+        patched_lines = []
+
+        for line in original.splitlines():
+            stripped = line.strip()
+            needs_patch = (
+                "1.log" in stripped
+                and "LOG_FILE" in stripped
+                and (
+                    stripped.startswith("sed ")
+                    or stripped.startswith("perl -pe ")
+                    or stripped.startswith("LC_ALL=C tr ")
+                    or stripped == "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \\\"\\$LOG_FILE\\\""
+                )
+            )
+
+            if needs_patch:
+                indent = line[:len(line) - len(line.lstrip())]
+                patched_lines.append(indent + replacement)
+                changed = True
+            else:
+                patched_lines.append(line)
+
+        updated = "\n".join(patched_lines)
+        if original.endswith("\n"):
+            updated += "\n"
+
+        return updated, changed
+
     def patch_install_script(self):
         """Patch upstream install.sh for portable /bin/sh wrapper logging.
 
@@ -577,19 +611,9 @@ class AomAv1Runner:
             print(f"  [WARN] Failed to read install.sh: {e}")
             return False
 
-        portable_log_filter = (
-            "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \"$LOG_FILE\""
-        )
-        updated = original
-        for pattern in (
-            "sed \\$'s/[^[:print:]\\t]/\\\\n/g' 1.log > \\$LOG_FILE",
-            "sed $'s/[^[:print:]\\t]/\\\\n/g' 1.log > \\$LOG_FILE",
-            "sed $'s/[^[:print:]\\t]/\\\\n/g' 1.log > $LOG_FILE",
-            "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \\\"\\$LOG_FILE\\\"",
-        ):
-            updated = updated.replace(pattern, portable_log_filter)
+        updated, changed = self._patch_log_filter_text(original, self.INSTALL_SH_LOG_FILTER)
 
-        if updated == original:
+        if not changed:
             print("  [INFO] install.sh portable log filter patch not needed or pattern not found")
             return False
 
@@ -601,21 +625,63 @@ class AomAv1Runner:
             print(f"  [WARN] Failed to patch install.sh: {e}")
             return False
 
+    def patch_installed_wrapper(self):
+        """Patch the generated PTS runtime wrapper if it already exists."""
+        wrapper = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "installed-tests"
+            / "pts"
+            / self.benchmark
+            / "aom-av1"
+        )
+
+        if not wrapper.exists():
+            print(f"  [WARN] Installed wrapper not found for patching: {wrapper}")
+            return False
+
+        try:
+            original = wrapper.read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"  [WARN] Failed to read installed wrapper: {e}")
+            return False
+
+        updated, changed = self._patch_log_filter_text(original, self.WRAPPER_LOG_FILTER)
+        if not changed:
+            print("  [INFO] Installed wrapper portable log filter patch not needed")
+            return False
+
+        try:
+            wrapper.write_text(updated, encoding="utf-8")
+            wrapper.chmod(wrapper.stat().st_mode | 0o111)
+            print("  [PATCH] installed wrapper: portable LOG_FILE filter")
+            return True
+        except Exception as e:
+            print(f"  [WARN] Failed to patch installed wrapper: {e}")
+            return False
+
     def collect_aom_debug_logs(self, num_threads):
         """Collect raw AOM wrapper logs when PTS cannot parse a result."""
         debug_dir = self.results_dir / f"{num_threads}-thread_debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
 
         copied = []
+        installed_dir = (
+            Path.home()
+            / ".phoronix-test-suite"
+            / "installed-tests"
+            / "pts"
+            / self.benchmark
+        )
         for filename in ("1.log", "test-exit-status", "install-exit-status"):
-            src = Path.home() / filename
-            if src.exists():
-                dst = debug_dir / filename
-                try:
-                    shutil.copy2(src, dst)
-                    copied.append(dst)
-                except Exception as e:
-                    print(f"  [WARN] Failed to copy {src}: {e}")
+            for src in (Path.home() / filename, installed_dir / filename):
+                if src.exists():
+                    dst = debug_dir / f"{src.parent.name}_{filename}"
+                    try:
+                        shutil.copy2(src, dst)
+                        copied.append(dst)
+                    except Exception as e:
+                        print(f"  [WARN] Failed to copy {src}: {e}")
 
         if copied:
             print(f"  [INFO] Collected AOM debug logs: {debug_dir}")
@@ -770,6 +836,7 @@ class AomAv1Runner:
             print("  [WARN] Test may not be fully installed (test-installed check failed)")
             print("  [INFO] But installation directory exists, continuing...")
 
+        self.patch_installed_wrapper()
         print(f"  [OK] Installation completed and verified: {installed_dir}")
 
     def parse_perf_stats_and_freq(self, perf_stats_file, freq_start_file, freq_end_file, cpu_list):
@@ -1276,6 +1343,7 @@ class AomAv1Runner:
             self.install_benchmark()
         else:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
+            self.patch_installed_wrapper()
 
         # Run for each thread count
         failed = []
