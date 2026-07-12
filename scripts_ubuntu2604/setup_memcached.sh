@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib/os_guard.sh"
 # Required by:
 #   memcached-1.6.19     : libevent-dev
 #   memtier_benchmark-1.4.0 (autoreconf + ./configure):
-#                          libpcre3-dev, libssl-dev, zlib1g-dev
+#                          libpcre2-dev, libssl-dev, zlib1g-dev
 #                          autoconf, automake, libtool
 #
 
@@ -32,7 +32,7 @@ pkg_installed() {
 
 MEMCACHED_PACKAGES=(
     libevent-dev
-    libpcre3-dev
+    libpcre2-dev
     libssl-dev
     zlib1g-dev
     autoconf
