@@ -556,6 +556,69 @@ class AomAv1Runner:
 
         print("  [OK] PTS cache cleaned")
 
+    def patch_install_script(self):
+        """Patch upstream install.sh for portable /bin/sh wrapper logging.
+
+        The upstream profile generates an aom-av1 wrapper with /bin/sh but uses
+        Bash-style ANSI-C quoting in the sed command that writes PTS' LOG_FILE.
+        If that shell feature is unavailable, aomenc may run while PTS sees no
+        parseable output and reports "The test run did not produce a result."
+        """
+        profile_path = Path.home() / ".phoronix-test-suite" / "test-profiles" / "pts" / self.benchmark
+        install_sh = profile_path / "install.sh"
+
+        if not install_sh.exists():
+            print(f"  [WARN] install.sh not found for patching: {install_sh}")
+            return False
+
+        try:
+            original = install_sh.read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"  [WARN] Failed to read install.sh: {e}")
+            return False
+
+        portable_log_filter = (
+            "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \\\"\\$LOG_FILE\\\""
+        )
+        updated = original
+        for pattern in (
+            "sed \\$'s/[^[:print:]\\t]/\\\\n/g' 1.log > \\$LOG_FILE",
+            "sed $'s/[^[:print:]\\t]/\\\\n/g' 1.log > \\$LOG_FILE",
+            "sed $'s/[^[:print:]\\t]/\\\\n/g' 1.log > $LOG_FILE",
+        ):
+            updated = updated.replace(pattern, portable_log_filter)
+
+        if updated == original:
+            print("  [INFO] install.sh portable log filter patch not needed or pattern not found")
+            return False
+
+        try:
+            install_sh.write_text(updated, encoding="utf-8")
+            print("  [PATCH] install.sh: portable LOG_FILE filter for /bin/sh wrapper")
+            return True
+        except Exception as e:
+            print(f"  [WARN] Failed to patch install.sh: {e}")
+            return False
+
+    def collect_aom_debug_logs(self, num_threads):
+        """Collect raw AOM wrapper logs when PTS cannot parse a result."""
+        debug_dir = self.results_dir / f"{num_threads}-thread_debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        copied = []
+        for filename in ("1.log", "test-exit-status", "install-exit-status"):
+            src = Path.home() / filename
+            if src.exists():
+                dst = debug_dir / filename
+                try:
+                    shutil.copy2(src, dst)
+                    copied.append(dst)
+                except Exception as e:
+                    print(f"  [WARN] Failed to copy {src}: {e}")
+
+        if copied:
+            print(f"  [INFO] Collected AOM debug logs: {debug_dir}")
+
     def get_cpu_affinity_list(self, n):
         """
         Generate CPU affinity list for HyperThreading optimization.
@@ -597,6 +660,7 @@ class AomAv1Runner:
         print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
+        self.patch_install_script()
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -1000,6 +1064,7 @@ class AomAv1Runner:
 
         if returncode == 0 and pts_test_failed:
             print(f"\n[ERROR] PTS reported benchmark failure despite zero exit code: {pts_failure_reason}")
+            self.collect_aom_debug_logs(num_threads)
             return False
 
         if returncode == 0:
@@ -1025,6 +1090,7 @@ class AomAv1Runner:
 
         else:
             print(f"\n[ERROR] Benchmark failed with return code {returncode}")
+            self.collect_aom_debug_logs(num_threads)
             err_file = self.results_dir / f"{num_threads}-thread.err"
             with open(err_file, 'w') as f:
                 f.write(f"Benchmark failed with return code {returncode}\n")
