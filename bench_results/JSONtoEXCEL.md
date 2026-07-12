@@ -11,6 +11,7 @@ JSONファイルはDefaultで特に指定がない限り${PWD}/globalの下に`t
 - [列 L: `performance`](#列-l-performance)
 - [ソート順](#ソート順)
 - [グラフ生成](#グラフ生成)
+  - [PDF 出力ファイル名](#pdf-出力ファイル名)
   - [線の色](#線の色)
   - [CSP マーカー表（折れ線グラフ）](#csp-マーカー表折れ線グラフ)
   - [グラフタイトルレイアウト](#グラフタイトルレイアウト)
@@ -129,7 +130,24 @@ Python 3.12 以上が必要です。
 ## グラフ生成
 
 グラフは `*performance_analysis*` ファイルのみに対して生成されます。
-`test_name`ごとに 1 つのグラフにまとめ、系列は`machinename`。１グラフあたり1ページの PDF にまとめて出力します。
+PDF は Excel 列 **D** `os` ごとに分割して出力されます。各 OS 別 PDF の中では、`test_name`ごとに 1 つのグラフにまとめ、系列は`machinename`。１グラフあたり1ページの PDF にまとめて出力します。
+
+### PDF 出力ファイル名
+
+PDF は元の JSON / Excel と同じディレクトリに保存され、ファイル名の末尾に OS ID を付与します。
+Excel は従来通り OS 別には分割しません。
+
+例:
+
+| 入力 JSON | 出力 Excel | 出力 PDF |
+|----------|------------|----------|
+| `AI_performance_analysis_x86_64.json` | `AI_performance_analysis_x86_64.xlsx` | `AI_performance_analysis_x86_64_rhel_10_family.pdf` |
+| `AI_performance_analysis_x86_64.json` | `AI_performance_analysis_x86_64.xlsx` | `AI_performance_analysis_x86_64_Ubuntu_26_04.pdf` |
+
+OS ID は Excel 列 **D** `os` の値から作成します。ファイル名に使いにくい文字（空白、`/` など）は `_` に置換します。
+例: `Ubuntu 26.04 LTS` は `Ubuntu_26.04_LTS` になります。
+
+既存の OS suffix なし PDF（例: `AI_performance_analysis_x86_64.pdf`）が存在する場合、PDF 再生成時に削除されます。
 
 ### 線の色
 
@@ -204,6 +222,8 @@ Y 軸は実測値ではなく列 **L** `performance` を描画するため、単
 各カテゴリ `<testcategory>` 配下の `<testcategory>/<testcategory>_*.json` という形式のファイルを
 `<testcategory>/<testcategory>_*.xlsx` に変換します。
 
+`*performance_analysis*` については、Excel に加えて OS 別 PDF を生成します。PDF 名は `<testcategory>_performance_analysis..._<OS>.pdf` 形式です。
+
 ## 変換ルール
 
 - 比較ブロック: `workload` サブキーを持つ、トップレベルで `*_comparison` で終わるキーを使用します。
@@ -268,7 +288,7 @@ python JSONtoEXCEL.py [options]
 | `--root PATH` | スクリプトのあるディレクトリ | ワークスペースルート。`global/` 配下を検索対象とします。 |
 | `--ext .xlsx` | `.xlsx` | 出力拡張子（現在は `.xlsx` 固定） |
 | `--log DIR` | `$PWD/log` | ログ保存先ディレクトリ。なければ自動作成 |
-| `--graph` | — | 既存の Excel を読み込み PDF を再生成します。**Excel は再作成・上書きされません。**
+| `--graph` | — | 既存の Excel を読み込み、OS 別 PDF を再生成します。**Excel は再作成・上書きされません。**
 JSON を再実行せず、手動編集した Excel のグラフだけを更新したい場合に使用します。 |
 | `--coverage-out PATH` | `<root>/coverage_nog_all_<timestamp>.json` | 網羅性チェック（NOG）JSON の出力先。指定しない場合はデフォルト名で保存され、同じ内容が `stdout` にも出力されます。 |
 

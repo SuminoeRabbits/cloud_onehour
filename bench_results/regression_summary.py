@@ -582,7 +582,14 @@ def prepare_machine_json(
     if not results_path.is_dir():
         return
     output_json = results_path / f"one_big_json_{csp_dir.name}.json"
-    if not output_json.exists() or not is_valid_one_big_json(output_json, csp_dir.name, target_major):
+    script_updated = output_json.exists() and make_one_big_json.stat().st_mtime > output_json.stat().st_mtime
+    if (
+        not output_json.exists()
+        or not is_valid_one_big_json(output_json, csp_dir.name, target_major)
+        or script_updated
+    ):
+        if script_updated:
+            print(f"Regenerating due to updated make_one_big_json.py -> {output_json}")
         generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
     postmortem_output = results_path / f"postmortem_{csp_dir.name}.json"
     run_postmortem(postmortem_script, results_path, postmortem_output, results_path)
@@ -605,9 +612,12 @@ def merge_machine(
         existing_inputs = sorted(results_path.glob("one_big_json_*.json"))
         out_mtime = output_json.stat().st_mtime
         newer = [j for j in existing_inputs if j.stat().st_mtime > out_mtime]
-        if not newer:
+        script_updated = make_one_big_json.stat().st_mtime > out_mtime
+        if not newer and not script_updated:
             print(f"Skipping regeneration, existing file is valid and up-to-date -> {output_json}")
             return
+        if script_updated:
+            print(f"Regenerating due to updated make_one_big_json.py -> {output_json}")
         print(f"Regenerating due to updated source(s): {[j.name for j in newer]}")
     generate_one_big_json_if_missing(results_path, make_one_big_json, csp_dir.name)
     input_jsons = sorted(results_path.glob("one_big_json_*.json"))

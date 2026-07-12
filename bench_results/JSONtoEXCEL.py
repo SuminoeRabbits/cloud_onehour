@@ -468,6 +468,51 @@ def read_rows_from_xlsx(xlsx_path: Path) -> List[Tuple[Any, ...]]:
     return rows
 
 
+def safe_os_id(os_name: Any) -> str:
+    """Return a filesystem-safe OS suffix for PDF filenames."""
+    if is_fallback_value(os_name):
+        return "unknown_os"
+    text = str(os_name).strip()
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("._-")
+    return text or "unknown_os"
+
+
+def split_rows_by_os(rows: Iterable[Tuple[Any, ...]]) -> List[Tuple[str, List[Tuple[Any, ...]]]]:
+    """Split 12-column rows by OS column while preserving existing Excel rows."""
+    grouped: Dict[str, List[Tuple[Any, ...]]] = {}
+    for row in rows:
+        os_name = row[3] if len(row) > 3 else None
+        os_key = str(os_name).strip() if not is_fallback_value(os_name) else "unknown_os"
+        grouped.setdefault(os_key, []).append(row)
+    return sorted(grouped.items(), key=lambda item: _natural_sort_key(item[0]))
+
+
+def os_pdf_path(base_pdf_path: Path, os_name: Any) -> Path:
+    """Build <stem>_<os>.pdf next to the legacy base PDF path."""
+    return base_pdf_path.with_name(f"{base_pdf_path.stem}_{safe_os_id(os_name)}.pdf")
+
+
+def generate_os_split_graph_pdfs(
+    rows: Iterable[Tuple[Any, ...]],
+    base_pdf_path: Path,
+) -> List[Tuple[Path, int]]:
+    """Generate one performance PDF per OS, leaving Excel/JSON flow unchanged."""
+    if not _MPL_AVAILABLE:
+        logging.warning("matplotlib is not available; skipping PDF generation: %s", base_pdf_path)
+        return []
+
+    if base_pdf_path.exists():
+        base_pdf_path.unlink()
+
+    generated: List[Tuple[Path, int]] = []
+    for os_name, os_rows in split_rows_by_os(rows):
+        pdf_path = os_pdf_path(base_pdf_path, os_name)
+        page_count = generate_graph_pdf(os_rows, pdf_path)
+        generated.append((pdf_path, page_count))
+    return generated
+
+
 def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> int:
     """Generate per-(benchmark, test_name) PDF graphs.  Expects 12-tuples:
     (benchmark, test_snippet, test_name, os, gcc_ver, thread, unit, machinename, cpu_name, score, relative, performance).
@@ -487,8 +532,13 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
     benchmark_units: Dict[Tuple[str, str], str] = {}
     machine_family_by_key: Dict[Tuple[str, str], Dict[str, str]] = {}
 
-    def detect_machine_family(cpu_name: Any) -> str:
-        cpu_text = cpu_name.casefold() if isinstance(cpu_name, str) else ""
+    def detect_machine_family(cpu_name: Any, machinename: Any) -> str:
+        parts = []
+        if isinstance(cpu_name, str):
+            parts.append(cpu_name)
+        if isinstance(machinename, str):
+            parts.append(machinename)
+        cpu_text = " ".join(parts).casefold()
         arm_markers = ("arm", "aarch64", "graviton", "ampere", "neoverse", "cortex")
         amd_markers = ("amd", "epyc")
         intel_markers = ("intel", "xeon")
@@ -531,7 +581,7 @@ def generate_graph_pdf(rows: Iterable[Tuple[Any, ...]], output_path: Path) -> in
         benchmark_map = grouped.setdefault(key, {})
         benchmark_map.setdefault(machinename, []).append((thread, float(performance)))
         family_map = machine_family_by_key.setdefault(key, {})
-        family_map.setdefault(machinename, detect_machine_family(cpu_name))
+        family_map.setdefault(machinename, detect_machine_family(cpu_name, machinename))
         if isinstance(test_snippet, str) and not is_fallback_value(test_snippet):
             snippet_map[key] = test_snippet
 
@@ -708,17 +758,17 @@ def convert_json_file(json_path: Path, output_ext: str) -> int:
     rows_with_performance = add_original_column(raw_rows, json_path)
     output_rows = build_output_rows(rows_with_performance)
     output_path = json_path.with_suffix(output_ext)
-    pdf_path = json_path.with_suffix(".pdf")
+    base_pdf_path = json_path.with_suffix(".pdf")
 
     write_xlsx(output_rows, output_path)
 
     is_performance_analysis = "performance_analysis" in json_path.name
     if is_performance_analysis:
-        generate_graph_pdf(output_rows, pdf_path)
-        if not _MPL_AVAILABLE and pdf_path.exists():
+        generate_os_split_graph_pdfs(output_rows, base_pdf_path)
+        if not _MPL_AVAILABLE and base_pdf_path.exists():
             logging.warning("PDF generation skipped because matplotlib is missing for %s", json_path.name)
-    elif pdf_path.exists():
-        pdf_path.unlink()
+    elif base_pdf_path.exists():
+        base_pdf_path.unlink()
 
     return len(output_rows)
 
@@ -764,15 +814,16 @@ def graph_mode(global_dir: Path) -> int:
         for xlsx_path in sorted(category_dir.glob("*.xlsx")):
             if "performance_analysis" not in xlsx_path.name:
                 continue
-            pdf_path = xlsx_path.with_suffix(".pdf")
+            base_pdf_path = xlsx_path.with_suffix(".pdf")
             try:
                 rows = read_rows_from_xlsx(xlsx_path)
                 if not rows:
                     logging.warning("[WARN] No data in %s", xlsx_path)
                     continue
-                count = generate_graph_pdf(rows, pdf_path)
-                logging.info("[OK] %s -> %s (%d pages)", xlsx_path, pdf_path, count)
-                generated += 1
+                outputs = generate_os_split_graph_pdfs(rows, base_pdf_path)
+                for pdf_path, count in outputs:
+                    logging.info("[OK] %s -> %s (%d pages)", xlsx_path, pdf_path, count)
+                generated += len(outputs)
             except Exception as exc:
                 logging.error("[NG] %s: %s", xlsx_path, exc)
                 errors += 1
