@@ -493,10 +493,12 @@ class XmrigRunner:
             pts_home / "installed-tests" / "pts" / self.benchmark / "test-definition.xml",
         ]
 
+        found_any = False
         patched_any = False
         for test_def_path in candidate_paths:
             if not test_def_path.exists():
                 continue
+            found_any = True
 
             try:
                 tree = ET.parse(test_def_path)
@@ -505,13 +507,13 @@ class XmrigRunner:
                 print(f"  [WARN] Failed to parse {test_def_path}: {e}")
                 continue
 
-            removed = []
+            changed = False
             for option in root.findall("./TestSettings/Option"):
                 identifier = option.findtext("Identifier", default="").strip()
                 if identifier == "variant":
-                    keep = self.KEEP_VARIANTS
+                    keep_names = self.KEEP_VARIANTS
                 elif identifier == "count":
-                    keep = self.KEEP_HASH_COUNTS
+                    keep_names = self.KEEP_HASH_COUNTS
                 else:
                     continue
 
@@ -519,13 +521,29 @@ class XmrigRunner:
                 if menu is None:
                     continue
 
+                existing_names = [
+                    entry.findtext("Name", default="").strip()
+                    for entry in menu.findall("Entry")
+                ]
+                missing_names = sorted(keep_names - set(existing_names))
+                if missing_names:
+                    print(
+                        f"  [WARN] XMRig requested {identifier} entries not found "
+                        f"in {test_def_path}: {missing_names}"
+                    )
+
+                target_names = [name for name in existing_names if name in keep_names]
+                if existing_names == target_names:
+                    continue
+
                 for entry in list(menu.findall("Entry")):
                     name = entry.findtext("Name", default="").strip()
-                    if name not in keep:
+                    if name not in keep_names:
                         menu.remove(entry)
-                        removed.append(f"{identifier}:{name}")
 
-            if not removed:
+                changed = True
+
+            if not changed:
                 print(f"  [INFO] XMRig test-definition already filtered: {test_def_path}")
                 continue
 
@@ -540,7 +558,7 @@ class XmrigRunner:
             except Exception as e:
                 print(f"  [WARN] Failed to write {test_def_path}: {e}")
 
-        if not patched_any:
+        if not found_any:
             print("  [WARN] XMRig test-definition.xml not found for filtering yet")
 
         return patched_any
@@ -761,17 +779,22 @@ class XmrigRunner:
             f'TEST_RESULTS_DESCRIPTION={self.benchmark}-{num_threads}threads'
         )
 
-        # Prevent interactive prompts by removing prior results
-        result_tag = f"{self.benchmark}-{num_threads}threads"
-        try:
-            subprocess.run(
-                ['phoronix-test-suite', 'remove-result', result_tag],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False
-            )
-        except Exception:
-            pass
+        # Prevent interactive prompts and stale partial result reuse by removing
+        # both the visible result name and PTS' sanitized directory name.
+        sanitized_benchmark = self.benchmark.replace('.', '')
+        for result_tag in (
+            f"{self.benchmark}-{num_threads}threads",
+            f"{sanitized_benchmark}-{num_threads}threads",
+        ):
+            try:
+                subprocess.run(
+                    ['phoronix-test-suite', 'remove-result', result_tag],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False
+                )
+            except Exception:
+                pass
 
         if num_threads >= self.vcpu_count:
             cpu_list = ','.join([str(i) for i in range(self.vcpu_count)])

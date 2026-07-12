@@ -205,6 +205,8 @@ class PreSeedDownloader:
 class KvazaarRunner:
     # Time-reduction: keep only the two fastest presets
     _KEEP_PRESETS: frozenset = frozenset({"veryfast", "ultrafast"})
+    # Time-reduction: keep only 1080p input; 4K exceeds cloud timeout on Arm64.
+    _KEEP_VIDEOS: frozenset = frozenset({"Bosphorus 1080p"})
 
     def __init__(self, threads_arg=None, quick_mode=False, diag_mode=True):
         """
@@ -615,6 +617,7 @@ class KvazaarRunner:
     def patch_test_definition(self) -> bool:
         """
         Patch test-definition.xml to reduce benchmark runtime:
+        - Remove video entries not in _KEEP_VIDEOS (Bosphorus 4K)
         - Remove preset entries not in _KEEP_PRESETS (slow, medium, superfast)
 
         Returns True if the file was successfully patched (backup exists).
@@ -655,6 +658,15 @@ class KvazaarRunner:
                 if menu is None:
                     continue
 
+                if identifier == "video":
+                    # Remove entries not in _KEEP_VIDEOS
+                    for entry in menu.findall("Entry"):
+                        name_el = entry.find("Name")
+                        name = (name_el.text or "").strip() if name_el is not None else ""
+                        if name not in self._KEEP_VIDEOS:
+                            menu.remove(entry)
+                            print(f"  [PATCH] Removed video entry: {name}")
+
                 if identifier == "preset":
                     # Remove entries not in _KEEP_PRESETS
                     for entry in menu.findall("Entry"):
@@ -667,6 +679,7 @@ class KvazaarRunner:
             tree.write(xml_path, encoding="utf-8", xml_declaration=True)
             print(
                 f"[INFO] test-definition.xml patched: "
+                f"videos={sorted(self._KEEP_VIDEOS)}, "
                 f"presets={sorted(self._KEEP_PRESETS)}"
             )
             return True
