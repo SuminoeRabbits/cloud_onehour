@@ -19,6 +19,7 @@
 | `json_parser_compress-zstd-1.6.0.py` | C (JSON) | 複数 (12〜14) | `<N>-thread.json` から取得 (機種によりテスト数が異なる) |
 | `json_parser_coremark-1.0.1.py` | A (ログ単一) | 単一 | time 取得不可 |
 | `json_parser_cpuminer-opt-1.8.0.py` | C (JSON) | 複数 | `<N>-thread.json` 有り機種のみ出力。log-only機種はスキップ |
+| `json_parser_xmrig-1.3.0.py` | C (JSON) | 3 | `<N>-thread.json` から取得 (Monero / KawPow / CryptoNight-Heavy 1M)。neo55sGen6 で検証済み |
 | `json_parser_dacapobench-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_ffmpeg-7.0.1.py` | B (ログ複数) | 複数 | ケース5相当 |
 | `json_parser_glibc-bench-1.9.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
@@ -48,8 +49,10 @@
 | `json_parser_valkey-1.1.0.py` | C (JSON) | 複数 | `<N>-thread.json` から取得 |
 | `json_parser_vkpeak-1.3.0.py` | C (JSON) | 11 | `<N>-thread.json` から取得 |
 | `json_parser_webp-1.4.0.py` | C (JSON) | 5 | `<N>-thread.json` から取得 (Default / Quality 100 等), pts/webp-1.2.0用 |
+| `json_parser_jpegxl-1.6.0.py` | C (JSON) | 6 | `<N>-thread.json` から取得 (JPEG/PNG × Quality 80/90/100)。neo55sGen6 で検証済み |
 | `json_parser_x265-1.5.0.py` | C (JSON) | 2 | `<N>-thread.json` から取得 (Bosphorus 4K / 1080p) |
 | `json_parser_svt-av1-2.17.0.py` | C (JSON) | 12 | `<N>-thread.json` から取得 (Preset 3/5/8/13 × Bosphorus 4K/1080p/Beauty 4K 10-bit)。neo55sGen6 で検証済み |
+| `json_parser_aom-av1-3.12.0.py` | C (JSON) | 16 | `<N>-thread.json` から取得 (Speed/Mode × Bosphorus 4K/1080p)。neo55sGen6 で検証済み |
 | `json_parser_srsran-2.5.0.py` | C (JSON) | 4 | `<N>-thread.json` から取得 (PDSCH/PUSCH × Total/Thread)。neo55sGen6 で検証済み |
 | `json_parser_llama-cpp-2.4.1.py` | C (JSON) | 複数 | `<N>-thread.json` から取得。`test_run_times` は PTS JSON を利用 |
 
@@ -70,6 +73,7 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_compress-xz-1.1.0.py` — OK (1 test)
 - `json_parser_compress-zstd-1.6.0.py` — OK (14 tests)
 - `json_parser_cpuminer-opt-1.8.0.py` — OK (12 tests: Algorithm 別)
+- `json_parser_xmrig-1.3.0.py` — OK (3 tests: Monero / KawPow / CryptoNight-Heavy 1M)
 - `json_parser_ffmpeg-7.0.1.py` — OK (8 tests: Encoder × Scenario)
 - `json_parser_numpy-1.2.1.py` — OK (1 test)
 - `json_parser_apache-siege-1.1.0.py` — OK (5 tests: Concurrent Users 50/100/200/500/1000。10 は run failed のため skip)
@@ -78,6 +82,8 @@ neo55sGen6/Ubuntu_24_04_3 にテストデータが存在しないため未検証
 - `json_parser_llama-cpp-2.4.1.py` — OK (値あり 29 tests、PTS JSON の test_run_times を利用)
 - `json_parser_pgbench-1.11.1.py` — OK after fix (2 tests: Read Only / Read Write TPS)。TPS_RE を `Average: X TPS` 形式に修正
 - `json_parser_svt-av1-2.17.0.py` — OK (12 tests: Preset 3/5/8/13 × 3 入力)（新規作成）
+- `json_parser_jpegxl-1.6.0.py` — OK (6 tests: JPEG/PNG × Quality 80/90/100)
+- `json_parser_aom-av1-3.12.0.py` — OK (16 tests: Speed/Mode × Bosphorus 4K/1080p)
 - `json_parser_pmbench-1.0.2.py` — OK (20 tests)
 - `json_parser_renaissance-1.4.0.py` — OK (12 tests)
 - `json_parser_rustls-1.0.0.py` — OK (12 tests)
