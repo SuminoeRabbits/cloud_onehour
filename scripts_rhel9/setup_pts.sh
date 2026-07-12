@@ -117,7 +117,7 @@ sudo dnf -y groupinstall "Development Tools"
 # Libraries and headers
 # dwarves: provides pahole, required for kernel allmodconfig (BTF/BPF support since kernel 5.2)
 # glibc-static: required for BPF skeleton programs compiled during allmodconfig
-LIB_DEPS="flex bison bc elfutils-libelf-devel openssl-devel zlib-devel bzip2-devel readline-devel sqlite-devel ncurses-devel libffi-devel xz-devel dwarves glibc-static libuv-devel"
+LIB_DEPS="flex bison bc elfutils-libelf-devel openssl-devel zlib-devel bzip2-devel readline-devel sqlite-devel ncurses-devel libffi-devel xz-devel dwarves glibc-static libstdc++-static libuv-devel"
 
 echo "Installing: $BUILD_DEPS $LIB_DEPS"
 for pkg in $BUILD_DEPS $LIB_DEPS; do

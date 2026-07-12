@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
 
@@ -470,18 +471,52 @@ class XmrigRunner:
             if not pkg_config_exists(pkg_name) and not header_found:
                 missing.append((pkg_name, header, apt_package))
 
+        cxx = shutil.which("g++") or shutil.which("c++")
+        if not cxx:
+            missing.append(("c++", "g++ executable", "build-essential / gcc-c++"))
+        elif not self._can_link_static_libstdcxx(cxx):
+            missing.append(("libstdc++", "static libstdc++ link support", "libstdc++-static"))
+
         if not missing:
             print("  [OK] XMRig build dependencies found")
             return
 
         print("\n  [ERROR] Missing XMRig build dependencies:")
         for pkg_name, header, apt_package in missing:
-            print(f"    - {pkg_name}: missing {header} (Ubuntu/Debian package: {apt_package})")
+            print(f"    - {pkg_name}: missing {header} (package: {apt_package})")
         print("  [INFO] Ubuntu/Debian fix:")
         print("        sudo apt-get install -y libuv1-dev libhwloc-dev libssl-dev")
+        print("  [INFO] RHEL/Oracle Linux fix:")
+        print("        sudo dnf install -y libuv-devel hwloc-devel openssl-devel libstdc++-static")
         print("  [INFO] Project setup fix:")
-        print("        ./scripts/setup_pts.sh")
+        print("        ./scripts/setup_pts.sh  # Ubuntu/Debian")
+        print("        ./scripts_rhel9/setup_pts.sh  # RHEL/Oracle Linux")
         sys.exit(1)
+
+    def _can_link_static_libstdcxx(self, cxx):
+        """Return True if C++ compiler can link with -static-libstdc++."""
+        source = "int main(){return 0;}\n"
+        output_path = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix="xmrig-libstdcxx-", delete=False) as tmp:
+                output_path = Path(tmp.name)
+            result = subprocess.run(
+                [cxx, "-x", "c++", "-", "-static-libstdc++", "-o", str(output_path)],
+                input=source,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+        finally:
+            if output_path and output_path.exists():
+                try:
+                    output_path.unlink()
+                except OSError:
+                    pass
 
     def patch_test_definition(self):
         """Limit XMRig sub-tests by filtering the PTS test-definition.xml."""
