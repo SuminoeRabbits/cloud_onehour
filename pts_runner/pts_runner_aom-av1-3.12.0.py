@@ -578,13 +578,14 @@ class AomAv1Runner:
             return False
 
         portable_log_filter = (
-            "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \\\"\\$LOG_FILE\\\""
+            "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \"$LOG_FILE\""
         )
         updated = original
         for pattern in (
             "sed \\$'s/[^[:print:]\\t]/\\\\n/g' 1.log > \\$LOG_FILE",
             "sed $'s/[^[:print:]\\t]/\\\\n/g' 1.log > \\$LOG_FILE",
             "sed $'s/[^[:print:]\\t]/\\\\n/g' 1.log > $LOG_FILE",
+            "perl -pe 's/[^[:print:]\\t]/\\n/g' 1.log > \\\"\\$LOG_FILE\\\"",
         ):
             updated = updated.replace(pattern, portable_log_filter)
 
