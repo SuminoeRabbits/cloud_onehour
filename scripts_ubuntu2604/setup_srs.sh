@@ -36,20 +36,6 @@ pkg_installed() {
     dpkg -s "$1" >/dev/null 2>&1
 }
 
-# Collect only missing packages from the given list
-collect_missing() {
-    local missing=()
-    for pkg in "$@"; do
-        if pkg_installed "$pkg"; then
-            log_srs "[OK] already installed: $pkg"
-        else
-            log_srs "[MISS] will install: $pkg"
-            missing+=("$pkg")
-        fi
-    done
-    echo "${missing[@]+"${missing[@]}"}"
-}
-
 SRS_PACKAGES=(
     build-essential
     libfftw3-dev
@@ -70,17 +56,14 @@ if declare -F wait_for_apt_lock >/dev/null 2>&1; then
 fi
 
 MISSING_PKGS=()
-while IFS= read -r -d '' pkg; do
-    MISSING_PKGS+=("$pkg")
-done < <(
-    for pkg in "${SRS_PACKAGES[@]}"; do
-        if ! pkg_installed "$pkg"; then
-            printf '%s\0' "$pkg"
-        else
-            log_srs "[OK] already installed: $pkg"
-        fi
-    done
-)
+for pkg in "${SRS_PACKAGES[@]}"; do
+    if pkg_installed "$pkg"; then
+        log_srs "[OK] already installed: $pkg"
+    else
+        log_srs "[MISS] will install: $pkg"
+        MISSING_PKGS+=("$pkg")
+    fi
+done
 
 if [[ ${#MISSING_PKGS[@]} -eq 0 ]]; then
     log_srs "All srsRAN dependencies are already installed. Nothing to do."
