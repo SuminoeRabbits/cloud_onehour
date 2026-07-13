@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts, pick_compiler
 
 
 class PreSeedDownloader:
@@ -507,8 +507,8 @@ class CpuminerOptRunner:
             cxx = 'g++'
             base_flags = '-O3 -march=native -mtune=native -Wno-error -fpermissive -flax-vector-conversions'
         else:
-            cc = 'gcc-14'
-            cxx = 'g++-14'
+            cc = pick_compiler('gcc-14', 'gcc')
+            cxx = pick_compiler('g++-14', 'g++')
             base_flags = '-O3 -march=native -mtune=native -Wno-error -fpermissive'
 
         install_cmd = (

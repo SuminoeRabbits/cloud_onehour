@@ -31,6 +31,19 @@ def get_pts_download_cache_dir() -> Path:
     return get_pts_home() / "download-cache"
 
 
+def pick_compiler(preferred: str, fallback: str) -> str:
+    """Return preferred compiler when available, otherwise fall back to system default.
+
+    Runner scripts should not hard-code gcc-14/g++-14 without checking whether
+    those commands exist. This preserves the existing GCC 14 behavior on older
+    setup flows while allowing Ubuntu 26.04 and newer images to use their system
+    GCC.
+    """
+    if preferred and shutil.which(preferred):
+        return preferred
+    return fallback
+
+
 def detect_pts_failure_from_log(log_file: Path) -> tuple[bool, str]:
     patterns = {
         "multiple tests are not installed": "PTS test profile is not installed",

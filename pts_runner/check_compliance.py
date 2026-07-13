@@ -147,6 +147,7 @@ class ComplianceChecker:
 
         # Host environment safety (new 2026-03)
         self.check_no_host_package_install()
+        self.check_compiler_fallback_policy()
 
         # Informational checks
         self.find_hardcoded_thread_lists()
@@ -276,6 +277,60 @@ class ComplianceChecker:
             )
         else:
             self.passed.append("✅ No host OS package installation commands detected in runner")
+
+    def check_compiler_fallback_policy(self):
+        """Detect hard-coded gcc-14/g++-14 usage without a compiler fallback."""
+        hardcoded_patterns = [
+            r'\bCC=gcc-14\b',
+            r'\bCXX=g\+\+-14\b',
+            r'-DCMAKE_C_COMPILER=gcc-14\b',
+            r'-DCMAKE_CXX_COMPILER=g\+\+-14\b',
+            r'\bcc\s*=\s*[\'"]gcc-14[\'"]',
+            r'\bcxx\s*=\s*[\'"]g\+\+-14[\'"]',
+        ]
+
+        matches = []
+        seen_lines = set()
+        for pattern in hardcoded_patterns:
+            for match in re.finditer(pattern, self.content):
+                line_no = self.content[:match.start()].count("\n") + 1
+                if line_no in seen_lines:
+                    continue
+                snippet = self.content.splitlines()[line_no - 1].strip()
+                if snippet.startswith("#"):
+                    continue
+                seen_lines.add(line_no)
+                matches.append((line_no, snippet))
+
+        if not matches:
+            self.passed.append("✅ No hard-coded GCC 14 compiler selection detected")
+            return
+
+        fallback_signals = [
+            "pick_compiler(",
+            "runner_common.pick_compiler",
+            "shutil.which(\"gcc-14\")",
+            "shutil.which('gcc-14')",
+            "shutil.which(\"g++-14\")",
+            "shutil.which('g++-14')",
+        ]
+        has_fallback = any(signal in self.content for signal in fallback_signals)
+
+        if has_fallback:
+            self.passed.append("✅ GCC 14 compiler selection includes fallback logic")
+            return
+
+        formatted = "\n".join(
+            f"   line {line_no}: {snippet}" for line_no, snippet in matches[:8]
+        )
+        self.warnings.append(
+            "⚠️  WARNING: Hard-coded GCC 14 compiler selection without fallback detected.\n"
+            "   Runner scripts should preserve GCC 14 when available, but fall back to\n"
+            "   system gcc/g++ for Ubuntu 26.04 and newer images.\n"
+            "   Fix: use runner_common.pick_compiler('gcc-14', 'gcc') and\n"
+            "        runner_common.pick_compiler('g++-14', 'g++').\n"
+            f"{formatted}"
+        )
 
 
 

@@ -294,6 +294,53 @@ class SimdJsonRunner:
              shutil.rmtree(installed_dir)
         print("  [OK] PTS cache cleaned")
 
+    def _find_json11_sources(self):
+        """Find bundled json11.cpp files under the current PTS install tree."""
+        pts_home = Path.home() / '.phoronix-test-suite'
+        installed_root = pts_home / 'installed-tests' / 'pts' / self.benchmark
+        if not installed_root.exists():
+            return []
+        return sorted(installed_root.rglob('json11.cpp'))
+
+    def _apply_json11_cstdint_patch(self):
+        """Patch json11.cpp for newer compilers that require explicit uint8_t declaration."""
+        sources = self._find_json11_sources()
+        if not sources:
+            print("  [WARN] json11.cpp not found under installed-tests tree")
+            return False
+
+        patched_any = False
+        for source in sources:
+            try:
+                with open(source, 'r', encoding='utf-8', errors='ignore') as f:
+                    original = f.read()
+            except Exception as e:
+                print(f"  [WARN] Failed to read {source}: {e}")
+                continue
+
+            if '#include <cstdint>' in original:
+                print(f"  [INFO] json11.cpp already includes <cstdint>: {source}")
+                patched_any = True
+                continue
+
+            lines = original.splitlines(keepends=True)
+            insert_at = 0
+            for i, line in enumerate(lines):
+                if line.startswith('#include '):
+                    insert_at = i + 1
+            lines.insert(insert_at, '#include <cstdint>\n')
+            updated = ''.join(lines)
+
+            try:
+                with open(source, 'w', encoding='utf-8') as f:
+                    f.write(updated)
+                print(f"  [OK] Patched json11.cpp with <cstdint>: {source}")
+                patched_any = True
+            except Exception as e:
+                print(f"  [WARN] Failed to write {source}: {e}")
+
+        return patched_any
+
     def install_benchmark(self):
         print(f"\n>>> Installing {self.benchmark_full}...")
         subprocess.run(['bash', '-c', f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -306,27 +353,34 @@ class SimdJsonRunner:
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
         install_log = Path(install_log_path) if install_log_path else (self.results_dir / "install.log")
         log_file = install_log
-        log_f = open(install_log, 'w') if use_install_log else None
-        if log_f:
-            log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
-            log_f.flush()
-        process = subprocess.Popen(['bash', '-c', install_cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        out = []
-        for line in process.stdout:
-            print(line, end='')
-            if log_f:
-                log_f.write(line)
-                log_f.flush()
-            out.append(line)
-        process.wait()
-        if log_f:
-            log_f.close()
+        if use_install_log:
+            with open(install_log, 'w') as log_f:
+                log_f.write(f"[PTS INSTALL COMMAND]\n{install_cmd}\n\n")
+        def run_install_command(cmd: str, title: str):
+            local_log_f = open(install_log, 'a') if use_install_log else None
+            if local_log_f:
+                local_log_f.write(f"[PTS INSTALL COMMAND - {title}]\n{cmd}\n\n")
+                local_log_f.flush()
+
+            process = subprocess.Popen(['bash', '-c', cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            output_lines = []
+            for line in process.stdout:
+                print(line, end='')
+                if local_log_f:
+                    local_log_f.write(line)
+                    local_log_f.flush()
+                output_lines.append(line)
+            process.wait()
+            if local_log_f:
+                local_log_f.close()
+            return process.returncode, ''.join(output_lines)
+
+        returncode, full_output = run_install_command(install_cmd, "primary")
+        out = full_output.splitlines(keepends=True)
 
         # Check for installation failure
-        returncode = process.returncode
         pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
         install_failed = False
-        full_output = ''.join(out)
 
         if returncode != 0:
             install_failed = True
@@ -336,6 +390,30 @@ class SimdJsonRunner:
             install_failed = True
         elif 'ERROR' in full_output or 'FAILED' in full_output:
             install_failed = True
+
+        json11_cstdint_error = (
+            'json11.cpp' in full_output
+            and 'uint8_t' in full_output
+            and 'does not name a type' in full_output
+        )
+
+        if install_failed and json11_cstdint_error:
+            print("\n  [WARN] json11.cpp is missing <cstdint>. Applying patch and retrying install...")
+            if self._apply_json11_cstdint_patch():
+                returncode, full_output = run_install_command(install_cmd, "json11-cstdint-patched-retry")
+                out = full_output.splitlines(keepends=True)
+                pts_test_failed, pts_failure_reason = detect_pts_failure_from_log(log_file)
+                install_failed = False
+                if returncode != 0:
+                    install_failed = True
+                elif pts_test_failed:
+                    install_failed = True
+                elif 'Checksum Failed' in full_output or 'Downloading of needed test files failed' in full_output:
+                    install_failed = True
+                elif 'ERROR' in full_output or 'FAILED' in full_output:
+                    install_failed = True
+            else:
+                print("  [ERROR] Could not apply json11.cpp patch automatically.")
 
         if install_failed:
             print(f"\n  [ERROR] Installation failed with return code {returncode}")

@@ -5,12 +5,13 @@
 ## 目次
 1. [スクリプトヘッダ](#スクリプトヘッダ-docstring)
 2. [ユーティリティクラス](#ユーティリティクラス-preseeddownloader)
-3. [必須メソッド](#必須メソッド)
-4. [環境適応型メソッド (WSL/Cloud対応)](#環境適応型メソッド-wslcloud対応)
-5. [トラブルシューティングパターン](#トラブルシューティングパターン)
-6. [エントリーポイント (main関数)](#エントリーポイント-main関数)
-7. [Runner Output Protocol (cloud_exec_para.py 連携)](#runner-output-protocol-cloud_exec_parapy-連携)
-8. [参考実装](#参考実装)
+3. [Compiler Selection Policy](#compiler-selection-policy)
+4. [必須メソッド](#必須メソッド)
+5. [環境適応型メソッド (WSL/Cloud対応)](#環境適応型メソッド-wslcloud対応)
+6. [トラブルシューティングパターン](#トラブルシューティングパターン)
+7. [エントリーポイント (main関数)](#エントリーポイント-main関数)
+8. [Runner Output Protocol (cloud_exec_para.py 連携)](#runner-output-protocol-cloud_exec_parapy-連携)
+9. [参考実装](#参考実装)
 
 ---
 
@@ -38,6 +39,36 @@ Test Characteristics:
 - THChange_at_runtime: true/false
 """
 ```
+
+---
+
+## Compiler Selection Policy
+
+Runner script must not hard-code a specific compiler command such as `gcc-14`
+or `g++-14` without a fallback. Ubuntu 26.04 and newer images use the system GCC
+by design, while existing RHEL/Ubuntu setup flows may still provide GCC 14.
+
+Use `runner_common.pick_compiler()` so existing GCC 14 environments keep the
+same behavior, and newer system-GCC environments continue to work:
+
+```python
+from runner_common import pick_compiler
+
+cc = pick_compiler("gcc-14", "gcc")
+cxx = pick_compiler("g++-14", "g++")
+
+install_cmd = (
+    f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
+    f'CFLAGS="-O3 -march=native -mtune=native" '
+    f'CXXFLAGS="-O3 -march=native -mtune=native" '
+    f'phoronix-test-suite batch-install {self.benchmark_full}'
+)
+```
+
+If a runner patches `install.sh`, CMake options, or Makefiles, the patched
+compiler values must also use the selected `cc` / `cxx` variables. Avoid
+embedding `gcc-14` inside patch strings unless it is guarded by the same
+fallback policy.
 
 ---
 
@@ -1175,7 +1206,9 @@ def install_benchmark(self):
 
     # Build install command
     nproc = os.cpu_count() or 1
-    install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+    cc = pick_compiler("gcc-14", "gcc")
+    cxx = pick_compiler("g++-14", "g++")
+    install_cmd = f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
     # Execute with real-time output streaming (RECOMMENDED)
     print(f"  Running installation...")
