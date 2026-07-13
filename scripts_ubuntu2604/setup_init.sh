@@ -18,7 +18,14 @@ sudo apt-get install -y python3-tabulate libexpat1-dev
 # Ubuntu 26.04 no longer ships the legacy PCRE v1 development package
 # (libpcre3-dev). Use the OS default PCRE2 development package here.
 sudo apt-get install -y cl-ppcre libpcre2-dev
-sudo apt-get -y install p7zip-full
+if ! sudo apt-get -y install p7zip-full; then
+    echo "[WARN] p7zip-full is not available on Ubuntu 26.04. Trying 7zip package..."
+    sudo apt-get -y install 7zip
+fi
+if ! command -v 7z >/dev/null 2>&1 && command -v 7zz >/dev/null 2>&1; then
+    sudo ln -sf "$(command -v 7zz)" /usr/local/bin/7z
+    echo "[OK] Created /usr/local/bin/7z -> $(command -v 7zz)"
+fi
 sudo apt-get install -y libc6-dev numactl
 sudo apt-get install -y gawk
 # libpng + libjpeg (required by pts/avifenc libavif cmake build)
