@@ -345,9 +345,13 @@ class SimdJsonRunner:
         print(f"\n>>> Installing {self.benchmark_full}...")
         subprocess.run(['bash', '-c', f'echo "y" | phoronix-test-suite remove-installed-test "{self.benchmark_full}"'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # Use NUM_CPU_CORES for compilation speedup
+        # Use NUM_CPU_CORES for compilation speedup.
+        # Ubuntu 26.04's newer compiler exposes a missing <cstdint> include in
+        # bundled json11.cpp, so force it for C++ compilation without touching C.
         nproc = os.cpu_count() or 1
-        install_cmd = f'NUM_CPU_CORES={nproc} phoronix-test-suite batch-install {self.benchmark_full}'
+        common_flags = "-O3 -march=native -mtune=native"
+        cxx_flags = f"{common_flags} -include cstdint"
+        install_cmd = f'NUM_CPU_CORES={nproc} MAKEFLAGS="-j{nproc}" CFLAGS="{common_flags}" CXXFLAGS="{cxx_flags}" phoronix-test-suite batch-install {self.benchmark_full}'
         install_log_env = os.environ.get("PTS_INSTALL_LOG", "").strip().lower()
         install_log_path = os.environ.get("PTS_INSTALL_LOG_PATH", "").strip()
         use_install_log = install_log_env in {"1", "true", "yes"} or bool(install_log_path)
