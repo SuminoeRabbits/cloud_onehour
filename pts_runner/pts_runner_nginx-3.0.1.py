@@ -48,7 +48,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 
 class NginxRunner:
@@ -829,7 +829,9 @@ fi
         # MAKEFLAGS: parallelize compilation itself with -j$(nproc)
         # Note: Using -O2 (7-Zip default) instead of -O3 to reduce optimization issues
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")

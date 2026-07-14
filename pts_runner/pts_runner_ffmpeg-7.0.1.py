@@ -31,7 +31,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 
 class PreSeedDownloader:
@@ -716,7 +716,9 @@ class FFmpegRunner:
         ffmpeg_configure_opts = self.get_ffmpeg_configure_opts()
         print(f"  [INFO] FFmpeg configure extra options: {ffmpeg_configure_opts[:100]}...")
 
-        install_cmd = f'FFMPEG_CONFIGURE_EXTRA_OPTS="{ffmpeg_configure_opts}" MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
+        install_cmd = f'FFMPEG_CONFIGURE_EXTRA_OPTS="{ffmpeg_configure_opts}" MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging
         print(f"\n{'>'*80}")

@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, get_pts_profile_dir
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, get_pts_profile_dir, pick_compiler
 
 
 class Compress7zipRunner:
@@ -684,7 +684,9 @@ chmod +x compress-7zip
         # MAKEFLAGS/CC/CXX are retained for compatibility with normal PTS installs,
         # but the patched 7-Zip profile uses a prebuilt ISA-specific binary.
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")
