@@ -38,7 +38,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 
 class PreSeedDownloader:
@@ -783,10 +783,12 @@ class SvtAv1Runner:
                 march_flags = "-O3 -march=x86-64-v3 -mtune=generic"
             else:
                 march_flags = "-O3 -march=native -mtune=native"
+            cc = pick_compiler("gcc-14", "gcc")
+            cxx = pick_compiler("g++-14", "g++")
 
             gcc_flags = (
-                f'-DCMAKE_C_COMPILER=gcc-14 '
-                f'-DCMAKE_CXX_COMPILER=g++-14 '
+                f'-DCMAKE_C_COMPILER={cc} '
+                f'-DCMAKE_CXX_COMPILER={cxx} '
                 f'-DCMAKE_C_FLAGS="{march_flags}" '
                 f'-DCMAKE_CXX_FLAGS="{march_flags}"'
             )
@@ -808,18 +810,18 @@ class SvtAv1Runner:
             ]
 
             for old_cmake, new_cmake in cmake_patterns:
-                if old_cmake in content and 'CMAKE_C_COMPILER=gcc-14' not in content:
+                if old_cmake in content and 'CMAKE_C_COMPILER=' not in content:
                     content = content.replace(old_cmake, new_cmake)
                     patched = True
-                    print(f"  [OK] Applied GCC-14 cmake patch (pattern: '{old_cmake}')")
+                    print(f"  [OK] Applied compiler cmake patch (pattern: '{old_cmake}')")
                     break
 
             if not patched:
-                if 'CMAKE_C_COMPILER=gcc-14' in content:
+                if 'CMAKE_C_COMPILER=' in content:
                     print("  [INFO] CMake patch already applied")
                 else:
                     print("  [WARN] No cmake pattern matched in install.sh")
-                    print("  [INFO] Relying on CC=gcc-14 / CXX=g++-14 environment variables")
+                    print(f"  [INFO] Relying on CC={cc} / CXX={cxx} environment variables")
 
             if patched:
                 with open(install_sh_path, 'w') as f:
@@ -970,8 +972,10 @@ class SvtAv1Runner:
 
         # Build install command
         nproc = os.cpu_count() or 1
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
         install_cmd = (
-            f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 '
+            f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
             f'CFLAGS="-O3 -march=native -mtune=native" '
             f'CXXFLAGS="-O3 -march=native -mtune=native" '
             f'phoronix-test-suite batch-install {self.benchmark_full}'

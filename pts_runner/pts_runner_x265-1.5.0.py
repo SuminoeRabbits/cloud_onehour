@@ -32,7 +32,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 
 class PreSeedDownloader:
@@ -825,18 +825,20 @@ class X265Runner:
                 march_flags = "-O3 -march=x86-64-v3 -mtune=generic -Wno-error"
             else:
                 march_flags = "-O3 -march=native -mtune=native -Wno-error"
+            cc = pick_compiler("gcc-14", "gcc")
+            cxx = pick_compiler("g++-14", "g++")
             new_cmake = '''cmake -DCMAKE_BUILD_TYPE=Release \\
-  -DCMAKE_C_COMPILER=gcc-14 \\
-  -DCMAKE_CXX_COMPILER=g++-14 \\
+  -DCMAKE_C_COMPILER={cc} \\
+  -DCMAKE_CXX_COMPILER={cxx} \\
   -DCMAKE_C_FLAGS="{march_flags}" \\
   -DCMAKE_CXX_FLAGS="{march_flags}" \\
   ../source'''
 
-            if old_cmake in content and 'CMAKE_C_COMPILER=gcc-14' not in content:
-                content = content.replace(old_cmake, new_cmake.format(march_flags=march_flags))
+            if old_cmake in content and 'CMAKE_C_COMPILER=' not in content:
+                content = content.replace(old_cmake, new_cmake.format(cc=cc, cxx=cxx, march_flags=march_flags))
                 patched = True
-                print(f"  [OK] Added CMake GCC-14 patch for arch: {arch}")
-            elif 'CMAKE_C_COMPILER=gcc-14' in content:
+                print(f"  [OK] Added CMake compiler patch for arch: {arch}")
+            elif 'CMAKE_C_COMPILER=' in content:
                 print("  [INFO] CMake patch already applied")
             else:
                 print("  [WARN] Could not find cmake command to patch")
@@ -893,7 +895,9 @@ class X265Runner:
 
         # Build install command
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging
         print(f"\n{'>'*80}")

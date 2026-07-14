@@ -28,7 +28,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 class PreSeedDownloader:
     """
@@ -777,7 +777,9 @@ class RedisRunner:
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         nproc = os.cpu_count() or 1
-        install_cmd = f'MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
+        install_cmd = f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         print(f"\n{'>'*80}")
         print("[PTS INSTALL COMMAND]")

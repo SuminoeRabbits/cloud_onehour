@@ -38,7 +38,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 class PreSeedDownloader:
     """
@@ -583,8 +583,8 @@ class ValkeyRunner:
         subprocess.run(['bash', '-c', remove_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         nproc = os.cpu_count() or 1
-        cc = 'gcc-14'
-        cxx = 'g++-14'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
         install_cmd = (
             f'MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} '
             f'CFLAGS="-O3 -march=native -mtune=native" '
