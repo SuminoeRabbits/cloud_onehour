@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 
 class PreSeedDownloader:
@@ -776,7 +776,9 @@ class BuildLLVMRunner:
         llvm_cmake_opts = self.get_llvm_cmake_opts()
         print(f"  [INFO] LLVM CMake extra options: {llvm_cmake_opts}")
 
-        install_cmd = f'{builder_env_str}LLVM_CMAKE_EXTRA_OPTS="{llvm_cmake_opts}" MAKEFLAGS="-j{nproc}" CC=gcc-14 CXX=g++-14 CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
+        install_cmd = f'{builder_env_str}LLVM_CMAKE_EXTRA_OPTS="{llvm_cmake_opts}" MAKEFLAGS="-j{nproc}" CC={cc} CXX={cxx} CFLAGS="-O3 -march=native -mtune=native" CXXFLAGS="-O3 -march=native -mtune=native" phoronix-test-suite batch-install {self.benchmark_full}'
 
         # Print install command for debugging (as per README requirement)
         print(f"\n{'>'*80}")

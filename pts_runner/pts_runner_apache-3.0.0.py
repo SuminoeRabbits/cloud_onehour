@@ -40,7 +40,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runner_common import detect_pts_failure_from_log, get_install_status, cleanup_pts_artifacts
+from runner_common import cleanup_pts_artifacts, detect_pts_failure_from_log, get_install_status, pick_compiler
 
 
 class PreSeedDownloader:
@@ -669,12 +669,14 @@ echo "[PATCH] GCC-14 compatibility patch applied to wrk Makefile"
 
         # STEP 5: Build and install
         nproc = os.cpu_count() or 1
+        cc = pick_compiler("gcc-14", "gcc")
+        cxx = pick_compiler("g++-14", "g++")
         # PATH: /usr/local/bin first so pcre-config is found on EL10
         # CFLAGS: -Wno-error flags for EL10/libxml2 ABI changes + LuaJIT ARM64
         install_cmd = (
             f'PATH="/usr/local/bin:$PATH" '
             f'MAKEFLAGS="-j{nproc}" '
-            f'CC=gcc-14 CXX=g++-14 '
+            f'CC={cc} CXX={cxx} '
             f'CFLAGS="-O3 -march=native -mtune=native '
             f'-Wno-error=incompatible-pointer-types '
             f'-Wno-error=implicit-function-declaration '
