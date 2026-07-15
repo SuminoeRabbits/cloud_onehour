@@ -107,13 +107,16 @@ BUILD_DEPS="build-essential pkg-config autoconf automake libtool cmake ninja-bui
 # Linux kernel build requirements
 KERNEL_DEPS="flex bison bc libelf-dev libssl-dev"
 
+# GCC source build requirements (pts/build-gcc)
+GCC_BUILD_DEPS="libgmp-dev libmpfr-dev libmpc-dev"
+
 # Additional common dependencies
 EXTRA_DEPS="libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev"
 EXTRA_DEPS="$EXTRA_DEPS libncurses-dev libffi-dev liblzma-dev"
 EXTRA_DEPS="$EXTRA_DEPS libuv1-dev libhwloc-dev"
 
-echo "Installing: $BUILD_DEPS $KERNEL_DEPS $EXTRA_DEPS"
-if apt_get install -y $BUILD_DEPS $KERNEL_DEPS $EXTRA_DEPS; then
+echo "Installing: $BUILD_DEPS $KERNEL_DEPS $GCC_BUILD_DEPS $EXTRA_DEPS"
+if apt_get install -y $BUILD_DEPS $KERNEL_DEPS $GCC_BUILD_DEPS $EXTRA_DEPS; then
     echo "[OK] Build dependencies installed"
 else
     echo "[WARN] Some dependencies failed to install, continuing anyway..."
