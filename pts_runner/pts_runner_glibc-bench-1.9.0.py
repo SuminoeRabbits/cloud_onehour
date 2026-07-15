@@ -588,12 +588,99 @@ class GlibcBenchRunner:
 
         return ','.join(cpu_list)
 
+    def _needs_glibc_werror_compat_patch(self):
+        """Return True on Ubuntu releases affected by the glibc 2.39 header clash."""
+        try:
+            os_release = {}
+            with open('/etc/os-release', 'r') as f:
+                for line in f:
+                    if '=' not in line:
+                        continue
+                    key, value = line.rstrip().split('=', 1)
+                    os_release[key] = value.strip().strip('"').strip("'")
+
+            if os_release.get('ID', '').lower() != 'ubuntu':
+                return False
+
+            version_parts = re.findall(r'\d+', os_release.get('VERSION_ID', ''))
+            if len(version_parts) < 2:
+                print("  [WARN] Could not parse Ubuntu VERSION_ID; compatibility patch skipped")
+                return False
+
+            version = tuple(int(part) for part in version_parts[:2])
+            return version >= (26, 4)
+        except OSError as exc:
+            print(f"  [WARN] Could not read /etc/os-release; compatibility patch skipped: {exc}")
+            return False
+
+    def _patch_profile_for_ubuntu2604(self):
+        """Disable glibc's warnings-as-errors only on Ubuntu 26.04 and newer.
+
+        glibc 2.39's sys/mount.h compatibility definitions conflict with the
+        newer Linux UAPI headers shipped by Ubuntu 26.04.  The duplicate
+        OPEN_TREE_CLONE definition is otherwise a warning, but glibc's default
+        -Werror policy turns it into an installation failure.
+        """
+        if not self._needs_glibc_werror_compat_patch():
+            print("  [INFO] glibc 2.39 compatibility patch not required on this OS")
+            return
+
+        print("  [INFO] Ubuntu 26.04+ detected; applying glibc 2.39 compatibility patch")
+        profile_install_sh = (
+            Path.home()
+            / '.phoronix-test-suite'
+            / 'test-profiles'
+            / 'pts'
+            / self.benchmark
+            / 'install.sh'
+        )
+
+        # The profile must exist before batch-install, otherwise PTS would fetch
+        # and execute an unpatched copy in the same command.
+        if not profile_install_sh.exists():
+            subprocess.run(
+                ['phoronix-test-suite', 'info', self.benchmark_full],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        if not profile_install_sh.exists():
+            raise RuntimeError(
+                f"PTS install.sh not found after fetching profile: {profile_install_sh}"
+            )
+
+        content = profile_install_sh.read_text()
+        if '--disable-werror' in content:
+            print("  [INFO] PTS glibc profile already contains --disable-werror")
+            return
+
+        patched, replacements = re.subn(
+            r'^(\s*\.\./configure)(\s+)',
+            r'\1 --disable-werror\2',
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if replacements != 1:
+            raise RuntimeError(
+                f"Expected glibc configure command not found in {profile_install_sh}"
+            )
+
+        profile_install_sh.write_text(patched)
+        print("  [OK] Added --disable-werror to PTS glibc profile")
+
     def install_benchmark(self):
         """Install benchmark with error detection and verification."""
         # [Pattern 5] Pre-download large files from downloads.xml (Size > 256MB)
         print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
+
+        # Ubuntu 26.04 ships Linux headers that clash with glibc 2.39's
+        # compatibility definitions. Keep all other operating systems on the
+        # upstream profile unchanged.
+        self._patch_profile_for_ubuntu2604()
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
