@@ -588,6 +588,75 @@ class BuildGccRunner:
 
         return ','.join(cpu_list)
 
+    def patch_pts_profile_for_glibc243(self):
+        """Backport the upstream GCC libgomp fix before the timed build.
+
+        glibc 2.43 implements C23 const-preserving string macros, so strchr()
+        can return const char * here.  GCC upstream commit
+        9c9d3aef2f66625d9cb03ef4baee10ed6648e681 changes the local variable
+        in libgomp/affinity-fmt.c from char * to const char *.
+
+        The PTS pre.sh extracts a fresh source tree before every trial.  Add
+        the one-line upstream backport immediately after extraction so every
+        OS builds identical source and the patching time remains outside the
+        measured `make` command.
+        """
+        pts_home = Path.home() / '.phoronix-test-suite'
+        profile_pre_sh = (
+            pts_home / 'test-profiles' / 'pts' / self.benchmark / 'pre.sh'
+        )
+        installed_pre_sh = (
+            pts_home / 'installed-tests' / 'pts' / self.benchmark / 'pre.sh'
+        )
+
+        if not profile_pre_sh.exists():
+            print("  [INFO] Fetching PTS profile to apply GCC upstream compatibility fix...")
+            subprocess.run(
+                ['phoronix-test-suite', 'info', self.benchmark_full],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        if not profile_pre_sh.exists():
+            raise RuntimeError(
+                f"PTS pre.sh not found after fetching profile: {profile_pre_sh}"
+            )
+
+        marker = '# CLOUD_ONEHOUR_GCC_GLIBC243_UPSTREAM_FIX'
+        extract_line = 'tar -xf gcc-15.2.0.tar.xz'
+        patch_block = extract_line + '\n' + marker + '''
+affinity_fmt="gcc-15.2.0/libgomp/affinity-fmt.c"
+old_decl="char *q = strchr (p + 1, '}');"
+new_decl="const char *q = strchr (p + 1, '}');"
+if grep -Fq "$old_decl" "$affinity_fmt"; then
+    sed -i "s/char \\*q = strchr (p + 1, '}');/const char *q = strchr (p + 1, '}');/" "$affinity_fmt"
+elif ! grep -Fq "$new_decl" "$affinity_fmt"; then
+    echo "ERROR: GCC upstream libgomp compatibility patch did not match" >&2
+    exit 1
+fi'''
+
+        patched_any = False
+        for pre_sh in (profile_pre_sh, installed_pre_sh):
+            if not pre_sh.exists():
+                continue
+
+            content = pre_sh.read_text()
+            if marker in content:
+                print(f"  [INFO] GCC upstream compatibility fix already present: {pre_sh}")
+                continue
+            if content.count(extract_line) != 1:
+                raise RuntimeError(
+                    f"Expected one GCC source extraction command in {pre_sh}"
+                )
+
+            pre_sh.write_text(content.replace(extract_line, patch_block, 1))
+            print(f"  [OK] Added GCC upstream glibc 2.43 compatibility fix: {pre_sh}")
+            patched_any = True
+
+        if not patched_any and marker not in profile_pre_sh.read_text():
+            raise RuntimeError("Failed to patch the PTS build-gcc pre.sh")
+
     def install_benchmark(self):
         """
         Install build-gcc-1.5.0 with GCC-14 native compilation.
@@ -602,6 +671,10 @@ class BuildGccRunner:
         print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=96)
+
+        # Patch the profile before batch-install copies pre.sh into the
+        # installed test directory.
+        self.patch_pts_profile_for_glibc243()
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
@@ -694,6 +767,10 @@ class BuildGccRunner:
             print("  [INFO] Installation may have failed silently")
             print(f"  [INFO] Try manually installing: phoronix-test-suite install {self.benchmark_full}")
             sys.exit(1)
+
+        # Defensive re-check in case the local PTS version regenerated pre.sh
+        # during installation instead of copying the cached profile verbatim.
+        self.patch_pts_profile_for_glibc243()
 
         # Check if test is recognized by PTS
         verify_cmd = f'phoronix-test-suite test-installed {self.benchmark_full}'
@@ -1056,6 +1133,9 @@ class BuildGccRunner:
             self.install_benchmark()
         else:
             print(f"[INFO] Benchmark already installed, skipping installation: {self.benchmark_full}")
+
+        # Also cover runs that reuse an already-installed PTS test.
+        self.patch_pts_profile_for_glibc243()
 
         # Run for each thread count
         failed = []
