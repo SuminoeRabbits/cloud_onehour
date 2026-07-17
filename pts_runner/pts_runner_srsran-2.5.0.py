@@ -40,6 +40,7 @@ Test Characteristics:
   test-definition.xml is backed up before patching and restored after each run.
 """
 
+import ctypes.util
 import json
 import os
 import re
@@ -318,25 +319,30 @@ class SrsranRunner:
         missing_cmds = [cmd for cmd in required_cmds if shutil.which(cmd) is None]
 
         missing_paths = []
-        shared_lib_candidates = {
-            "libfftw3.so": [
+        shared_libraries = {
+            "libfftw3.so": ("fftw3", [
                 "/usr/lib/x86_64-linux-gnu/libfftw3.so",
                 "/usr/lib64/libfftw3.so",
                 "/usr/lib/libfftw3.so",
-            ],
-            "libsctp.so": [
+            ]),
+            "libsctp.so": ("sctp", [
                 "/usr/lib/x86_64-linux-gnu/libsctp.so",
                 "/usr/lib64/libsctp.so",
                 "/usr/lib/libsctp.so",
-            ],
-            "libyaml-cpp.so": [
+            ]),
+            "libyaml-cpp.so": ("yaml-cpp", [
                 "/usr/lib/x86_64-linux-gnu/libyaml-cpp.so",
                 "/usr/lib64/libyaml-cpp.so",
                 "/usr/lib/libyaml-cpp.so",
-            ],
+            ]),
         }
-        for soname, candidates in shared_lib_candidates.items():
-            if not any(Path(candidate).exists() for candidate in candidates):
+        for soname, (library_name, fallback_paths) in shared_libraries.items():
+            # find_library() consults the platform linker configuration, so it
+            # works with Debian multiarch paths such as aarch64-linux-gnu as
+            # well as x86_64-linux-gnu and RHEL's /usr/lib64. Keep the known
+            # paths as a fallback for minimal environments without ldconfig.
+            if (ctypes.util.find_library(library_name) is None
+                    and not any(Path(path).exists() for path in fallback_paths)):
                 missing_paths.append(soname)
 
         if not missing_cmds and not missing_paths:
