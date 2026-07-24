@@ -276,19 +276,72 @@ class JpegxlRunner:
         jpegxl-1.6.0 builds libjxl with CMake.
         """
         required_commands = ["cmake", "curl", "make", "pkg-config", "unzip"]
-        # Accept either cc or gcc as the C compiler
-        has_cc = shutil.which("cc") is not None or shutil.which("gcc") is not None
+        cc = shutil.which("cc") or shutil.which("gcc")
+        cxx = shutil.which("c++") or shutil.which("g++")
         missing_commands = [cmd for cmd in required_commands if shutil.which(cmd) is None]
 
-        if not has_cc:
+        if not cc:
             missing_commands.insert(0, "cc/gcc")
+        if not cxx:
+            missing_commands.insert(1, "c++/g++")
 
-        if not missing_commands:
-            return True
+        if missing_commands:
+            print(f"  [ERROR] Missing required build tools: {', '.join(missing_commands)}")
+            print("  [INFO] Please run scripts/setup_init.sh first.")
+            return False
 
-        print(f"  [ERROR] Missing required build tools: {', '.join(missing_commands)}")
-        print("  [INFO] Please run scripts/setup_init.sh first.")
-        return False
+        required_headers = {
+            "gif_lib.h": (cc, "c", "libgif-dev"),
+            "brotli/encode.h": (cc, "c", "libbrotli-dev"),
+            "png.h": (cc, "c", "libpng-dev"),
+            "gtest/gtest.h": (cxx, "c++", "libgtest-dev"),
+        }
+        missing_headers = []
+        for header, (compiler, language, package) in required_headers.items():
+            check = subprocess.run(
+                [compiler, "-E", "-x", language, "-"],
+                input=f"#include <{header}>\n",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            if check.returncode != 0:
+                missing_headers.append((header, package))
+
+        if missing_headers:
+            print("  [ERROR] Missing development headers required by pts/jpegxl:")
+            for header, package in missing_headers:
+                print(f"    - {header} (Ubuntu package: {package})")
+            print("  [INFO] Please run scripts_ubuntu2604/setup_init.sh first.")
+            return False
+
+        return True
+
+    def archive_install_failure_logs(self):
+        """Copy PTS and CMake diagnostics into the benchmark result directory."""
+        installed_dir = (
+            Path.home() / ".phoronix-test-suite" / "installed-tests"
+            / "pts" / self.benchmark
+        )
+        diagnostics_dir = self.results_dir / "install_diagnostics"
+        candidates = [installed_dir / "install-failed.log"]
+        if installed_dir.exists():
+            candidates.extend(installed_dir.rglob("CMakeConfigureLog.yaml"))
+            candidates.extend(installed_dir.rglob("CMakeError.log"))
+
+        copied = 0
+        for source in candidates:
+            if not source.is_file():
+                continue
+            diagnostics_dir.mkdir(parents=True, exist_ok=True)
+            relative_name = "__".join(source.relative_to(installed_dir).parts)
+            destination = diagnostics_dir / relative_name
+            shutil.copy2(source, destination)
+            print(f"  [INFO] Archived install diagnostic: {destination}")
+            copied += 1
+
+        if copied == 0:
+            print("  [WARN] No PTS/CMake install diagnostics were found to archive")
 
     def get_os_name(self):
         """
@@ -682,6 +735,7 @@ class JpegxlRunner:
             failed_log = Path.home() / ".phoronix-test-suite" / "installed-tests" / "pts" / self.benchmark / "install-failed.log"
             if failed_log.exists():
                 print(f"  [INFO] PTS failure log: {failed_log}")
+            self.archive_install_failure_logs()
             sys.exit(1)
 
         # Verify installation by checking if directory exists
