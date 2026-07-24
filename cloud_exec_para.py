@@ -3131,11 +3131,20 @@ class GCPProvider(CloudProvider):
                 f"gcloud compute instances describe {name} --project={project} --zone={zone} "
                 f"--format='get(status)'",
                 capture=True,
-                ignore=True,
                 logger=logger
             )
             return status.strip().lower() if status else "unknown"
-        except:
+        except subprocess.CalledProcessError as exc:
+            # A successful GCP delete removes the resource.  Subsequent
+            # `describe` calls therefore fail with "not found"; that is the
+            # terminal state we are waiting for, not an unknown state.
+            error_text = " ".join(
+                str(part) for part in (exc.stderr, exc.output, exc) if part
+            ).lower()
+            if "not found" in error_text or "was not found" in error_text:
+                return "notfound"
+            return "unknown"
+        except Exception:
             return "unknown"
 
 

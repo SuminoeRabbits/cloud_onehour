@@ -293,6 +293,7 @@ class JpegxlRunner:
         required_headers = {
             "gif_lib.h": (cc, "c", "libgif-dev"),
             "brotli/encode.h": (cc, "c", "libbrotli-dev"),
+            "hwy/highway.h": (cxx, "c++", "libhwy-dev"),
             "png.h": (cc, "c", "libpng-dev"),
             "gtest/gtest.h": (cxx, "c++", "libgtest-dev"),
         }

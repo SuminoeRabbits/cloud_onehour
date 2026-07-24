@@ -29,8 +29,9 @@ fi
 sudo apt-get install -y libc6-dev numactl
 sudo apt-get install -y gawk
 # Image development headers required by pts/avifenc and pts/jpegxl.
-# libgif-dev provides gif_lib.h, which the jpegxl profile requires.
-sudo apt-get install -y libpng-dev libjpeg-dev libgif-dev
+# libgif-dev provides gif_lib.h, and libhwy-dev avoids the bundled Highway
+# fallback failing on some arm64 machines (notably GCP T2A).
+sudo apt-get install -y libpng-dev libjpeg-dev libgif-dev libhwy-dev
 # libsharpyuv (required by pts/avifenc; split from libwebp >= 1.3.0)
 # On Ubuntu 24.04+, libwebp-dev depends on libsharpyuv-dev automatically.
 # On Ubuntu 22.04, libwebp-dev bundles sharpyuv headers.
@@ -57,6 +58,11 @@ Cflags: -I\${includedir}
 EOF
     echo "[OK] Created ${LIBYUV_LIBDIR}/pkgconfig/libyuv.pc"
 fi
+
+# The PTS FFmpeg profile builds x265 itself, but its FFmpeg configure step
+# requires an x265 pkg-config entry.  Ubuntu's development package provides a
+# known-good fallback when the profile-local x265 build does not expose one.
+sudo apt-get install -y libx264-dev libx265-dev
 
 # 1. Architecture Detection
 ARCH=$(uname -m)
