@@ -343,6 +343,50 @@ class JpegxlRunner:
         if copied == 0:
             print("  [WARN] No PTS/CMake install diagnostics were found to archive")
 
+    def patch_install_script_for_cmake4(self):
+        """Make the libjxl 0.10.1 profile compatible with CMake 4.x.
+
+        The bundled third_party/sjpeg project declares compatibility with a
+        pre-3.5 CMake version. CMake 4 rejects that declaration unless the
+        policy compatibility floor is supplied explicitly.
+        """
+        install_sh = (
+            Path.home() / ".phoronix-test-suite" / "test-profiles"
+            / "pts" / self.benchmark / "install.sh"
+        )
+        if not install_sh.exists():
+            print(f"  [INFO] Fetching test profile metadata for {self.benchmark_full}...")
+            subprocess.run(
+                ["phoronix-test-suite", "info", self.benchmark_full],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        if not install_sh.exists():
+            print(f"  [ERROR] PTS install script not found: {install_sh}")
+            return False
+
+        policy_option = "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        try:
+            content = install_sh.read_text()
+            if policy_option in content:
+                print("  [INFO] PTS install.sh already patched for CMake 4.x")
+                return True
+
+            cmake_command = "cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF"
+            if cmake_command not in content:
+                print("  [ERROR] Unexpected pts/jpegxl install.sh format; CMake patch not applied")
+                return False
+
+            patched_command = f"{cmake_command} {policy_option}"
+            install_sh.write_text(content.replace(cmake_command, patched_command, 1))
+            print(f"  [OK] Patched PTS install.sh for CMake 4.x: {install_sh}")
+            return True
+        except OSError as exc:
+            print(f"  [ERROR] Failed to patch PTS install.sh: {exc}")
+            return False
+
     def get_os_name(self):
         """
         Get OS name and version formatted as <Distro>_<Version>.
@@ -651,6 +695,9 @@ class JpegxlRunner:
         print("\n>>> Checking for large files to pre-seed...")
         downloader = PreSeedDownloader()
         downloader.download_from_xml(self.benchmark_full, threshold_mb=32)
+
+        if not self.patch_install_script_for_cmake4():
+            sys.exit(1)
 
         print(f"\n>>> Installing {self.benchmark_full}...")
 
